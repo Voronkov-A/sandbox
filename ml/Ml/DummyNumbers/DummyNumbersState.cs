@@ -9,7 +9,7 @@ internal readonly record struct DummyNumbersState
     public DummyNumbersState(int maxNumber)
     {
         var minNumber = int.Min(maxNumber, 5);
-        CurrentNumber = Random.Next(maxNumber + minNumber) - minNumber - (maxNumber - minNumber) / 2;
+        CurrentNumber = Random.Next(minNumber, maxNumber + 1) * (int)Math.Pow(-1, Random.Next(2));
         StepsLeft = Math.Abs(CurrentNumber);
     }
 
