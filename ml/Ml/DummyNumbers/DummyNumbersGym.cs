@@ -12,9 +12,9 @@ internal static class DummyNumbersGym
             bot
         };
 
-        for (var i = 0; i < 5000; ++i)
+        for (var i = 0; i < 10000; ++i)
         {
-            var game = new DummyNumbersGame(players, 500);
+            var game = new DummyNumbersGame(players, 1000);
             game.Run();
         }
 
