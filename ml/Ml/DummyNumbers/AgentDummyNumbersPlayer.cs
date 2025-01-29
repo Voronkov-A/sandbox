@@ -37,9 +37,9 @@ internal class AgentDummyNumbersPlayer : IDummyNumbersPlayer, IDisposable
         public override torch.Tensor forward(torch.Tensor input)
         {
             var result = _fc1.forward(input);
-            result = torch.nn.ReLU().forward(result);
+            result = torch.nn.functional.relu(result);
             result = _fc2.forward(result);
-            result = torch.nn.ReLU().forward(result);
+            result = torch.nn.functional.relu(result);
             result = _fc3.forward(result);
             return result;
         }
@@ -110,6 +110,8 @@ internal class AgentDummyNumbersPlayer : IDummyNumbersPlayer, IDisposable
 
     public IEnumerable<DummyNumbersAction> Decide(DummyNumbersState state)
     {
+        using var scope = torch.NewDisposeScope();
+
         Learn(state);
 
         using var features = GetFeatures(state);
@@ -143,6 +145,8 @@ internal class AgentDummyNumbersPlayer : IDummyNumbersPlayer, IDisposable
 
     public void FinalFeedback(DummyNumbersState finalState)
     {
+        using var scope = torch.NewDisposeScope();
+
         if (finalState != _lastState)
         {
             Learn(finalState);
@@ -257,7 +261,15 @@ internal class AgentDummyNumbersPlayer : IDummyNumbersPlayer, IDisposable
                 - Math.Abs(_lastState.Value.CurrentNumber + _lastAction.Value.Number);*/
 
             float reward = -Math.Abs(state.CurrentNumber);
-            if (state.CurrentNumber == 0) reward = 100;
+
+            if (state.CurrentNumber == 0)
+            {
+                reward = 100;
+            }
+            else if (state.StepsLeft == 0)
+            {
+                reward = -100;
+            }
 
             var lastTransition = new Transition(_lastState.Value, _lastAction.Value, reward, state);
             _memory.Add(lastTransition);

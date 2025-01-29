@@ -8,7 +8,7 @@ internal static class DummyNumbersGym
 
         var players = new IDummyNumbersPlayer[]
         {
-            //new AgentDummyNumbersPlayer(),
+            new NullDummyNumbersPlayer(),
             bot
         };
 
