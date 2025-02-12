@@ -4,10 +4,9 @@ using System.Linq;
 using TorchSharp;
 using TorchSharp.Modules;
 
-namespace Ml.DummyNumbers;
+namespace Ml.CartPole;
 
-// source: https://github.com/KonstantinAlexeevich/Ksoshin.QLearning/blob/main/QLearning.Avalonia/QLearning.Avalonia.Desktop/QLearning.fs
-internal class AgentDummyNumbersPlayer : IDummyNumbersPlayer, IDisposable
+internal class AgentCartPolePlayer : ICartPolePlayer
 {
     private class Dqn : torch.nn.Module<torch.Tensor, torch.Tensor>
     {
@@ -47,7 +46,7 @@ internal class AgentDummyNumbersPlayer : IDummyNumbersPlayer, IDisposable
 
     private readonly struct Transition
     {
-        public Transition(DummyNumbersState state, DummyNumbersAction action, float reward, DummyNumbersState nextState)
+        public Transition(CartPoleState state, CartPoleAction action, float reward, CartPoleState nextState)
         {
             State = state;
             Action = action;
@@ -55,21 +54,21 @@ internal class AgentDummyNumbersPlayer : IDummyNumbersPlayer, IDisposable
             NextState = nextState;
         }
 
-        public DummyNumbersState State { get; }
+        public CartPoleState State { get; }
 
-        public DummyNumbersAction Action { get; }
+        public CartPoleAction Action { get; }
 
         public float Reward { get; }
 
-        public DummyNumbersState NextState { get; }
+        public CartPoleState NextState { get; }
     }
 
     private const float EpsStart = 1.0f;
     private const float EpsEnd = 0.05f;
-    private const float EpsDecay = 0.9995f;
+    private const float EpsDecay = 0.995f;
     private const float GammaLearn = 0.99f;
-    private const float LearningRate = 0.001f;
-    private const float TauLearn = 0.01f;
+    private const float LearningRate = 0.01f;
+    private const float TauLearn = 0.001f;
 
     private static readonly Random _random = new();
     private readonly Dqn _policyNet;
@@ -77,18 +76,18 @@ internal class AgentDummyNumbersPlayer : IDummyNumbersPlayer, IDisposable
     private readonly List<Transition> _memory;
     private readonly Adam _optimizer;
     private float _eps;
-    private DummyNumbersState? _lastState;
-    private DummyNumbersAction? _lastAction;
+    private CartPoleState? _lastState;
+    private CartPoleAction? _lastAction;
     private bool _isCompleted;
     private readonly ExactArrayPool<float> _arrayPool;
 
-    public AgentDummyNumbersPlayer()
+    public AgentCartPolePlayer()
     {
         _arrayPool = new ExactArrayPool<float>();
         _eps = EpsStart;
 
-        int stateSize = 1;
-        int actionSize = 11;
+        int stateSize = 4;
+        int actionSize = 2;
 
         _policyNet = new Dqn(stateSize, actionSize);
         _targetNet = new Dqn(stateSize, actionSize);
@@ -108,7 +107,7 @@ internal class AgentDummyNumbersPlayer : IDummyNumbersPlayer, IDisposable
         _isCompleted = true;
     }
 
-    public IEnumerable<DummyNumbersAction> Decide(DummyNumbersState state)
+    public IEnumerable<CartPoleAction> Decide(CartPoleState state)
     {
         using var scope = torch.NewDisposeScope();
 
@@ -127,9 +126,9 @@ internal class AgentDummyNumbersPlayer : IDummyNumbersPlayer, IDisposable
                 .Select((weight, index) => (weight, index))
                 .OrderByDescending(x => x.weight)
                 .Select(x => x.index)
-            : Enumerable.Range(0, 11)
+            : Enumerable.Range(0, 2)
                 .OrderBy(_ => _random.Next());
-        var result = actionIndices.Select(x => new DummyNumbersAction(x - 5));
+        var result = actionIndices.Select(x => (CartPoleAction)x);
 
         foreach (var item in result)
         {
@@ -137,13 +136,13 @@ internal class AgentDummyNumbersPlayer : IDummyNumbersPlayer, IDisposable
         }
     }
 
-    public void CommitDecision(DummyNumbersState state, DummyNumbersAction decision)
+    public void CommitDecision(CartPoleState state, CartPoleAction decision)
     {
         _lastState = state;
         _lastAction = decision;
     }
 
-    public void FinalFeedback(DummyNumbersState finalState)
+    public void FinalFeedback(CartPoleState finalState)
     {
         using var scope = torch.NewDisposeScope();
 
@@ -155,15 +154,18 @@ internal class AgentDummyNumbersPlayer : IDummyNumbersPlayer, IDisposable
         _eps = float.Max(EpsEnd, _eps * EpsDecay);
     }
 
-    private static int GetActionIndex(DummyNumbersAction action)
+    private static int GetActionIndex(CartPoleAction action)
     {
-        return action.Number + 5;
+        return (int)action;
     }
 
-    private RentedArray<float> GetFeatures(DummyNumbersState state)
+    private RentedArray<float> GetFeatures(CartPoleState state)
     {
-        var result = _arrayPool.Rent(1);
-        result.Items[0] = state.CurrentNumber;
+        var result = _arrayPool.Rent(4);
+        result.Items[0] = state.X;
+        result.Items[1] = state.XDot;
+        result.Items[2] = state.Theta;
+        result.Items[3] = state.ThetaDot;
         return result;
     }
 
@@ -253,29 +255,17 @@ internal class AgentDummyNumbersPlayer : IDummyNumbersPlayer, IDisposable
         }
     }
 
-    private void Learn(DummyNumbersState state)
+    private void Learn(CartPoleState state)
     {
         if (_lastState != null && _lastAction != null)
         {
-            /*float reward = Math.Abs(_lastState.Value.CurrentNumber)
-                - Math.Abs(_lastState.Value.CurrentNumber + _lastAction.Value.Number);*/
-
-            float reward = -Math.Abs(state.CurrentNumber);
-
-            if (state.CurrentNumber == 0)
-            {
-                reward = 100;
-            }
-            else if (state.StepsLeft == 0)
-            {
-                reward = -100;
-            }
+            float reward = state.IsDone ? -100.0f : 1.0f;
 
             var lastTransition = new Transition(_lastState.Value, _lastAction.Value, reward, state);
             _memory.Add(lastTransition);
         }
 
-        if (state.CurrentNumber == 0 || state.StepsLeft == 0 || _memory.Count >= 500)
+        if (state.IsDone || _memory.Count >= 500)
         {
             foreach (var transition in _memory)
             {
@@ -288,14 +278,17 @@ internal class AgentDummyNumbersPlayer : IDummyNumbersPlayer, IDisposable
                 actions.Items[0] = action;
                 using var rewards = _arrayPool.Rent(1);
                 rewards.Items[0] = transition.Reward;
+                using var dones = _arrayPool.Rent(1);
+                dones.Items[0] = transition.State.IsDone ? 1.0f : 0.0f;
 
                 using var statesTensor = torch.tensor(features.Items);
                 using var actionsTensor = torch.tensor(actions.Items);
                 using var nextStatesTensor = torch.tensor(nextFeatures.Items);
                 using var rewardsTensor = torch.tensor(rewards.Items);
+                using var donesTensor = torch.tensor(dones.Items);
 
                 using var qTargetNext = _targetNet.forward(nextStatesTensor).max();
-                using var qTargets = rewardsTensor + (GammaLearn * qTargetNext);
+                using var qTargets = rewardsTensor + (GammaLearn * qTargetNext) * (1 - donesTensor);
                 using var qExpected = _policyNet.forward(statesTensor).gather(0, (long)action).unsqueeze(0);
 
                 using var loss = torch.nn.functional.mse_loss(qExpected, qTargets, torch.nn.Reduction.Sum);
@@ -316,11 +309,13 @@ internal class AgentDummyNumbersPlayer : IDummyNumbersPlayer, IDisposable
 
             _memory.Clear();
 
+            /*
             // copy target network to policy network
             foreach (var (policyParam, targetParam) in _policyNet.parameters().Zip(_targetNet.parameters()))
             {
                 policyParam.copy_(targetParam);
             }
+            */
         }
     }
 }
