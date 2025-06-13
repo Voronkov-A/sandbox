@@ -25,7 +25,7 @@ internal partial class MapPageViewModel : ViewModelBase
             firstParticipant,
             new Position(new Vector3(0, 0, 0), Angle.FromRadians(0)),
             new BoundingCircle(20),
-            new BoundingSector(60, Angle.FromRadians(45))));
+            new BoundingSector(100, Angle.FromDegrees(45))));
     }
 
     public string Title => "Map";

@@ -76,7 +76,7 @@ public static class Box2Extensions
         {
             var v = otherPoint - _sectorCenter;
             return v.LengthSquared <= _squareOfSectorRadius
-                && Vector2.Dot(v, _normalizedSectorForwardDirection) >= _cosOfHalfOfSectorAngle;
+                && Vector2.Dot(v.Normalized(), _normalizedSectorForwardDirection) >= _cosOfHalfOfSectorAngle;
         }
 
         public bool AnyRadiusBoundaryIntersectsBoxBoundaries(in Box2 box)

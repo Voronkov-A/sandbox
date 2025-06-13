@@ -1,3 +1,5 @@
+using System;
+
 namespace Yaprt.Miscellaneous.Geometry;
 
 public readonly record struct Angle
@@ -14,6 +16,11 @@ public readonly record struct Angle
     public static Angle FromRadians(float radians)
     {
         return new Angle(radians);
+    }
+
+    public static Angle FromDegrees(float degrees)
+    {
+        return new Angle(degrees / 180 * MathF.PI);
     }
 
     public static Angle operator /(Angle left, float right)

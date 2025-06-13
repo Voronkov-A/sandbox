@@ -61,7 +61,7 @@ internal class MapView : Control
 
         var boxes = new List<Box2>();
 
-        var a = 10f;
+        var a = 18f;
 
         for (var y = world.Bounds.Min.Y; y <= world.Bounds.Max.Y; y += a)
         {
@@ -72,11 +72,10 @@ internal class MapView : Control
                 var p = world.Objects.OfType<Pawn>().First();
                 var intersects = box.Intersects(p.VisionField, p.Position);
 
-                var color = intersects
-                    ? new Color(255, 0, 128, 0)
-                    : new Color(255, 0, 255, 0);
+                var color1 = new Color(255, 0, 128, 0);
+                var color2 = new Color(255, 0, 255, 0);
 
-                var brush = new SolidColorBrush(color);
+                var brush = new SolidColorBrush(color1);
                 var pen = new Pen(brush);
 
                 var polygone = new PolylineGeometry(
@@ -87,8 +86,21 @@ internal class MapView : Control
                         new(x - world.Bounds.Min.X + a, y - world.Bounds.Min.Y + a),
                         new(x - world.Bounds.Min.X, y - world.Bounds.Min.Y + a)
                     },
-                    isFilled: false);
+                    isFilled: intersects);
                 context.DrawGeometry(brush, pen, polygone);
+
+                brush = new SolidColorBrush(color2);
+                pen = new Pen(brush);
+                var polygone2 = new PolylineGeometry(
+                    new Avalonia.Point[]
+                    {
+                        new(x - world.Bounds.Min.X, y - world.Bounds.Min.Y),
+                        new(x - world.Bounds.Min.X + a, y - world.Bounds.Min.Y),
+                        new(x - world.Bounds.Min.X + a, y - world.Bounds.Min.Y + a),
+                        new(x - world.Bounds.Min.X, y - world.Bounds.Min.Y + a)
+                    },
+                    isFilled: false);
+                context.DrawGeometry(brush, pen, polygone2);
             }
         }
 
