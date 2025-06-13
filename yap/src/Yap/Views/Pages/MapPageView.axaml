@@ -1,0 +1,23 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:vm="clr-namespace:Yap.ViewModels.Pages"
+             xmlns:controls="clr-namespace:Yap.Views.Controls"
+             mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="450"
+             x:Class="Yap.Views.Pages.MapPageView"
+             x:DataType="vm:MapPageViewModel">
+  <Design.DataContext>
+    <vm:MapPageViewModel />
+  </Design.DataContext>
+  <StackPanel VerticalAlignment="Top">
+    <TextBlock Text="{Binding Title}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+    <Button Click="MoveTopLeftOnClick">Move top left</Button>
+    <Button Click="MoveTopRightOnClick">Move top right</Button>
+    <Button Click="MoveRightOnClick">Move right</Button>
+    <Button Click="MoveBottomRightOnClick">Move bottom right</Button>
+    <Button Click="MoveBottomLeftOnClick">Move bottom left</Button>
+    <Button Click="MoveLeftOnClick">Move left</Button>
+    <controls:MapView DataContext="{Binding World}" />
+  </StackPanel>
+</UserControl>
