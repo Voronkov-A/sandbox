@@ -171,8 +171,8 @@ public static class Box2Extensions
                     if (otherSectorHelper.Contains(self.Min)
                         || otherSectorHelper.Contains(new Vector2(self.Min.X, self.Max.Y))
                         || otherSectorHelper.Contains(new Vector2(self.Max.X, self.Min.Y))
-                        || otherSectorHelper.Contains(self.Max)/*
-                        || otherSectorHelper.AnyRadiusBoundaryIntersectsBoxBoundaries(self)*/)
+                        || otherSectorHelper.Contains(self.Max)
+                        || otherSectorHelper.AnyRadiusBoundaryIntersectsBoxBoundaries(self))
                     {
                         return true;
                     }

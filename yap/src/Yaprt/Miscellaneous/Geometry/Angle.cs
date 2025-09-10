@@ -20,7 +20,7 @@ public readonly record struct Angle
 
     public static Angle FromDegrees(float degrees)
     {
-        return new Angle(degrees / 180 * MathF.PI);
+        return new(degrees / 180 * MathF.PI);
     }
 
     public static Angle operator /(Angle left, float right)
