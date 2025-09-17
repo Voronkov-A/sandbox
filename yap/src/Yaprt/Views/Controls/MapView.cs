@@ -136,8 +136,8 @@ internal class MapView : Control
                         pawn.Position.ModelMatrix[0, 0],
                         pawn.Position.ModelMatrix[1, 0])
                     .Normalized();
-                var leftBoundaryTail = Rotate(normalizedSectorForwardDirection, -vf.Angle / 2) * vf.Radius * scale.X;
-                var rightBoundaryTail = Rotate(normalizedSectorForwardDirection, vf.Angle / 2) * vf.Radius * scale.X;
+                var leftBoundaryTail = vfCenter.Xy + Rotate(normalizedSectorForwardDirection, -vf.Angle / 2) * vf.Radius * scale.X;
+                var rightBoundaryTail = vfCenter.Xy + Rotate(normalizedSectorForwardDirection, vf.Angle / 2) * vf.Radius * scale.X;
 
                 var path = new Path
                 {

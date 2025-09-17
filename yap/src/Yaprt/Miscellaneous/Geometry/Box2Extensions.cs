@@ -81,8 +81,10 @@ public static class Box2Extensions
 
         public bool AnyRadiusBoundaryIntersectsBoxBoundaries(in Box2 box)
         {
-            var leftBoundaryTail = Rotate(_normalizedSectorForwardDirection, -_halfOfSectorAngle) * _sectorRadius;
-            var rightBoundaryTail = Rotate(_normalizedSectorForwardDirection, _halfOfSectorAngle) * _sectorRadius;
+            var leftBoundaryTail
+                = _sectorCenter + Rotate(_normalizedSectorForwardDirection, -_halfOfSectorAngle) * _sectorRadius;
+            var rightBoundaryTail
+                = _sectorCenter + Rotate(_normalizedSectorForwardDirection, _halfOfSectorAngle) * _sectorRadius;
 
             return SegmentsIntersect(_sectorCenter, leftBoundaryTail, box.Min, new Vector2(box.Max.X, box.Min.Y))
                 || SegmentsIntersect(_sectorCenter, leftBoundaryTail, new Vector2(box.Max.X, box.Min.Y), box.Max)

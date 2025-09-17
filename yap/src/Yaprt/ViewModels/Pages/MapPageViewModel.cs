@@ -23,9 +23,9 @@ internal partial class MapPageViewModel : ViewModelBase
 
         World.AddObject(new Pawn(
             firstParticipant,
-            new Position(new Vector3(-64, -64, 0), Angle.FromDegrees(0)),
+            new Position(new Vector3(-64, -64, 0), Angle.FromDegrees(-30)),
             new BoundingCircle(20),
-            new BoundingSector(100, Angle.FromDegrees(45))));
+            new BoundingSector(100, Angle.FromDegrees(90))));
     }
 
     public string Title => "Map";
