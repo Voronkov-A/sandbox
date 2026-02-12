@@ -26,6 +26,10 @@ internal partial class MapPageViewModel : ViewModelBase
             new Position(new Vector3(-64, -64, 0), Angle.FromDegrees(-30)),
             new BoundingCircle(20),
             new BoundingSector(100, Angle.FromDegrees(90))));
+
+        World.AddObject(new StaticBlock(
+            new Position(new Vector3(0, 0, 0), Angle.FromDegrees(0)),
+            new BoundingBox(20, 20)));
     }
 
     public string Title => "Map";

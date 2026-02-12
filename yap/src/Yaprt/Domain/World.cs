@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Yaprt.Domain.Physics;
+using Yaprt.Domain.Visibility;
 using Yaprt.Miscellaneous.Geometry;
 
 namespace Yaprt.Domain;
@@ -35,6 +36,18 @@ public sealed class World
         _pawns.Add(pawn);
     }
 
+    public void AddObject(StaticBlock staticBlock)
+    {
+        var intersection = _collisionTree.GetIntersections(staticBlock).FirstOrDefault();
+
+        if (intersection != null)
+        {
+            throw new InvalidOperationException($"Object {staticBlock} intersects object {intersection}.");
+        }
+
+        _collisionTree.Add(staticBlock);
+    }
+
     public IEnumerable<IBoundedObject> GetVisibleObjects(Participant participant)
     {
         var objects = new HashSet<IBoundedObject>();
@@ -42,6 +55,20 @@ public sealed class World
         foreach (var pawn in _pawns.Where(x => x.Participant == participant))
         {
             objects.Add(pawn);
+        }
+
+        foreach (var obj in _collisionTree.Objects)
+        {
+            if (obj is Pawn pawn && pawn.Participant == participant)
+            {
+                objects.Add(obj);
+            }
+            else if (
+                obj is IVisibleObject visibleObject
+                && visibleObject.VisibilityMode == ObjectVisibilityMode.AlwaysVisible)
+            {
+                objects.Add(obj);
+            }
         }
 
         return objects;

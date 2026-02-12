@@ -170,6 +170,45 @@ internal class MapView : Control
 
                 context.DrawGeometry(brush, pen, geometry);
             }
+            else if (obj is StaticBlock staticBlock)
+            {
+                if (obj.Bounds is BoundingBox boundingBox)
+                {
+                    var color = new Color(255, 0, 0, 255);
+
+                    var sba
+                        = staticBlock.Position.ModelMatrix
+                        * new Vector4(-boundingBox.Width, -boundingBox.Height, 0, 1);
+                    var sbb
+                        = staticBlock.Position.ModelMatrix
+                        * new Vector4(boundingBox.Width, -boundingBox.Height, 0, 1);
+                    var sbc
+                        = staticBlock.Position.ModelMatrix
+                        * new Vector4(boundingBox.Width, boundingBox.Height, 0, 1);
+                    var sbd
+                        = staticBlock.Position.ModelMatrix
+                        * new Vector4(-boundingBox.Width, boundingBox.Height, 0, 1);
+
+
+                    var brush = new SolidColorBrush(color);
+                    var pen = new Pen(brush);
+
+                    var polygone = new PolylineGeometry(
+                        new Avalonia.Point[]
+                        {
+                            new(sba.X - world.Bounds.Min.X,
+                                sba.Y - world.Bounds.Min.Y),
+                            new(sbb.X - world.Bounds.Min.X,
+                                sbb.Y - world.Bounds.Min.Y),
+                            new(sbc.X - world.Bounds.Min.X,
+                                sbc.Y - world.Bounds.Min.Y),
+                            new(sbd.X - world.Bounds.Min.X,
+                                sbd.Y - world.Bounds.Min.Y)
+                        },
+                        isFilled: true);
+                    context.DrawGeometry(brush, pen, polygone);
+                }
+            }
         }
 
 

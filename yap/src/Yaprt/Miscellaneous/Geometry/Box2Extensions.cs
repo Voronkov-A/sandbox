@@ -25,6 +25,26 @@ public static class Box2Extensions
                         && self.Max.X >= otherCenter.X + otherScale.X
                         && self.Max.Y >= otherCenter.Y + otherScale.Y;
                 }
+            case BoundingBox otherBoundingBox:
+                {
+                    var otherA
+                        = other.Position.ModelMatrix
+                        * new Vector4(-otherBoundingBox.Width, -otherBoundingBox.Height, 0, 1);
+                    var otherB
+                        = other.Position.ModelMatrix
+                        * new Vector4(otherBoundingBox.Width, -otherBoundingBox.Height, 0, 1);
+                    var otherC
+                        = other.Position.ModelMatrix
+                        * new Vector4(otherBoundingBox.Width, otherBoundingBox.Height, 0, 1);
+                    var otherD
+                        = other.Position.ModelMatrix
+                        * new Vector4(-otherBoundingBox.Width, otherBoundingBox.Height, 0, 1);
+
+                    return self.Contains(otherA.Xy, boundaryInclusive: false)
+                        && self.Contains(otherB.Xy, boundaryInclusive: false)
+                        && self.Contains(otherC.Xy, boundaryInclusive: false)
+                        && self.Contains(otherD.Xy, boundaryInclusive: false);
+                }
             default:
                 {
                     throw new InvalidOperationException($"{other.Bounds.GetType()} is not supported.");
