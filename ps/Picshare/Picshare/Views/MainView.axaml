@@ -1,0 +1,500 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:vm="clr-namespace:Picshare.ViewModels"
+             mc:Ignorable="d" d:DesignWidth="1000" d:DesignHeight="700"
+             x:Class="Picshare.Views.MainView"
+             x:DataType="vm:MainViewModel">
+  <Design.DataContext>
+    <vm:MainViewModel />
+  </Design.DataContext>
+
+  <Grid RowDefinitions="Auto,*,Auto" Background="#F7F7F4">
+    <Border Grid.Row="0" Background="#27343B" Padding="20,16">
+      <Grid ColumnDefinitions="*,Auto">
+        <StackPanel Spacing="3">
+          <TextBlock Text="Picshare" FontSize="24" FontWeight="SemiBold" Foreground="White"/>
+          <TextBlock Text="Serverless photo albums on Google Drive" Foreground="#D9E5E8"/>
+        </StackPanel>
+        <TextBlock Grid.Column="1"
+                   Text="{Binding Status}"
+                   Foreground="#D9E5E8"
+                   VerticalAlignment="Center"
+                   TextWrapping="Wrap"
+                   MaxWidth="420"/>
+      </Grid>
+    </Border>
+
+    <TabControl Grid.Row="1" Margin="20">
+      <TabItem Header="Create">
+        <Grid>
+          <ScrollViewer>
+            <Grid ColumnDefinitions="440,*"
+                  RowDefinitions="Auto,Auto">
+            <Border Grid.Row="0" Grid.Column="0" Background="White" BorderBrush="#D6D8D1" BorderThickness="1" CornerRadius="6" Padding="18" Margin="0,0,20,0">
+              <StackPanel Spacing="12">
+                <TextBlock Text="New album" FontSize="18" FontWeight="SemiBold"/>
+
+                <StackPanel Spacing="5">
+                  <TextBlock Text="Album type"/>
+                  <ComboBox ItemsSource="{Binding AlbumTypes}"
+                            SelectedItem="{Binding SelectedAlbumType}"
+                            HorizontalAlignment="Stretch"
+                            PlaceholderText="Choose album type">
+                    <ComboBox.ItemTemplate>
+                      <DataTemplate x:DataType="vm:AlbumTypeOptionViewModel">
+                        <StackPanel Spacing="2">
+                          <TextBlock Text="{Binding Title}"/>
+                          <TextBlock Text="{Binding Description}" FontSize="11" Foreground="#6C756F" TextWrapping="Wrap"/>
+                        </StackPanel>
+                      </DataTemplate>
+                    </ComboBox.ItemTemplate>
+                  </ComboBox>
+                </StackPanel>
+
+                <StackPanel Spacing="12" IsVisible="{Binding IsAlbumSettingsVisible}">
+                  <TextBlock Text="Upload local photos to Google Drive" FontSize="15" FontWeight="SemiBold"/>
+
+                  <StackPanel Spacing="5">
+                    <TextBlock Text="Album name"/>
+                    <TextBox Text="{Binding AlbumTitle}"/>
+                  </StackPanel>
+
+                  <StackPanel Spacing="5">
+                    <TextBlock Text="Photos"/>
+                    <Grid RowDefinitions="Auto,Auto" ColumnDefinitions="*,Auto,Auto">
+                      <ListBox x:Name="AlbumPhotosList"
+                               Grid.Row="0"
+                               Grid.ColumnSpan="3"
+                               ItemsSource="{Binding AlbumPhotos}"
+                               SelectedItem="{Binding SelectedAlbumPhoto}"
+                               SelectionMode="Multiple"
+                               MinHeight="150"
+                               MaxHeight="260"
+                               ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                        <ListBox.ItemsPanel>
+                          <ItemsPanelTemplate>
+                            <WrapPanel Orientation="Horizontal"/>
+                          </ItemsPanelTemplate>
+                        </ListBox.ItemsPanel>
+                        <ListBox.ItemTemplate>
+                          <DataTemplate x:DataType="vm:AlbumPhotoSourceViewModel">
+                            <Border Width="76"
+                                    Height="76"
+                                    Margin="0,0,8,8"
+                                    Background="#EDF0ED"
+                                    BorderBrush="#D6D8D1"
+                                    BorderThickness="1"
+                                    CornerRadius="4"
+                                    ClipToBounds="True"
+                                    ToolTip.Tip="{Binding FileName}">
+                              <Grid>
+                                <Image Source="{Binding Thumbnail}" Stretch="UniformToFill"/>
+                                <Border Background="#EDF0ED" IsVisible="{Binding HasThumbnailError}">
+                                  <TextBlock Text="IMG"
+                                             HorizontalAlignment="Center"
+                                             VerticalAlignment="Center"
+                                             Foreground="#6C756F"
+                                             FontSize="12"
+                                             FontWeight="SemiBold"/>
+                                </Border>
+                              </Grid>
+                            </Border>
+                          </DataTemplate>
+                        </ListBox.ItemTemplate>
+                      </ListBox>
+                      <Button Grid.Row="1"
+                              Grid.Column="1"
+                              Margin="0,8,8,0"
+                              Padding="12,8"
+                              Content="Add photos">
+                        <Button.Flyout>
+                          <Flyout>
+                            <StackPanel Spacing="6" MinWidth="210">
+                              <Button Click="ManualPhotoImport_Click"
+                                      HorizontalAlignment="Stretch"
+                                      HorizontalContentAlignment="Left"
+                                      Content="Select files manually"/>
+                              <Button Click="FolderDatePhotoImport_Click"
+                                      HorizontalAlignment="Stretch"
+                                      HorizontalContentAlignment="Left"
+                                      Content="Select by folder and date"/>
+                            </StackPanel>
+                          </Flyout>
+                        </Button.Flyout>
+                      </Button>
+                      <Button Grid.Row="1"
+                              Grid.Column="2"
+                              Click="RemoveSelectedAlbumPhotos_Click"
+                              Margin="0,8,0,0"
+                              Padding="12,8">
+                        Remove selected
+                      </Button>
+                    </Grid>
+                  </StackPanel>
+
+                  <StackPanel Spacing="8">
+                    <TextBlock Text="Google Drive" FontWeight="SemiBold"/>
+
+                    <Grid ColumnDefinitions="*,Auto">
+                      <TextBlock Text="{Binding GoogleConnectionStatus}" VerticalAlignment="Center"/>
+                      <Button Grid.Column="1"
+                              Click="SignInGoogle_Click"
+                              Padding="12,8">
+                        Sign in
+                      </Button>
+                    </Grid>
+
+                    <Border Background="#F2F2EE"
+                            BorderBrush="#D6D8D1"
+                            BorderThickness="1"
+                            CornerRadius="6"
+                            Padding="10"
+                            IsVisible="{Binding IsGoogleSignInInstructionVisible}">
+                      <StackPanel Spacing="8">
+                        <TextBlock Text="{Binding GoogleSignInMessage}" TextWrapping="Wrap"/>
+                        <Grid ColumnDefinitions="*,Auto,Auto">
+                          <TextBox Text="{Binding GoogleSignInUrl}" IsReadOnly="True" Margin="0,0,8,0"/>
+                          <Button Grid.Column="1"
+                                  Click="OpenGoogleSignIn_Click"
+                                  Padding="12,8"
+                                  Margin="0,0,8,0">
+                            Open Google
+                          </Button>
+                          <Button Grid.Column="2"
+                                  Command="{Binding CancelGoogleSignInCommand}"
+                                  Padding="12,8">
+                            Cancel
+                          </Button>
+                        </Grid>
+                      </StackPanel>
+                    </Border>
+
+                    <StackPanel Spacing="5">
+                      <TextBlock Text="Album destination"/>
+                      <Grid ColumnDefinitions="*,Auto">
+                        <TextBox Text="{Binding SelectedDriveFolderName}" IsReadOnly="True" Margin="0,0,8,0"/>
+                        <Button Grid.Column="1"
+                                Command="{Binding LoadDriveFoldersCommand}"
+                                Padding="12,8">
+                          Select
+                        </Button>
+                      </Grid>
+                    </StackPanel>
+                  </StackPanel>
+
+                  <Grid ColumnDefinitions="*,Auto">
+                    <Button Command="{Binding CreateAlbumCommand}"
+                            HorizontalAlignment="Stretch"
+                            HorizontalContentAlignment="Center"
+                            Padding="14,10"
+                            Margin="0,0,8,0">
+                      OK (upload)
+                    </Button>
+                    <Button Grid.Column="1"
+                            Command="{Binding CancelAlbumCreationCommand}"
+                            Padding="14,10">
+                      Cancel
+                    </Button>
+                  </Grid>
+                </StackPanel>
+              </StackPanel>
+            </Border>
+
+            <Border Grid.Row="0" Grid.Column="1" Background="White" BorderBrush="#D6D8D1" BorderThickness="1" CornerRadius="6" Padding="18" IsVisible="{Binding IsCreateResultVisible}">
+              <StackPanel Spacing="12">
+                <TextBlock Text="Album created" FontSize="18" FontWeight="SemiBold"/>
+                <TextBlock Text="Send this link to friends so they can open the album." TextWrapping="Wrap"/>
+
+                <StackPanel Spacing="5">
+                  <TextBlock Text="Picshare link"/>
+                  <TextBox Text="{Binding ShareLink}" IsReadOnly="True" TextWrapping="Wrap"/>
+                </StackPanel>
+
+                <StackPanel Spacing="5">
+                  <TextBlock Text="Google Drive folder"/>
+                  <TextBox Text="{Binding DriveFolderLink}" IsReadOnly="True" TextWrapping="Wrap"/>
+                </StackPanel>
+              </StackPanel>
+            </Border>
+            </Grid>
+          </ScrollViewer>
+
+          <Grid Background="#80000000"
+                IsVisible="{Binding IsDriveFolderPickerVisible}">
+            <Border Background="White"
+                    BorderBrush="#D6D8D1"
+                    BorderThickness="1"
+                    CornerRadius="6"
+                    Padding="18"
+                    Margin="20"
+                    MaxWidth="720"
+                    MaxHeight="620"
+                    HorizontalAlignment="Stretch"
+                    VerticalAlignment="Center">
+              <Grid RowDefinitions="Auto,Auto,*,Auto">
+                <TextBlock Text="Select Google Drive folder" FontSize="18" FontWeight="SemiBold"/>
+
+                <Grid Grid.Row="1" ColumnDefinitions="Auto,*,Auto" Margin="0,12,0,0">
+                  <Button Command="{Binding GoToParentDriveFolderCommand}"
+                          Padding="12,8"
+                          Margin="0,0,8,0">
+                    Up
+                  </Button>
+                  <TextBox Grid.Column="1"
+                           Text="{Binding CurrentDriveFolderName}"
+                           IsReadOnly="True"
+                           Margin="0,0,8,0"/>
+                  <Button Grid.Column="2"
+                          Command="{Binding ShowCreateDriveFolderDialogCommand}"
+                          IsEnabled="{Binding CurrentDriveFolderCanBeUsed}"
+                          Padding="12,8">
+                    Create
+                  </Button>
+                </Grid>
+
+                <Grid Grid.Row="2" RowDefinitions="*,Auto" Margin="0,12,0,0">
+                  <ListBox ItemsSource="{Binding DriveItems}"
+                           MinHeight="260"
+                           MaxHeight="390"
+                           SelectionMode="Single"
+                           ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                    <ListBox.ItemTemplate>
+                      <DataTemplate x:DataType="vm:DriveItemViewModel">
+                        <Button Click="DriveItem_Click"
+                                IsEnabled="{Binding CanOpen}"
+                                HorizontalAlignment="Stretch"
+                                HorizontalContentAlignment="Stretch"
+                                Padding="8"
+                                Background="Transparent"
+                                BorderThickness="0">
+                          <Grid ColumnDefinitions="70,*">
+                            <TextBlock Text="{Binding Icon}"
+                                       Foreground="#27343B"
+                                       VerticalAlignment="Center"
+                                       FontWeight="SemiBold"
+                                       Margin="0,0,10,0"/>
+                            <StackPanel Grid.Column="1" Spacing="2">
+                              <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis"/>
+                              <TextBlock Text="{Binding Description}"
+                                         FontSize="11"
+                                         Foreground="#6C756F"
+                                         TextTrimming="CharacterEllipsis"/>
+                            </StackPanel>
+                          </Grid>
+                        </Button>
+                      </DataTemplate>
+                    </ListBox.ItemTemplate>
+                  </ListBox>
+
+                  <Button Grid.Row="1"
+                          Command="{Binding LoadMoreDriveItemsCommand}"
+                          IsVisible="{Binding HasMoreDriveItems}"
+                          HorizontalAlignment="Center"
+                          Padding="12,8"
+                          Margin="0,8,0,0">
+                    Load more
+                  </Button>
+                </Grid>
+
+                <Grid Grid.Row="3" ColumnDefinitions="Auto,*,Auto,Auto" Margin="0,12,0,0">
+                  <TextBlock Text="OK selects the current folder."
+                             VerticalAlignment="Center"
+                             Foreground="#6C756F"
+                             TextWrapping="Wrap"/>
+                  <Button Grid.Column="2"
+                          Command="{Binding CancelDriveFolderPickerCommand}"
+                          Padding="12,8"
+                          Margin="0,0,8,0">
+                    Cancel
+                  </Button>
+                  <Button Grid.Column="3"
+                          Command="{Binding UseCurrentDriveFolderCommand}"
+                          IsEnabled="{Binding CurrentDriveFolderCanBeUsed}"
+                          Padding="12,8">
+                    OK
+                  </Button>
+                </Grid>
+              </Grid>
+            </Border>
+          </Grid>
+
+          <Grid Background="#80000000"
+                IsVisible="{Binding IsCreateDriveFolderDialogVisible}">
+            <Border Background="White"
+                    BorderBrush="#D6D8D1"
+                    BorderThickness="1"
+                    CornerRadius="6"
+                    Padding="18"
+                    Margin="20"
+                    MaxWidth="420"
+                    HorizontalAlignment="Stretch"
+                    VerticalAlignment="Center">
+              <StackPanel Spacing="12">
+                <TextBlock Text="Create folder" FontSize="18" FontWeight="SemiBold"/>
+                <TextBox Text="{Binding NewDriveFolderName}"
+                         Watermark="Folder name"/>
+                <Grid ColumnDefinitions="*,Auto,Auto">
+                  <Button Grid.Column="1"
+                          Command="{Binding CancelCreateDriveFolderCommand}"
+                          Padding="12,8"
+                          Margin="0,0,8,0">
+                    Cancel
+                  </Button>
+                  <Button Grid.Column="2"
+                          Command="{Binding CreateDriveFolderCommand}"
+                          Padding="12,8">
+                    Create
+                  </Button>
+                </Grid>
+              </StackPanel>
+            </Border>
+          </Grid>
+
+          <Grid Background="#80000000"
+                IsVisible="{Binding IsFolderDateImportVisible}">
+            <Border Background="White"
+                    BorderBrush="#D6D8D1"
+                    BorderThickness="1"
+                    CornerRadius="6"
+                    Padding="18"
+                    Margin="20"
+                    MaxWidth="620"
+                    HorizontalAlignment="Stretch"
+                    VerticalAlignment="Center">
+              <StackPanel Spacing="12">
+                <TextBlock Text="Select photos by folder and date" FontSize="18" FontWeight="SemiBold"/>
+
+                <StackPanel Spacing="5">
+                  <TextBlock Text="Folders"/>
+                  <TextBox Text="{Binding FolderDateImportSourceText}"
+                           IsReadOnly="True"
+                           TextWrapping="Wrap"
+                           MinHeight="54"/>
+                </StackPanel>
+
+                <Grid ColumnDefinitions="*,Auto,Auto">
+                  <DatePicker SelectedDate="{Binding ImportDate}" Margin="0,0,8,0"/>
+                  <Button Grid.Column="1"
+                          Command="{Binding ScanFolderDateImportCommand}"
+                          Padding="12,8"
+                          Margin="0,0,8,0">
+                    Scan
+                  </Button>
+                  <Button Grid.Column="2"
+                          Click="ChooseFolderDateImportFolders_Click"
+                          Padding="12,8">
+                    Choose folders
+                  </Button>
+                </Grid>
+
+                <Border Height="1" Background="#D6D8D1"/>
+
+                <StackPanel Spacing="8" IsVisible="{Binding IsImportCandidatesVisible}">
+                  <TextBlock Text="Matching photos" FontWeight="SemiBold"/>
+                  <ListBox x:Name="ImportCandidatesList"
+                           ItemsSource="{Binding ImportCandidates}"
+                           SelectionMode="Multiple"
+                           MinHeight="180"
+                           MaxHeight="260"
+                           ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                    <ListBox.ItemsPanel>
+                      <ItemsPanelTemplate>
+                        <WrapPanel Orientation="Horizontal"/>
+                      </ItemsPanelTemplate>
+                    </ListBox.ItemsPanel>
+                    <ListBox.ItemTemplate>
+                      <DataTemplate x:DataType="vm:AlbumPhotoSourceViewModel">
+                        <Border Width="76"
+                                Height="76"
+                                Margin="0,0,8,8"
+                                Background="#EDF0ED"
+                                BorderBrush="#D6D8D1"
+                                BorderThickness="1"
+                                CornerRadius="4"
+                                ClipToBounds="True"
+                                ToolTip.Tip="{Binding FileName}">
+                          <Grid>
+                            <Image Source="{Binding Thumbnail}" Stretch="UniformToFill"/>
+                            <Border Background="#EDF0ED" IsVisible="{Binding HasThumbnailError}">
+                              <TextBlock Text="IMG"
+                                         HorizontalAlignment="Center"
+                                         VerticalAlignment="Center"
+                                         Foreground="#6C756F"
+                                         FontSize="12"
+                                         FontWeight="SemiBold"/>
+                            </Border>
+                          </Grid>
+                        </Border>
+                      </DataTemplate>
+                    </ListBox.ItemTemplate>
+                  </ListBox>
+                  <Grid ColumnDefinitions="Auto,Auto,*,Auto">
+                    <Button Click="AddSelectedImportCandidates_Click" Padding="12,8" Margin="0,0,8,0">Add selected</Button>
+                    <Button Grid.Column="1" Command="{Binding AddAllImportCandidatesCommand}" Padding="12,8">Add all</Button>
+                    <Button Grid.Column="3" Command="{Binding ClearImportCandidatesCommand}" Padding="12,8">Clear</Button>
+                  </Grid>
+                </StackPanel>
+
+                <Grid ColumnDefinitions="*,Auto">
+                  <Button Grid.Column="1"
+                          Command="{Binding CancelFolderDateImportCommand}"
+                          Padding="12,8">
+                    Cancel
+                  </Button>
+                </Grid>
+              </StackPanel>
+            </Border>
+          </Grid>
+        </Grid>
+      </TabItem>
+
+      <TabItem Header="Open">
+        <Grid RowDefinitions="Auto,*">
+          <Border Grid.Row="0" Background="White" BorderBrush="#D6D8D1" BorderThickness="1" CornerRadius="6" Padding="18">
+            <Grid ColumnDefinitions="*,Auto">
+              <TextBox Text="{Binding OpenAlbumLink}" Watermark="Paste Picshare link or Google Drive manifest file link" Margin="0,0,12,0"/>
+              <Button Grid.Column="1" Command="{Binding OpenAlbumCommand}" Padding="16,8">Open</Button>
+            </Grid>
+          </Border>
+
+          <ScrollViewer Grid.Row="1" Margin="0,16,0,0">
+            <StackPanel Spacing="14">
+              <TextBlock Text="{Binding CurrentAlbumTitle}" FontSize="20" FontWeight="SemiBold"/>
+              <ItemsControl ItemsSource="{Binding Photos}">
+                <ItemsControl.ItemsPanel>
+                  <ItemsPanelTemplate>
+                    <WrapPanel Orientation="Horizontal"/>
+                  </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="vm:AlbumPhotoViewModel">
+                    <Border Width="220" Height="190" Margin="0,0,12,12" Background="White" BorderBrush="#D6D8D1" BorderThickness="1" CornerRadius="6">
+                      <Grid RowDefinitions="*,Auto">
+                        <Image Source="{Binding Image}" Stretch="UniformToFill"/>
+                        <Border Grid.Row="1" Background="#F2F2EE" Padding="8">
+                          <StackPanel Spacing="2">
+                            <TextBlock Text="{Binding FileName}" TextTrimming="CharacterEllipsis"/>
+                            <TextBlock Text="{Binding Status}" FontSize="11" Foreground="#7B4B39" TextTrimming="CharacterEllipsis"/>
+                          </StackPanel>
+                        </Border>
+                      </Grid>
+                    </Border>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
+          </ScrollViewer>
+        </Grid>
+      </TabItem>
+    </TabControl>
+
+    <ProgressBar Grid.Row="2"
+                 IsIndeterminate="{Binding IsBusy}"
+                 Height="3"
+                 Minimum="0"
+                 Maximum="1"
+                 Value="0"/>
+  </Grid>
+</UserControl>

@@ -1,0 +1,6 @@
+{
+  "google": {
+    "oauthClientId": "<oauthClientId>",
+    "oauthClientSecret": "<oauthClientSecret>"
+  }
+}
