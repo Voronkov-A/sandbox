@@ -45,4 +45,10 @@ public sealed record PhotoReference
     public required string DriveFileId { get; init; }
 
     public required string DownloadUrl { get; init; }
+
+    public required string ThumbnailDriveFileId { get; init; }
+
+    public required string ThumbnailDownloadUrl { get; init; }
+
+    public required string ThumbnailContentType { get; init; }
 }

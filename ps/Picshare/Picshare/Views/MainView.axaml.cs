@@ -147,4 +147,13 @@ public partial class MainView : UserControl
             await topLevel.Launcher.LaunchUriAsync(uri);
         }
     }
+
+    private async void AlbumPhoto_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is MainViewModel viewModel &&
+            sender is Control { DataContext: AlbumPhotoViewModel photo })
+        {
+            await viewModel.LoadFullPhotoAsync(photo);
+        }
+    }
 }

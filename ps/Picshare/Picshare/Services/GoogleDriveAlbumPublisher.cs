@@ -42,22 +42,38 @@ public sealed class GoogleDriveAlbumPublisher
         var photoReferences = new List<PhotoReference>();
         foreach (var photo in request.Photos)
         {
+            var photoId = Guid.NewGuid().ToString("N");
+            var contentType = GetContentType(photo.FileName);
+
+            await using var thumbnailSourceStream = await photo.OpenReadAsync();
+            await using var thumbnailStream = PhotoThumbnailGenerator.CreateJpegThumbnail(thumbnailSourceStream);
+
             await using var stream = await photo.OpenReadAsync();
             var driveFile = await client.UploadFileAsync(
                 photo.FileName,
                 photosFolder.Id,
                 stream,
-                GetContentType(photo.FileName),
+                contentType,
+                cancellationToken);
+
+            var thumbnailFile = await client.UploadFileAsync(
+                CreateThumbnailFileName(photoId),
+                photosFolder.Id,
+                thumbnailStream,
+                PhotoThumbnailGenerator.ContentType,
                 cancellationToken);
 
             photoReferences.Add(new PhotoReference
             {
-                Id = Guid.NewGuid().ToString("N"),
+                Id = photoId,
                 FileName = photo.FileName,
-                ContentType = GetContentType(photo.FileName),
+                ContentType = contentType,
                 BackendType = "google-drive-file",
                 DriveFileId = driveFile.Id,
-                DownloadUrl = GoogleDriveRestClient.CreatePublicDownloadUrl(driveFile.Id)
+                DownloadUrl = GoogleDriveRestClient.CreatePublicDownloadUrl(driveFile.Id),
+                ThumbnailDriveFileId = thumbnailFile.Id,
+                ThumbnailDownloadUrl = GoogleDriveRestClient.CreatePublicDownloadUrl(thumbnailFile.Id),
+                ThumbnailContentType = PhotoThumbnailGenerator.ContentType
             });
         }
 
@@ -112,5 +128,10 @@ public sealed class GoogleDriveAlbumPublisher
             ".bmp" => "image/bmp",
             _ => "application/octet-stream"
         };
+    }
+
+    private static string CreateThumbnailFileName(string photoId)
+    {
+        return $"{photoId}-thumbnail.jpg";
     }
 }

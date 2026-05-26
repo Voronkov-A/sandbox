@@ -12,7 +12,7 @@
 
   <Grid RowDefinitions="Auto,*,Auto" Background="#F7F7F4">
     <Border Grid.Row="0" Background="#27343B" Padding="20,16">
-      <Grid ColumnDefinitions="*,Auto">
+      <Grid ColumnDefinitions="*,Auto,Auto">
         <StackPanel Spacing="3">
           <TextBlock Text="Picshare" FontSize="24" FontWeight="SemiBold" Foreground="White"/>
           <TextBlock Text="Serverless photo albums on Google Drive" Foreground="#D9E5E8"/>
@@ -22,7 +22,14 @@
                    Foreground="#D9E5E8"
                    VerticalAlignment="Center"
                    TextWrapping="Wrap"
-                   MaxWidth="420"/>
+                   MaxWidth="420"
+                   Margin="0,0,12,0"/>
+        <Button Grid.Column="2"
+                Command="{Binding ShowSettingsPanelCommand}"
+                Padding="12,8"
+                VerticalAlignment="Center">
+          Settings
+        </Button>
       </Grid>
     </Border>
 
@@ -472,7 +479,14 @@
                   <DataTemplate x:DataType="vm:AlbumPhotoViewModel">
                     <Border Width="220" Height="190" Margin="0,0,12,12" Background="White" BorderBrush="#D6D8D1" BorderThickness="1" CornerRadius="6">
                       <Grid RowDefinitions="*,Auto">
-                        <Image Source="{Binding Image}" Stretch="UniformToFill"/>
+                        <Button Click="AlbumPhoto_Click"
+                                Padding="0"
+                                Background="Transparent"
+                                BorderThickness="0"
+                                HorizontalContentAlignment="Stretch"
+                                VerticalContentAlignment="Stretch">
+                          <Image Source="{Binding Image}" Stretch="UniformToFill"/>
+                        </Button>
                         <Border Grid.Row="1" Background="#F2F2EE" Padding="8">
                           <StackPanel Spacing="2">
                             <TextBlock Text="{Binding FileName}" TextTrimming="CharacterEllipsis"/>
@@ -496,5 +510,41 @@
                  Minimum="0"
                  Maximum="1"
                  Value="0"/>
+
+    <Grid Grid.RowSpan="3"
+          Background="#80000000"
+          IsVisible="{Binding IsSettingsPanelVisible}">
+      <Border Background="White"
+              BorderBrush="#D6D8D1"
+              BorderThickness="1"
+              CornerRadius="6"
+              Padding="18"
+              Margin="20"
+              MaxWidth="420"
+              HorizontalAlignment="Stretch"
+              VerticalAlignment="Center">
+        <StackPanel Spacing="12">
+          <TextBlock Text="Settings" FontSize="18" FontWeight="SemiBold"/>
+          <Grid ColumnDefinitions="*,Auto">
+            <TextBlock Text="Downloaded thumbnails and full images"
+                       VerticalAlignment="Center"
+                       TextWrapping="Wrap"
+                       Foreground="#6C756F"/>
+            <Button Grid.Column="1"
+                    Command="{Binding ClearImageCacheCommand}"
+                    Padding="12,8">
+              Clear cache
+            </Button>
+          </Grid>
+          <Grid ColumnDefinitions="*,Auto">
+            <Button Grid.Column="1"
+                    Command="{Binding CloseSettingsPanelCommand}"
+                    Padding="12,8">
+              Close
+            </Button>
+          </Grid>
+        </StackPanel>
+      </Border>
+    </Grid>
   </Grid>
 </UserControl>

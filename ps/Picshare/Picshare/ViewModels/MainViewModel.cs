@@ -84,6 +84,9 @@ public partial class MainViewModel : ViewModelBase
     private bool _isBusy;
 
     [ObservableProperty]
+    private bool _isSettingsPanelVisible;
+
+    [ObservableProperty]
     private AlbumPhotoSourceViewModel? _selectedAlbumPhoto;
 
     public ObservableCollection<AlbumTypeOptionViewModel> AlbumTypes { get; } = new()
@@ -122,6 +125,7 @@ public partial class MainViewModel : ViewModelBase
     private readonly GoogleOAuthClient _oauthClient = new();
     private readonly GoogleOAuthTokenStore _tokenStore = new();
     private readonly PicshareSettingsProvider _settingsProvider = new();
+    private readonly ImageCacheService _imageCache = new();
     private readonly HttpClient _imageHttpClient = new();
     private readonly List<IStorageFolder> _folderDateImportFolders = new();
     private readonly List<DriveFolderLocation> _driveFolderPath = new();
@@ -136,6 +140,42 @@ public partial class MainViewModel : ViewModelBase
         _googleTokenSet = _tokenStore.Load();
         IsGoogleSignedIn = _googleTokenSet is not null;
         ResetCreateInputs();
+    }
+
+    [RelayCommand]
+    private void ShowSettingsPanel()
+    {
+        IsSettingsPanelVisible = true;
+    }
+
+    [RelayCommand]
+    private void CloseSettingsPanel()
+    {
+        IsSettingsPanelVisible = false;
+    }
+
+    [RelayCommand]
+    private async Task ClearImageCacheAsync()
+    {
+        try
+        {
+            IsBusy = true;
+            foreach (var photo in Photos)
+            {
+                photo.ReleaseCachedImage();
+            }
+
+            await _imageCache.ClearAsync();
+            Status = "Image cache cleared.";
+        }
+        catch (Exception ex)
+        {
+            Status = ex.Message;
+        }
+        finally
+        {
+            IsBusy = false;
+        }
     }
 
     [RelayCommand]
@@ -681,10 +721,20 @@ public partial class MainViewModel : ViewModelBase
 
         foreach (var photo in manifest.Photos)
         {
-            Photos.Add(new AlbumPhotoViewModel(photo.FileName, photo.DownloadUrl));
+            Photos.Add(new AlbumPhotoViewModel(
+                manifest.AlbumId,
+                photo.Id,
+                photo.FileName,
+                photo.DownloadUrl,
+                photo.ThumbnailDownloadUrl));
         }
 
-        await Task.WhenAll(Photos.Select(photo => photo.LoadAsync(_imageHttpClient, CancellationToken.None)));
+        await Task.WhenAll(Photos.Select(photo => photo.LoadThumbnailAsync(_imageCache, _imageHttpClient, CancellationToken.None)));
+    }
+
+    public async Task LoadFullPhotoAsync(AlbumPhotoViewModel photo)
+    {
+        await photo.LoadFullImageAsync(_imageCache, _imageHttpClient, CancellationToken.None);
     }
 
     partial void OnSelectedAlbumTypeChanged(AlbumTypeOptionViewModel? value)
