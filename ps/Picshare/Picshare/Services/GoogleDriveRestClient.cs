@@ -28,7 +28,7 @@ public sealed class GoogleDriveRestClient
             metadata["parents"] = new[] { parentFolderId };
         }
 
-        using var request = CreateJsonRequest(HttpMethod.Post, "https://www.googleapis.com/drive/v3/files?fields=id,name,webViewLink", metadata);
+        using var request = CreateJsonRequest(HttpMethod.Post, "https://www.googleapis.com/drive/v3/files?fields=id,name,webViewLink,modifiedTime", metadata);
         return await SendForDriveFileAsync(request, cancellationToken);
     }
 
@@ -54,7 +54,7 @@ public sealed class GoogleDriveRestClient
 
         using var request = new HttpRequestMessage(
             HttpMethod.Post,
-            "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink,webContentLink")
+            "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink,webContentLink,modifiedTime")
         {
             Content = multipart
         };
@@ -90,7 +90,7 @@ public sealed class GoogleDriveRestClient
         var url =
             "https://www.googleapis.com/drive/v3/files" +
             $"?q={Uri.EscapeDataString(query)}" +
-            "&fields=nextPageToken,files(id,name,mimeType,capabilities/canAddChildren)" +
+            "&fields=nextPageToken,files(id,name,mimeType,modifiedTime,capabilities/canAddChildren)" +
             "&orderBy=name" +
             $"&pageSize={pageSize}" +
             "&supportsAllDrives=true" +
@@ -107,6 +107,60 @@ public sealed class GoogleDriveRestClient
 
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
         return await JsonSerializer.DeserializeAsync<DriveItemPage>(stream, JsonOptions, cancellationToken) ?? new DriveItemPage();
+    }
+
+    public async Task<DriveItemInfo?> FindChildByNameAsync(
+        string parentFolderId,
+        string name,
+        string? mimeType,
+        CancellationToken cancellationToken)
+    {
+        var query = $"'{parentFolderId}' in parents and name = '{EscapeDriveQueryValue(name)}' and trashed = false";
+        if (!string.IsNullOrWhiteSpace(mimeType))
+        {
+            query += $" and mimeType = '{EscapeDriveQueryValue(mimeType)}'";
+        }
+
+        var url =
+            "https://www.googleapis.com/drive/v3/files" +
+            $"?q={Uri.EscapeDataString(query)}" +
+            "&fields=files(id,name,mimeType,modifiedTime,capabilities/canAddChildren)" +
+            "&pageSize=1" +
+            "&supportsAllDrives=true" +
+            "&includeItemsFromAllDrives=true";
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
+        using var response = await _httpClient.SendAsync(request, cancellationToken);
+        await EnsureSuccessAsync(response, cancellationToken);
+
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        var page = await JsonSerializer.DeserializeAsync<DriveItemPage>(stream, JsonOptions, cancellationToken) ?? new DriveItemPage();
+        return page.Files.FirstOrDefault();
+    }
+
+    public async Task<DriveFileInfo> GetFileMetadataAsync(string fileId, CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(
+            HttpMethod.Get,
+            $"https://www.googleapis.com/drive/v3/files/{Uri.EscapeDataString(fileId)}?fields=id,name,webViewLink,webContentLink,modifiedTime&supportsAllDrives=true");
+
+        return await SendForDriveFileAsync(request, cancellationToken);
+    }
+
+    public async Task<Stream> DownloadFileAsync(string fileId, CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(
+            HttpMethod.Get,
+            $"https://www.googleapis.com/drive/v3/files/{Uri.EscapeDataString(fileId)}?alt=media&supportsAllDrives=true");
+
+        using var response = await _httpClient.SendAsync(request, cancellationToken);
+        await EnsureSuccessAsync(response, cancellationToken);
+
+        var memoryStream = new MemoryStream();
+        await using var responseStream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        await responseStream.CopyToAsync(memoryStream, cancellationToken);
+        memoryStream.Position = 0;
+        return memoryStream;
     }
 
     public async Task UpdateFileContentAsync(
@@ -141,6 +195,11 @@ public sealed class GoogleDriveRestClient
         };
     }
 
+    private static string EscapeDriveQueryValue(string value)
+    {
+        return value.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("'", "\\'", StringComparison.Ordinal);
+    }
+
     private async Task<DriveFileInfo> SendForDriveFileAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         using var response = await _httpClient.SendAsync(request, cancellationToken);
@@ -172,6 +231,8 @@ public sealed record DriveFileInfo
     public string? WebViewLink { get; init; }
 
     public string? WebContentLink { get; init; }
+
+    public DateTimeOffset? ModifiedTime { get; init; }
 }
 
 public sealed record DriveItemPage
@@ -188,6 +249,8 @@ public sealed record DriveItemInfo
     public required string Name { get; init; }
 
     public required string MimeType { get; init; }
+
+    public DateTimeOffset? ModifiedTime { get; init; }
 
     public DriveItemCapabilities? Capabilities { get; init; }
 }

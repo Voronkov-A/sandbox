@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform.Storage;
+using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Picshare.Models;
@@ -101,10 +102,37 @@ public partial class MainViewModel : ViewModelBase
     private Bitmap? _photoViewerImage;
 
     [ObservableProperty]
+    private bool _isPhotoViewerActionsVisible = true;
+
+    [ObservableProperty]
     private bool _isGoogleAuthorizationRequired;
 
     [ObservableProperty]
     private string _googleAuthorizationMessage = "";
+
+    [ObservableProperty]
+    private bool _isFeedbackConflictNoticeVisible;
+
+    [ObservableProperty]
+    private string _feedbackConflictMessage = "";
+
+    [ObservableProperty]
+    private bool _canMarkCurrentPhotoUncategorized;
+
+    [ObservableProperty]
+    private bool _canMarkCurrentPhotoNice;
+
+    [ObservableProperty]
+    private bool _canMarkCurrentPhotoOk;
+
+    [ObservableProperty]
+    private bool _canMarkCurrentPhotoTrash;
+
+    [ObservableProperty]
+    private bool _canShowCurrentPhotoTrashAction;
+
+    [ObservableProperty]
+    private bool _canNavigatePhotoViewerCategory;
 
     [ObservableProperty]
     private AlbumPhotoSourceViewModel? _selectedAlbumPhoto;
@@ -141,7 +169,21 @@ public partial class MainViewModel : ViewModelBase
 
     public ObservableCollection<AlbumPhotoViewModel> Photos { get; } = new();
 
-    public ObservableCollection<AlbumPhotoRowViewModel> PhotoRows { get; } = new();
+    public ObservableCollection<AlbumPhotoRowViewModel> UncategorizedPhotoRows { get; } = new();
+
+    public ObservableCollection<AlbumPhotoRowViewModel> NicePhotoRows { get; } = new();
+
+    public ObservableCollection<AlbumPhotoRowViewModel> OkPhotoRows { get; } = new();
+
+    public ObservableCollection<AlbumPhotoRowViewModel> TrashPhotoRows { get; } = new();
+
+    public string UncategorizedTabHeader => $"Uncategorized ({Photos.Count(photo => string.IsNullOrWhiteSpace(photo.Category))})";
+
+    public string NiceTabHeader => $"Nice ({Photos.Count(photo => string.Equals(photo.Category, "nice", StringComparison.Ordinal))})";
+
+    public string OkTabHeader => $"Ok ({Photos.Count(photo => string.Equals(photo.Category, "ok", StringComparison.Ordinal))})";
+
+    public string TrashTabHeader => $"Trash ({Photos.Count(photo => string.Equals(photo.Category, "trash", StringComparison.Ordinal))})";
 
     private readonly GoogleDriveAlbumPublisher _publisher = new();
     private readonly AlbumLoader _albumLoader = new();
@@ -149,6 +191,7 @@ public partial class MainViewModel : ViewModelBase
     private readonly GoogleOAuthClient _oauthClient = new();
     private readonly GoogleUserInfoClient _googleUserInfoClient = new();
     private readonly GoogleOAuthTokenStore _tokenStore = new();
+    private readonly ReviewerFeedbackService _reviewerFeedbackService = new();
     private readonly PicshareSettingsProvider _settingsProvider = new();
     private readonly ImageCacheService _imageCache = new();
     private readonly HttpClient _imageHttpClient = new();
@@ -157,8 +200,13 @@ public partial class MainViewModel : ViewModelBase
     private GoogleOAuthTokenSet? _googleTokenSet;
     private CancellationTokenSource? _googleSignInCancellation;
     private CancellationTokenSource? _photoViewerCancellation;
+    private CancellationTokenSource? _feedbackSyncCancellation;
     private AlbumManifest? _pendingGoogleAuthorizationManifest;
     private AlbumPhotoViewModel? _selectedViewedPhoto;
+    private string _selectedViewedPhotoSourceCategory = "";
+    private ReviewerFeedbackSession? _feedbackSession;
+    private ReviewerFeedbackDatabase? _feedbackDatabase;
+    private readonly SemaphoreSlim _feedbackSyncGate = new(1);
     private string? _driveNextPageToken;
 
     public bool HasMoreDriveItems => !string.IsNullOrWhiteSpace(_driveNextPageToken);
@@ -168,6 +216,49 @@ public partial class MainViewModel : ViewModelBase
         _googleTokenSet = _tokenStore.Load();
         IsGoogleSignedIn = _googleTokenSet is not null;
         ResetCreateInputs();
+    }
+
+    [RelayCommand]
+    private void DismissFeedbackConflictNotice()
+    {
+        IsFeedbackConflictNoticeVisible = false;
+        FeedbackConflictMessage = "";
+    }
+
+    [RelayCommand]
+    private async Task MarkCurrentPhotoUncategorizedAsync()
+    {
+        await SetCurrentPhotoCategoryAsync("");
+    }
+
+    [RelayCommand]
+    private async Task MarkCurrentPhotoNiceAsync()
+    {
+        await SetCurrentPhotoCategoryAsync("nice");
+    }
+
+    [RelayCommand]
+    private async Task MarkCurrentPhotoOkAsync()
+    {
+        await SetCurrentPhotoCategoryAsync("ok");
+    }
+
+    [RelayCommand]
+    private async Task MarkCurrentPhotoTrashAsync()
+    {
+        await SetCurrentPhotoCategoryAsync("trash");
+    }
+
+    [RelayCommand]
+    private async Task ShowPreviousPhotoInCategoryAsync()
+    {
+        await MovePhotoViewerInCategoryAsync(-1);
+    }
+
+    [RelayCommand]
+    private async Task ShowNextPhotoInCategoryAsync()
+    {
+        await MovePhotoViewerInCategoryAsync(1);
     }
 
     [RelayCommand]
@@ -182,6 +273,12 @@ public partial class MainViewModel : ViewModelBase
         IsPhotoViewerVisible = false;
     }
 
+    [RelayCommand]
+    private void TogglePhotoViewerActions()
+    {
+        IsPhotoViewerActionsVisible = !IsPhotoViewerActionsVisible;
+    }
+
     public async Task OpenPhotoViewerAsync(AlbumPhotoViewModel photo)
     {
         _photoViewerCancellation?.Cancel();
@@ -193,6 +290,7 @@ public partial class MainViewModel : ViewModelBase
         {
             SelectViewedPhoto(photo);
             IsPhotoViewerVisible = true;
+            IsPhotoViewerActionsVisible = true;
             PhotoViewerTitle = photo.FileName;
             PhotoViewerStatus = "Loading";
             PhotoViewerImage = null;
@@ -824,10 +922,13 @@ public partial class MainViewModel : ViewModelBase
 
             if (await RequiresGoogleAuthorizationPromptAsync(manifest))
             {
+                StopFeedbackSync();
+                _feedbackSession = null;
+                _feedbackDatabase = null;
                 _pendingGoogleAuthorizationManifest = manifest;
                 CurrentAlbumTitle = manifest.Title;
                 Photos.Clear();
-                PhotoRows.Clear();
+                ClearCategoryRows();
                 SelectViewedPhoto(null);
                 ClosePhotoViewer();
                 GoogleAuthorizationMessage = "Sign in with Google to open this Google Drive album.";
@@ -849,11 +950,15 @@ public partial class MainViewModel : ViewModelBase
         }
     }
 
-    private Task LoadAlbumAsync(AlbumManifest manifest)
+    private async Task LoadAlbumAsync(AlbumManifest manifest)
     {
+        StopFeedbackSync();
+        _feedbackSession = null;
+        _feedbackDatabase = null;
+
         CurrentAlbumTitle = manifest.Title;
         Photos.Clear();
-        PhotoRows.Clear();
+        ClearCategoryRows();
         SelectViewedPhoto(null);
         ClosePhotoViewer();
 
@@ -867,12 +972,12 @@ public partial class MainViewModel : ViewModelBase
                 photo.ThumbnailDownloadUrl));
         }
 
-        foreach (var row in Photos.Chunk(PhotosPerRow))
+        if (UsesGoogleDriveBackend(manifest))
         {
-            PhotoRows.Add(new AlbumPhotoRowViewModel(row));
+            await LoadReviewerFeedbackAsync(manifest);
         }
 
-        return Task.CompletedTask;
+        ApplyFeedbackDatabaseToPhotos();
     }
 
     public async Task StartPhotoViewportLoadAsync(AlbumPhotoViewModel photo)
@@ -883,6 +988,49 @@ public partial class MainViewModel : ViewModelBase
     public void StopPhotoViewportLoad(AlbumPhotoViewModel photo)
     {
         photo.StopViewportLoad();
+    }
+
+    private async Task SetCurrentPhotoCategoryAsync(string category)
+    {
+        if (_selectedViewedPhoto is null)
+        {
+            return;
+        }
+
+        var changedPhoto = _selectedViewedPhoto;
+        var sourceCategory = _selectedViewedPhotoSourceCategory;
+        var previousCategory = _selectedViewedPhoto.Category;
+        _selectedViewedPhoto.Category = category;
+
+        if (_feedbackSession is not null && _feedbackDatabase is not null)
+        {
+            if (string.IsNullOrWhiteSpace(category))
+            {
+                await _reviewerFeedbackService.RemoveLocalDecisionAsync(
+                    _feedbackSession,
+                    _feedbackDatabase,
+                    _selectedViewedPhoto.PhotoId,
+                    CancellationToken.None);
+            }
+            else
+            {
+                await _reviewerFeedbackService.SaveLocalDecisionAsync(
+                    _feedbackSession,
+                    _feedbackDatabase,
+                    _selectedViewedPhoto.PhotoId,
+                    category,
+                    CancellationToken.None);
+            }
+            _ = SyncFeedbackAsync();
+        }
+
+        RebuildCategoryRows();
+        UpdateCurrentPhotoActionVisibility();
+        Status = string.IsNullOrWhiteSpace(category)
+            ? $"{changedPhoto.FileName} moved to uncategorized."
+            : $"{changedPhoto.FileName} marked as {category}.";
+
+        await AdvanceFullImageViewerAfterCategoryChangeAsync(sourceCategory, changedPhoto);
     }
 
     partial void OnPhotoViewerImageChanging(Bitmap? value)
@@ -935,6 +1083,155 @@ public partial class MainViewModel : ViewModelBase
         Status = $"Opened {manifest.Title} with {manifest.Photos.Count} photo(s).";
     }
 
+    private async Task LoadReviewerFeedbackAsync(AlbumManifest manifest)
+    {
+        if (_googleTokenSet is null)
+        {
+            return;
+        }
+
+        var accessToken = await GetGoogleAccessTokenAsync(CancellationToken.None);
+        var result = await _reviewerFeedbackService.LoadAsync(
+            manifest,
+            _googleTokenSet,
+            accessToken,
+            CancellationToken.None);
+
+        _feedbackSession = result.Session;
+        _feedbackDatabase = result.Database;
+
+        if (result.ConcurrentRemoteUpdate)
+        {
+            ShowFeedbackConflictNotice();
+        }
+
+        StartFeedbackSync();
+    }
+
+    private void ApplyFeedbackDatabaseToPhotos()
+    {
+        foreach (var photo in Photos)
+        {
+            photo.Category = _feedbackDatabase is not null &&
+                _feedbackDatabase.PhotoCategories.TryGetValue(photo.PhotoId, out var category)
+                    ? category
+                    : "";
+        }
+
+        RebuildCategoryRows();
+    }
+
+    private void RebuildCategoryRows()
+    {
+        ClearCategoryRows();
+        AddRows(UncategorizedPhotoRows, Photos.Where(photo => string.IsNullOrWhiteSpace(photo.Category)));
+        AddRows(NicePhotoRows, Photos.Where(photo => string.Equals(photo.Category, "nice", StringComparison.Ordinal)));
+        AddRows(OkPhotoRows, Photos.Where(photo => string.Equals(photo.Category, "ok", StringComparison.Ordinal)));
+        AddRows(TrashPhotoRows, Photos.Where(photo => string.Equals(photo.Category, "trash", StringComparison.Ordinal)));
+        OnPropertyChanged(nameof(UncategorizedTabHeader));
+        OnPropertyChanged(nameof(NiceTabHeader));
+        OnPropertyChanged(nameof(OkTabHeader));
+        OnPropertyChanged(nameof(TrashTabHeader));
+    }
+
+    private void ClearCategoryRows()
+    {
+        UncategorizedPhotoRows.Clear();
+        NicePhotoRows.Clear();
+        OkPhotoRows.Clear();
+        TrashPhotoRows.Clear();
+    }
+
+    private static void AddRows(ObservableCollection<AlbumPhotoRowViewModel> rows, IEnumerable<AlbumPhotoViewModel> photos)
+    {
+        foreach (var row in photos.Chunk(PhotosPerRow))
+        {
+            rows.Add(new AlbumPhotoRowViewModel(row));
+        }
+    }
+
+    private void StartFeedbackSync()
+    {
+        StopFeedbackSync();
+        _feedbackSyncCancellation = new CancellationTokenSource();
+        _ = RunFeedbackSyncLoopAsync(_feedbackSyncCancellation.Token);
+    }
+
+    private void StopFeedbackSync()
+    {
+        _feedbackSyncCancellation?.Cancel();
+        _feedbackSyncCancellation?.Dispose();
+        _feedbackSyncCancellation = null;
+    }
+
+    private async Task RunFeedbackSyncLoopAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(30));
+            while (await timer.WaitForNextTickAsync(cancellationToken))
+            {
+                await SyncFeedbackAsync(cancellationToken);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private async Task SyncFeedbackAsync(CancellationToken cancellationToken = default)
+    {
+        if (_feedbackSession is null || _feedbackDatabase is null || _googleTokenSet is null)
+        {
+            return;
+        }
+
+        if (!await _feedbackSyncGate.WaitAsync(0, cancellationToken))
+        {
+            return;
+        }
+
+        try
+        {
+            var accessToken = await GetGoogleAccessTokenAsync(cancellationToken);
+            var result = await _reviewerFeedbackService.SyncAsync(
+                _feedbackSession,
+                _feedbackDatabase,
+                accessToken,
+                cancellationToken);
+
+            if (result.RemoteWon)
+            {
+                _feedbackDatabase = result.Database;
+                await Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    ApplyFeedbackDatabaseToPhotos();
+                    if (result.LocalDirtyBeforeSync)
+                    {
+                        ShowFeedbackConflictNotice();
+                    }
+                });
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            await Dispatcher.UIThread.InvokeAsync(() => Status = $"Feedback sync failed: {ex.Message}");
+        }
+        finally
+        {
+            _feedbackSyncGate.Release();
+        }
+    }
+
+    private void ShowFeedbackConflictNotice()
+    {
+        FeedbackConflictMessage = "The feedback has been updated concurrently. Remote feedback was loaded.";
+        IsFeedbackConflictNoticeVisible = true;
+    }
+
     private void SelectViewedPhoto(AlbumPhotoViewModel? photo)
     {
         if (_selectedViewedPhoto is not null)
@@ -943,11 +1240,78 @@ public partial class MainViewModel : ViewModelBase
         }
 
         _selectedViewedPhoto = photo;
+        _selectedViewedPhotoSourceCategory = photo?.Category ?? "";
 
         if (_selectedViewedPhoto is not null)
         {
             _selectedViewedPhoto.IsSelectedForViewing = true;
         }
+
+        UpdateCurrentPhotoActionVisibility();
+    }
+
+    private void UpdateCurrentPhotoActionVisibility()
+    {
+        var category = _selectedViewedPhoto?.Category ?? "";
+        CanMarkCurrentPhotoUncategorized = !string.IsNullOrWhiteSpace(category);
+        CanMarkCurrentPhotoNice = !string.Equals(category, "nice", StringComparison.Ordinal);
+        CanMarkCurrentPhotoOk = !string.Equals(category, "ok", StringComparison.Ordinal);
+        CanMarkCurrentPhotoTrash = !string.Equals(category, "trash", StringComparison.Ordinal);
+        CanShowCurrentPhotoTrashAction = !string.Equals(category, "trash", StringComparison.Ordinal);
+        CanNavigatePhotoViewerCategory = _selectedViewedPhoto is not null && GetPhotosForCategory(category).Any();
+    }
+
+    private async Task MovePhotoViewerInCategoryAsync(int offset)
+    {
+        if (_selectedViewedPhoto is null)
+        {
+            return;
+        }
+
+        var categoryPhotos = GetPhotosForCategory(_selectedViewedPhotoSourceCategory).ToList();
+        if (categoryPhotos.Count == 0)
+        {
+            ClosePhotoViewer();
+            return;
+        }
+
+        var currentIndex = categoryPhotos.FindIndex(photo => ReferenceEquals(photo, _selectedViewedPhoto));
+        if (currentIndex < 0)
+        {
+            currentIndex = 0;
+        }
+
+        var nextIndex = (currentIndex + offset) % categoryPhotos.Count;
+        if (nextIndex < 0)
+        {
+            nextIndex += categoryPhotos.Count;
+        }
+
+        await OpenPhotoViewerAsync(categoryPhotos[nextIndex]);
+    }
+
+    private async Task AdvanceFullImageViewerAfterCategoryChangeAsync(string sourceCategory, AlbumPhotoViewModel changedPhoto)
+    {
+        var sourcePhotos = GetPhotosForCategory(sourceCategory).ToList();
+        if (sourcePhotos.Count == 0)
+        {
+            ClosePhotoViewer();
+            return;
+        }
+
+        var changedIndex = sourcePhotos.FindIndex(photo => ReferenceEquals(photo, changedPhoto));
+        var nextIndex = changedIndex >= 0 && changedIndex < sourcePhotos.Count
+            ? changedIndex % sourcePhotos.Count
+            : 0;
+
+        await OpenPhotoViewerAsync(sourcePhotos[nextIndex]);
+    }
+
+    private IEnumerable<AlbumPhotoViewModel> GetPhotosForCategory(string category)
+    {
+        return string.IsNullOrWhiteSpace(category)
+            ? Photos.Where(photo => string.IsNullOrWhiteSpace(photo.Category))
+            : Photos.Where(photo => string.Equals(photo.Category, category, StringComparison.Ordinal));
     }
 
     private static bool UsesGoogleDriveBackend(AlbumManifest manifest)

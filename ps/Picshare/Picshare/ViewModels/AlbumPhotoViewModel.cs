@@ -57,6 +57,9 @@ public partial class AlbumPhotoViewModel : ObservableObject
     [ObservableProperty]
     private bool _isSelectedForViewing;
 
+    [ObservableProperty]
+    private string _category = "";
+
     public IBrush CardBorderBrush => IsSelectedForViewing
         ? Brushes.DeepSkyBlue
         : new SolidColorBrush(Color.Parse("#D6D8D1"));

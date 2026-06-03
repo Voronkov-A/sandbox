@@ -10,6 +10,48 @@
     <vm:MainViewModel />
   </Design.DataContext>
 
+  <UserControl.Resources>
+    <DataTemplate x:Key="AlbumPhotoRowTemplate" x:DataType="vm:AlbumPhotoRowViewModel">
+      <ItemsControl ItemsSource="{Binding Photos}">
+        <ItemsControl.ItemsPanel>
+          <ItemsPanelTemplate>
+            <StackPanel Orientation="Horizontal"/>
+          </ItemsPanelTemplate>
+        </ItemsControl.ItemsPanel>
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="vm:AlbumPhotoViewModel">
+            <Border Width="220"
+                    Height="190"
+                    Margin="0,0,12,12"
+                    Background="White"
+                    BorderBrush="{Binding CardBorderBrush}"
+                    BorderThickness="{Binding CardBorderThickness}"
+                    CornerRadius="6"
+                    Loaded="AlbumPhoto_Loaded"
+                    Unloaded="AlbumPhoto_Unloaded">
+              <Grid RowDefinitions="150,40">
+                <Button Click="AlbumPhoto_Click"
+                        Padding="0"
+                        Background="Transparent"
+                        BorderThickness="0"
+                        HorizontalContentAlignment="Stretch"
+                        VerticalContentAlignment="Stretch">
+                  <Image Source="{Binding Image}" Stretch="UniformToFill"/>
+                </Button>
+                <Border Grid.Row="1" Background="#F2F2EE" Padding="8">
+                  <StackPanel Spacing="2">
+                    <TextBlock Text="{Binding FileName}" TextTrimming="CharacterEllipsis"/>
+                    <TextBlock Text="{Binding Status}" FontSize="11" Foreground="#7B4B39" TextTrimming="CharacterEllipsis"/>
+                  </StackPanel>
+                </Border>
+              </Grid>
+            </Border>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+    </DataTemplate>
+  </UserControl.Resources>
+
   <Grid RowDefinitions="Auto,*,Auto" Background="#F7F7F4">
     <Border Grid.Row="0" Background="#27343B" Padding="20,16">
       <Grid ColumnDefinitions="*,Auto,Auto">
@@ -468,58 +510,60 @@
 
           <Grid Grid.Row="1" RowDefinitions="Auto,*" Margin="0,16,0,0">
               <TextBlock Grid.Row="0" Text="{Binding CurrentAlbumTitle}" FontSize="20" FontWeight="SemiBold" Margin="0,0,0,14"/>
-              <ListBox ItemsSource="{Binding PhotoRows}"
-                       Grid.Row="1"
-                       Background="Transparent"
-                       BorderThickness="0"
-                       ScrollViewer.HorizontalScrollBarVisibility="Disabled">
-                <ListBox.ItemsPanel>
-                  <ItemsPanelTemplate>
-                    <VirtualizingStackPanel/>
-                  </ItemsPanelTemplate>
-                </ListBox.ItemsPanel>
-                <ListBox.ItemTemplate>
-                  <DataTemplate x:DataType="vm:AlbumPhotoRowViewModel">
-                    <ItemsControl ItemsSource="{Binding Photos}">
-                      <ItemsControl.ItemsPanel>
-                        <ItemsPanelTemplate>
-                          <StackPanel Orientation="Horizontal"/>
-                        </ItemsPanelTemplate>
-                      </ItemsControl.ItemsPanel>
-                      <ItemsControl.ItemTemplate>
-                        <DataTemplate x:DataType="vm:AlbumPhotoViewModel">
-                          <Border Width="220"
-                                  Height="190"
-                                  Margin="0,0,12,12"
-                                  Background="White"
-                                  BorderBrush="{Binding CardBorderBrush}"
-                                  BorderThickness="{Binding CardBorderThickness}"
-                                  CornerRadius="6"
-                                  Loaded="AlbumPhoto_Loaded"
-                                  Unloaded="AlbumPhoto_Unloaded">
-                            <Grid RowDefinitions="150,40">
-                              <Button Click="AlbumPhoto_Click"
-                                      Padding="0"
-                                      Background="Transparent"
-                                      BorderThickness="0"
-                                      HorizontalContentAlignment="Stretch"
-                                      VerticalContentAlignment="Stretch">
-                                <Image Source="{Binding Image}" Stretch="UniformToFill"/>
-                              </Button>
-                              <Border Grid.Row="1" Background="#F2F2EE" Padding="8">
-                                <StackPanel Spacing="2">
-                                  <TextBlock Text="{Binding FileName}" TextTrimming="CharacterEllipsis"/>
-                                  <TextBlock Text="{Binding Status}" FontSize="11" Foreground="#7B4B39" TextTrimming="CharacterEllipsis"/>
-                                </StackPanel>
-                              </Border>
-                            </Grid>
-                          </Border>
-                        </DataTemplate>
-                      </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-                  </DataTemplate>
-                </ListBox.ItemTemplate>
-              </ListBox>
+              <TabControl Grid.Row="1">
+                <TabItem Header="{Binding UncategorizedTabHeader}">
+                  <ListBox ItemsSource="{Binding UncategorizedPhotoRows}"
+                           Background="Transparent"
+                           BorderThickness="0"
+                           ItemTemplate="{StaticResource AlbumPhotoRowTemplate}"
+                           ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                    <ListBox.ItemsPanel>
+                      <ItemsPanelTemplate>
+                        <VirtualizingStackPanel/>
+                      </ItemsPanelTemplate>
+                    </ListBox.ItemsPanel>
+                  </ListBox>
+                </TabItem>
+                <TabItem Header="{Binding NiceTabHeader}">
+                  <ListBox ItemsSource="{Binding NicePhotoRows}"
+                           Background="Transparent"
+                           BorderThickness="0"
+                           ItemTemplate="{StaticResource AlbumPhotoRowTemplate}"
+                           ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                    <ListBox.ItemsPanel>
+                      <ItemsPanelTemplate>
+                        <VirtualizingStackPanel/>
+                      </ItemsPanelTemplate>
+                    </ListBox.ItemsPanel>
+                  </ListBox>
+                </TabItem>
+                <TabItem Header="{Binding OkTabHeader}">
+                  <ListBox ItemsSource="{Binding OkPhotoRows}"
+                           Background="Transparent"
+                           BorderThickness="0"
+                           ItemTemplate="{StaticResource AlbumPhotoRowTemplate}"
+                           ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                    <ListBox.ItemsPanel>
+                      <ItemsPanelTemplate>
+                        <VirtualizingStackPanel/>
+                      </ItemsPanelTemplate>
+                    </ListBox.ItemsPanel>
+                  </ListBox>
+                </TabItem>
+                <TabItem Header="{Binding TrashTabHeader}">
+                  <ListBox ItemsSource="{Binding TrashPhotoRows}"
+                           Background="Transparent"
+                           BorderThickness="0"
+                           ItemTemplate="{StaticResource AlbumPhotoRowTemplate}"
+                           ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                    <ListBox.ItemsPanel>
+                      <ItemsPanelTemplate>
+                        <VirtualizingStackPanel/>
+                      </ItemsPanelTemplate>
+                    </ListBox.ItemsPanel>
+                  </ListBox>
+                </TabItem>
+              </TabControl>
           </Grid>
         </Grid>
       </TabItem>
@@ -621,25 +665,57 @@
     </Grid>
 
     <Grid Grid.RowSpan="3"
+          Background="#80000000"
+          IsVisible="{Binding IsFeedbackConflictNoticeVisible}">
+      <Border Background="White"
+              BorderBrush="#D6D8D1"
+              BorderThickness="1"
+              CornerRadius="6"
+              Padding="18"
+              Margin="20"
+              MaxWidth="460"
+              HorizontalAlignment="Stretch"
+              VerticalAlignment="Center">
+        <StackPanel Spacing="12">
+          <TextBlock Text="Feedback updated" FontSize="18" FontWeight="SemiBold"/>
+          <TextBlock Text="{Binding FeedbackConflictMessage}" TextWrapping="Wrap"/>
+          <Grid ColumnDefinitions="*,Auto">
+            <Button Grid.Column="1"
+                    Command="{Binding DismissFeedbackConflictNoticeCommand}"
+                    Padding="12,8">
+              OK
+            </Button>
+          </Grid>
+        </StackPanel>
+      </Border>
+    </Grid>
+
+    <Grid Grid.RowSpan="3"
           Background="#F8000000"
           IsVisible="{Binding IsPhotoViewerVisible}">
       <Grid RowDefinitions="Auto,*">
         <Border Grid.Row="0"
                 Background="#CC000000"
                 Padding="14,10">
-          <Grid ColumnDefinitions="*,Auto">
-            <StackPanel Spacing="2" VerticalAlignment="Center">
+          <Grid ColumnDefinitions="44,*,Auto">
+            <StackPanel Grid.Column="1"
+                        Spacing="2"
+                        VerticalAlignment="Center"
+                        HorizontalAlignment="Center"
+                        MaxWidth="520">
               <TextBlock Text="{Binding PhotoViewerTitle}"
                          Foreground="White"
                          FontSize="16"
                          FontWeight="SemiBold"
+                         TextAlignment="Center"
                          TextTrimming="CharacterEllipsis"/>
               <TextBlock Text="{Binding PhotoViewerStatus}"
                          Foreground="#D9E5E8"
                          FontSize="12"
+                         TextAlignment="Center"
                          TextTrimming="CharacterEllipsis"/>
             </StackPanel>
-          <Button Grid.Column="1"
+          <Button Grid.Column="2"
                   Command="{Binding ClosePhotoViewerCommand}"
                   Width="44"
                   Height="44"
@@ -667,15 +743,132 @@
                 PointerMoved="PhotoViewer_PointerMoved"
                 PointerReleased="PhotoViewer_PointerReleased"
                 PointerWheelChanged="PhotoViewer_PointerWheelChanged">
-          <ScrollViewer x:Name="PhotoViewerScrollViewer"
-                        HorizontalScrollBarVisibility="Auto"
-                        VerticalScrollBarVisibility="Auto">
-            <Image x:Name="PhotoViewerImageControl"
-                   Source="{Binding PhotoViewerImage}"
-                   Stretch="Uniform"
-                   HorizontalAlignment="Center"
-                   VerticalAlignment="Center"/>
-          </ScrollViewer>
+          <Grid>
+            <ScrollViewer x:Name="PhotoViewerScrollViewer"
+                          HorizontalScrollBarVisibility="Auto"
+                          VerticalScrollBarVisibility="Auto">
+              <Image x:Name="PhotoViewerImageControl"
+                     Source="{Binding PhotoViewerImage}"
+                     Stretch="Uniform"
+                     HorizontalAlignment="Center"
+                     VerticalAlignment="Center"/>
+            </ScrollViewer>
+            <Border Background="#99000000"
+                    CornerRadius="6"
+                    Padding="10"
+                    Margin="0,0,0,18"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Bottom"
+                    IsVisible="{Binding IsPhotoViewerActionsVisible}">
+              <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,Auto">
+                <Button Padding="14,10"
+                        Margin="0,0,8,0"
+                        Command="{Binding ShowPreviousPhotoInCategoryCommand}"
+                        IsEnabled="{Binding CanNavigatePhotoViewerCategory}"
+                        Background="White"
+                        Foreground="Black"
+                        BorderBrush="Black"
+                        BorderThickness="2">
+                  <Grid>
+                    <TextBlock Text="&lt;" FontWeight="SemiBold" Foreground="White" Margin="-1,-1,0,0"/>
+                    <TextBlock Text="&lt;" FontWeight="SemiBold" Foreground="White" Margin="1,-1,0,0"/>
+                    <TextBlock Text="&lt;" FontWeight="SemiBold" Foreground="White" Margin="-1,1,0,0"/>
+                    <TextBlock Text="&lt;" FontWeight="SemiBold" Foreground="White" Margin="1,1,0,0"/>
+                    <TextBlock Text="&lt;" FontWeight="SemiBold" Foreground="Black"/>
+                  </Grid>
+                </Button>
+                <Button Grid.Column="1"
+                        Padding="14,10"
+                        Margin="0,0,8,0"
+                        Command="{Binding MarkCurrentPhotoUncategorizedCommand}"
+                        IsVisible="{Binding CanMarkCurrentPhotoUncategorized}"
+                        Background="White"
+                        Foreground="Black"
+                        BorderBrush="Black"
+                        BorderThickness="2">
+                  <Grid>
+                    <TextBlock Text="uncategorized 👻" FontWeight="SemiBold" Foreground="White" Margin="-1,-1,0,0"/>
+                    <TextBlock Text="uncategorized 👻" FontWeight="SemiBold" Foreground="White" Margin="1,-1,0,0"/>
+                    <TextBlock Text="uncategorized 👻" FontWeight="SemiBold" Foreground="White" Margin="-1,1,0,0"/>
+                    <TextBlock Text="uncategorized 👻" FontWeight="SemiBold" Foreground="White" Margin="1,1,0,0"/>
+                    <TextBlock Text="uncategorized 👻" FontWeight="SemiBold" Foreground="Black"/>
+                  </Grid>
+                </Button>
+                <Button Grid.Column="2"
+                        Padding="14,10"
+                        Margin="0,0,8,0"
+                        Command="{Binding MarkCurrentPhotoNiceCommand}"
+                        IsVisible="{Binding CanMarkCurrentPhotoNice}"
+                        Background="White"
+                        Foreground="Black"
+                        BorderBrush="Black"
+                        BorderThickness="2">
+                  <Grid>
+                    <TextBlock Text="nice 😍" FontWeight="SemiBold" Foreground="White" Margin="-1,-1,0,0"/>
+                    <TextBlock Text="nice 😍" FontWeight="SemiBold" Foreground="White" Margin="1,-1,0,0"/>
+                    <TextBlock Text="nice 😍" FontWeight="SemiBold" Foreground="White" Margin="-1,1,0,0"/>
+                    <TextBlock Text="nice 😍" FontWeight="SemiBold" Foreground="White" Margin="1,1,0,0"/>
+                    <TextBlock Text="nice 😍" FontWeight="SemiBold" Foreground="Black"/>
+                  </Grid>
+                </Button>
+                <Button Grid.Column="3"
+                        Padding="14,10"
+                        Margin="0,0,8,0"
+                        Command="{Binding MarkCurrentPhotoOkCommand}"
+                        IsVisible="{Binding CanMarkCurrentPhotoOk}"
+                        Background="White"
+                        Foreground="Black"
+                        BorderBrush="Black"
+                        BorderThickness="2">
+                  <Grid>
+                    <TextBlock Text="ok 🗿" FontWeight="SemiBold" Foreground="White" Margin="-1,-1,0,0"/>
+                    <TextBlock Text="ok 🗿" FontWeight="SemiBold" Foreground="White" Margin="1,-1,0,0"/>
+                    <TextBlock Text="ok 🗿" FontWeight="SemiBold" Foreground="White" Margin="-1,1,0,0"/>
+                    <TextBlock Text="ok 🗿" FontWeight="SemiBold" Foreground="White" Margin="1,1,0,0"/>
+                    <TextBlock Text="ok 🗿" FontWeight="SemiBold" Foreground="Black"/>
+                  </Grid>
+                </Button>
+                <Button Grid.Column="4"
+                        Padding="14,10"
+                        Margin="0,0,8,0"
+                        Background="White"
+                        Foreground="Black"
+                        BorderBrush="Black"
+                        BorderThickness="2">
+                  <Grid>
+                    <TextBlock Text="more... ⚙" FontWeight="SemiBold" Foreground="White" Margin="-1,-1,0,0"/>
+                    <TextBlock Text="more... ⚙" FontWeight="SemiBold" Foreground="White" Margin="1,-1,0,0"/>
+                    <TextBlock Text="more... ⚙" FontWeight="SemiBold" Foreground="White" Margin="-1,1,0,0"/>
+                    <TextBlock Text="more... ⚙" FontWeight="SemiBold" Foreground="White" Margin="1,1,0,0"/>
+                    <TextBlock Text="more... ⚙" FontWeight="SemiBold" Foreground="Black"/>
+                  </Grid>
+                  <Button.Flyout>
+                    <MenuFlyout>
+                      <MenuItem Header="trash"
+                                Command="{Binding MarkCurrentPhotoTrashCommand}"
+                                IsVisible="{Binding CanShowCurrentPhotoTrashAction}"/>
+                    </MenuFlyout>
+                  </Button.Flyout>
+                </Button>
+                <Button Grid.Column="5"
+                        Padding="14,10"
+                        Command="{Binding ShowNextPhotoInCategoryCommand}"
+                        IsEnabled="{Binding CanNavigatePhotoViewerCategory}"
+                        Background="White"
+                        Foreground="Black"
+                        BorderBrush="Black"
+                        BorderThickness="2">
+                  <Grid>
+                    <TextBlock Text="&gt;" FontWeight="SemiBold" Foreground="White" Margin="-1,-1,0,0"/>
+                    <TextBlock Text="&gt;" FontWeight="SemiBold" Foreground="White" Margin="1,-1,0,0"/>
+                    <TextBlock Text="&gt;" FontWeight="SemiBold" Foreground="White" Margin="-1,1,0,0"/>
+                    <TextBlock Text="&gt;" FontWeight="SemiBold" Foreground="White" Margin="1,1,0,0"/>
+                    <TextBlock Text="&gt;" FontWeight="SemiBold" Foreground="Black"/>
+                  </Grid>
+                </Button>
+              </Grid>
+            </Border>
+          </Grid>
         </Border>
       </Grid>
     </Grid>

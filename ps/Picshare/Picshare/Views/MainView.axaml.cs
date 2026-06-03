@@ -19,6 +19,10 @@ public partial class MainView : UserControl
     private double _photoViewerZoom = MinimumPhotoViewerZoom;
     private double _pinchStartDistance;
     private double _pinchStartZoom = MinimumPhotoViewerZoom;
+    private bool _photoViewerPointerPressed;
+    private bool _photoViewerPointerMoved;
+    private bool _photoViewerPinchActive;
+    private Point _photoViewerPointerStart;
 
     public MainView()
     {
@@ -202,11 +206,15 @@ public partial class MainView : UserControl
     private void PhotoViewer_PointerPressed(object? sender, PointerPressedEventArgs e)
     {
         _photoViewerPointers[e.Pointer] = e.GetPosition(PhotoViewerViewport);
+        _photoViewerPointerPressed = _photoViewerPointers.Count == 1;
+        _photoViewerPointerStart = e.GetPosition(PhotoViewerViewport);
+        _photoViewerPointerMoved = false;
 
         if (_photoViewerPointers.Count == 2)
         {
             _pinchStartDistance = GetActivePointerDistance();
             _pinchStartZoom = _photoViewerZoom;
+            _photoViewerPinchActive = true;
         }
     }
 
@@ -218,6 +226,7 @@ public partial class MainView : UserControl
         }
 
         _photoViewerPointers[e.Pointer] = e.GetPosition(PhotoViewerViewport);
+        _photoViewerPointerMoved = true;
         if (_photoViewerPointers.Count >= 2 && _pinchStartDistance > 0)
         {
             SetPhotoViewerZoom(_pinchStartZoom * GetActivePointerDistance() / _pinchStartDistance);
@@ -227,6 +236,15 @@ public partial class MainView : UserControl
 
     private void PhotoViewer_PointerReleased(object? sender, PointerReleasedEventArgs e)
     {
+        var endPosition = e.GetPosition(PhotoViewerViewport);
+        var delta = endPosition - _photoViewerPointerStart;
+        var shouldToggleActions = _photoViewerPointerPressed &&
+            !_photoViewerPointerMoved &&
+            !_photoViewerPinchActive &&
+            _photoViewerPointers.Count == 1 &&
+            DataContext is MainViewModel;
+        var swipeDirection = GetPhotoViewerSwipeDirection(delta);
+
         _photoViewerPointers.Remove(e.Pointer);
 
         if (_photoViewerPointers.Count == 2)
@@ -237,6 +255,23 @@ public partial class MainView : UserControl
         else if (_photoViewerPointers.Count < 2)
         {
             _pinchStartDistance = 0;
+            _photoViewerPinchActive = false;
+        }
+
+        if (shouldToggleActions && DataContext is MainViewModel viewModel)
+        {
+            viewModel.TogglePhotoViewerActionsCommand.Execute(null);
+        }
+        else if (swipeDirection is not 0 && DataContext is MainViewModel swipeViewModel)
+        {
+            if (swipeDirection > 0)
+            {
+                swipeViewModel.ShowPreviousPhotoInCategoryCommand.Execute(null);
+            }
+            else
+            {
+                swipeViewModel.ShowNextPhotoInCategoryCommand.Execute(null);
+            }
         }
     }
 
@@ -289,6 +324,23 @@ public partial class MainView : UserControl
         var x = points[0].X - points[1].X;
         var y = points[0].Y - points[1].Y;
         return Math.Sqrt(x * x + y * y);
+    }
+
+    private int GetPhotoViewerSwipeDirection(Vector delta)
+    {
+        if (_photoViewerZoom > MinimumPhotoViewerZoom || _photoViewerPinchActive)
+        {
+            return 0;
+        }
+
+        var horizontal = Math.Abs(delta.X);
+        var vertical = Math.Abs(delta.Y);
+        if (horizontal < 80 || horizontal < vertical * 1.8)
+        {
+            return 0;
+        }
+
+        return delta.X > 0 ? 1 : -1;
     }
 
     private async Task SignInGoogleAsync(bool loadDriveFoldersAfterSignIn)
