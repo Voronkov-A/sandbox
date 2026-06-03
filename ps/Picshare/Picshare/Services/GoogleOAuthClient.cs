@@ -14,6 +14,9 @@ public sealed class GoogleOAuthClient
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly string[] Scopes =
     {
+        "openid",
+        "email",
+        "profile",
         "https://www.googleapis.com/auth/drive"
     };
 
@@ -317,7 +320,10 @@ public sealed record GoogleOAuthTokenSet(
     string AccessToken,
     string? RefreshToken,
     DateTimeOffset ExpiresAt,
-    string Scope);
+    string Scope,
+    string? UserId = null,
+    string? Email = null,
+    string? DisplayName = null);
 
 internal sealed record GoogleOAuthTokenResponse
 {

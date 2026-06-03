@@ -1,4 +1,6 @@
+using Avalonia;
 using Avalonia.Media.Imaging;
+using Avalonia.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using Picshare.Services;
 
@@ -51,6 +53,17 @@ public partial class AlbumPhotoViewModel : ObservableObject
 
     [ObservableProperty]
     private bool _isFullImageLoaded;
+
+    [ObservableProperty]
+    private bool _isSelectedForViewing;
+
+    public IBrush CardBorderBrush => IsSelectedForViewing
+        ? Brushes.DeepSkyBlue
+        : new SolidColorBrush(Color.Parse("#D6D8D1"));
+
+    public Thickness CardBorderThickness => IsSelectedForViewing
+        ? new Thickness(3)
+        : new Thickness(1);
 
     private CancellationTokenSource? _loadCancellation;
     private bool _isLoading;
@@ -167,5 +180,11 @@ public partial class AlbumPhotoViewModel : ObservableObject
         {
             Image.Dispose();
         }
+    }
+
+    partial void OnIsSelectedForViewingChanged(bool value)
+    {
+        OnPropertyChanged(nameof(CardBorderBrush));
+        OnPropertyChanged(nameof(CardBorderThickness));
     }
 }

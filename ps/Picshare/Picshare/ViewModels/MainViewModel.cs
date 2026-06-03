@@ -101,6 +101,12 @@ public partial class MainViewModel : ViewModelBase
     private Bitmap? _photoViewerImage;
 
     [ObservableProperty]
+    private bool _isGoogleAuthorizationRequired;
+
+    [ObservableProperty]
+    private string _googleAuthorizationMessage = "";
+
+    [ObservableProperty]
     private AlbumPhotoSourceViewModel? _selectedAlbumPhoto;
 
     public ObservableCollection<AlbumTypeOptionViewModel> AlbumTypes { get; } = new()
@@ -120,7 +126,9 @@ public partial class MainViewModel : ViewModelBase
     public bool IsImportCandidatesVisible => ImportCandidates.Count > 0;
 
     public string GoogleConnectionStatus => IsGoogleSignedIn
-        ? "Connected"
+        ? string.IsNullOrWhiteSpace(_googleTokenSet?.Email)
+            ? "Connected"
+            : $"Connected as {_googleTokenSet.Email}"
         : IsGoogleSignInPending
             ? "Waiting for consent"
             : "Not connected";
@@ -139,6 +147,7 @@ public partial class MainViewModel : ViewModelBase
     private readonly AlbumLoader _albumLoader = new();
     private readonly LocalPhotoScanner _photoScanner = new();
     private readonly GoogleOAuthClient _oauthClient = new();
+    private readonly GoogleUserInfoClient _googleUserInfoClient = new();
     private readonly GoogleOAuthTokenStore _tokenStore = new();
     private readonly PicshareSettingsProvider _settingsProvider = new();
     private readonly ImageCacheService _imageCache = new();
@@ -148,6 +157,8 @@ public partial class MainViewModel : ViewModelBase
     private GoogleOAuthTokenSet? _googleTokenSet;
     private CancellationTokenSource? _googleSignInCancellation;
     private CancellationTokenSource? _photoViewerCancellation;
+    private AlbumManifest? _pendingGoogleAuthorizationManifest;
+    private AlbumPhotoViewModel? _selectedViewedPhoto;
     private string? _driveNextPageToken;
 
     public bool HasMoreDriveItems => !string.IsNullOrWhiteSpace(_driveNextPageToken);
@@ -180,6 +191,7 @@ public partial class MainViewModel : ViewModelBase
 
         try
         {
+            SelectViewedPhoto(photo);
             IsPhotoViewerVisible = true;
             PhotoViewerTitle = photo.FileName;
             PhotoViewerStatus = "Loading";
@@ -212,6 +224,25 @@ public partial class MainViewModel : ViewModelBase
                 PhotoViewerStatus = ex.Message;
             }
         }
+    }
+
+    [RelayCommand]
+    private void CancelGoogleAuthorization()
+    {
+        _pendingGoogleAuthorizationManifest = null;
+        IsGoogleAuthorizationRequired = false;
+        GoogleAuthorizationMessage = "";
+        Status = "Google authorization cancelled.";
+    }
+
+    [RelayCommand]
+    private void ClearGoogleAuthorization()
+    {
+        _googleSignInCancellation?.Cancel();
+        _tokenStore.Clear();
+        _googleTokenSet = null;
+        IsGoogleSignedIn = false;
+        Status = "Google authorization cleared.";
     }
 
     [RelayCommand]
@@ -314,7 +345,7 @@ public partial class MainViewModel : ViewModelBase
         }
     }
 
-    public async Task SignInGoogleAsync(Func<Uri, Task> launchBrowserAsync)
+    public async Task SignInGoogleAsync(Func<Uri, Task> launchBrowserAsync, bool loadDriveFoldersAfterSignIn = false)
     {
         if (IsGoogleSignInPending)
         {
@@ -343,7 +374,7 @@ public partial class MainViewModel : ViewModelBase
             GoogleSignInMessage = "Complete Google sign-in in your browser. This window will update automatically.";
             Status = "Waiting for Google sign-in in the browser...";
 
-            _googleTokenSet = await _oauthClient.SignInWithLoopbackAsync(
+            var signedInToken = await _oauthClient.SignInWithLoopbackAsync(
                 clientId.Trim(),
                 _settingsProvider.GoogleOAuthClientSecret,
                 async launch =>
@@ -352,11 +383,26 @@ public partial class MainViewModel : ViewModelBase
                     await launchBrowserAsync(launch.AuthorizationUrl);
                 },
                 _googleSignInCancellation.Token);
-            EnsureDriveScope(_googleTokenSet);
+            _googleTokenSet = await PrepareGoogleTokenAsync(signedInToken, _googleSignInCancellation.Token);
             _tokenStore.Save(_googleTokenSet);
             IsGoogleSignedIn = true;
-            Status = "Google Drive is connected.";
-            await LoadDriveFoldersAsync();
+            OnPropertyChanged(nameof(GoogleConnectionStatus));
+            IsGoogleAuthorizationRequired = false;
+            GoogleAuthorizationMessage = "";
+
+            if (_pendingGoogleAuthorizationManifest is not null)
+            {
+                await CompletePendingGoogleAuthorizedAlbumOpenAsync();
+            }
+            else
+            {
+                Status = "Google Drive is connected.";
+            }
+
+            if (loadDriveFoldersAfterSignIn)
+            {
+                await LoadDriveFoldersAsync();
+            }
         }
         catch (OperationCanceledException)
         {
@@ -773,9 +819,24 @@ public partial class MainViewModel : ViewModelBase
             IsBusy = true;
             Status = "Opening album...";
             var manifest = await _albumLoader.LoadFromPublicDriveFileAsync(manifestFileId, CancellationToken.None);
-            await LoadAlbumAsync(manifest);
             DriveFolderLink = manifest.GoogleDrive.AlbumFolderUrl;
             ShareLink = AlbumLinkParser.CreatePicshareLink(manifest.GoogleDrive.ManifestFileId, manifest.GoogleDrive.AlbumFolderId);
+
+            if (await RequiresGoogleAuthorizationPromptAsync(manifest))
+            {
+                _pendingGoogleAuthorizationManifest = manifest;
+                CurrentAlbumTitle = manifest.Title;
+                Photos.Clear();
+                PhotoRows.Clear();
+                SelectViewedPhoto(null);
+                ClosePhotoViewer();
+                GoogleAuthorizationMessage = "Sign in with Google to open this Google Drive album.";
+                IsGoogleAuthorizationRequired = true;
+                Status = "Google authorization is required before this album can be opened.";
+                return;
+            }
+
+            await LoadAlbumAsync(manifest);
             Status = $"Opened {manifest.Title} with {manifest.Photos.Count} photo(s).";
         }
         catch (Exception ex)
@@ -788,11 +849,13 @@ public partial class MainViewModel : ViewModelBase
         }
     }
 
-    private async Task LoadAlbumAsync(AlbumManifest manifest)
+    private Task LoadAlbumAsync(AlbumManifest manifest)
     {
         CurrentAlbumTitle = manifest.Title;
         Photos.Clear();
         PhotoRows.Clear();
+        SelectViewedPhoto(null);
+        ClosePhotoViewer();
 
         foreach (var photo in manifest.Photos)
         {
@@ -808,6 +871,8 @@ public partial class MainViewModel : ViewModelBase
         {
             PhotoRows.Add(new AlbumPhotoRowViewModel(row));
         }
+
+        return Task.CompletedTask;
     }
 
     public async Task StartPhotoViewportLoadAsync(AlbumPhotoViewModel photo)
@@ -826,6 +891,69 @@ public partial class MainViewModel : ViewModelBase
         {
             PhotoViewerImage.Dispose();
         }
+    }
+
+    private async Task<bool> RequiresGoogleAuthorizationPromptAsync(AlbumManifest manifest)
+    {
+        if (!UsesGoogleDriveBackend(manifest))
+        {
+            return false;
+        }
+
+        if (_googleTokenSet is null)
+        {
+            return true;
+        }
+
+        try
+        {
+            await GetGoogleAccessTokenAsync(CancellationToken.None);
+            return false;
+        }
+        catch
+        {
+            _tokenStore.Clear();
+            _googleTokenSet = null;
+            IsGoogleSignedIn = false;
+            OnPropertyChanged(nameof(GoogleConnectionStatus));
+            return true;
+        }
+    }
+
+    private async Task CompletePendingGoogleAuthorizedAlbumOpenAsync()
+    {
+        if (_pendingGoogleAuthorizationManifest is null)
+        {
+            return;
+        }
+
+        var manifest = _pendingGoogleAuthorizationManifest;
+        _pendingGoogleAuthorizationManifest = null;
+        IsGoogleAuthorizationRequired = false;
+        GoogleAuthorizationMessage = "";
+        await LoadAlbumAsync(manifest);
+        Status = $"Opened {manifest.Title} with {manifest.Photos.Count} photo(s).";
+    }
+
+    private void SelectViewedPhoto(AlbumPhotoViewModel? photo)
+    {
+        if (_selectedViewedPhoto is not null)
+        {
+            _selectedViewedPhoto.IsSelectedForViewing = false;
+        }
+
+        _selectedViewedPhoto = photo;
+
+        if (_selectedViewedPhoto is not null)
+        {
+            _selectedViewedPhoto.IsSelectedForViewing = true;
+        }
+    }
+
+    private static bool UsesGoogleDriveBackend(AlbumManifest manifest)
+    {
+        return string.Equals(manifest.DatabaseBackendType, "google-drive-folder", StringComparison.OrdinalIgnoreCase) ||
+               manifest.Photos.Any(photo => string.Equals(photo.BackendType, "google-drive-file", StringComparison.OrdinalIgnoreCase));
     }
 
     partial void OnSelectedAlbumTypeChanged(AlbumTypeOptionViewModel? value)
@@ -888,6 +1016,10 @@ public partial class MainViewModel : ViewModelBase
 
         if (_googleTokenSet.ExpiresAt > DateTimeOffset.UtcNow.AddMinutes(2))
         {
+            _googleTokenSet = await PrepareGoogleTokenAsync(_googleTokenSet, cancellationToken);
+            _tokenStore.Save(_googleTokenSet);
+            IsGoogleSignedIn = true;
+            OnPropertyChanged(nameof(GoogleConnectionStatus));
             return _googleTokenSet.AccessToken;
         }
 
@@ -906,12 +1038,20 @@ public partial class MainViewModel : ViewModelBase
 
         try
         {
-            _googleTokenSet = await _oauthClient.RefreshAsync(
+            var currentToken = _googleTokenSet;
+            var refreshedToken = await _oauthClient.RefreshAsync(
                 clientId.Trim(),
                 _settingsProvider.GoogleOAuthClientSecret,
-                _googleTokenSet.RefreshToken,
+                currentToken.RefreshToken,
                 cancellationToken);
-            EnsureDriveScope(_googleTokenSet);
+            _googleTokenSet = await PrepareGoogleTokenAsync(
+                refreshedToken with
+                {
+                    UserId = currentToken.UserId,
+                    Email = currentToken.Email,
+                    DisplayName = currentToken.DisplayName
+                },
+                cancellationToken);
             _tokenStore.Save(_googleTokenSet);
         }
         catch
@@ -922,20 +1062,44 @@ public partial class MainViewModel : ViewModelBase
         }
 
         IsGoogleSignedIn = true;
+        OnPropertyChanged(nameof(GoogleConnectionStatus));
         return _googleTokenSet.AccessToken;
     }
 
-    private static void EnsureDriveScope(GoogleOAuthTokenSet tokenSet)
+    private async Task<GoogleOAuthTokenSet> PrepareGoogleTokenAsync(GoogleOAuthTokenSet tokenSet, CancellationToken cancellationToken)
+    {
+        EnsureRequiredGoogleScopes(tokenSet);
+
+        if (!string.IsNullOrWhiteSpace(tokenSet.UserId))
+        {
+            return tokenSet;
+        }
+
+        var userInfo = await _googleUserInfoClient.GetUserInfoAsync(tokenSet.AccessToken, cancellationToken);
+        return tokenSet with
+        {
+            UserId = userInfo.UserId,
+            Email = userInfo.Email,
+            DisplayName = userInfo.DisplayName
+        };
+    }
+
+    private static void EnsureRequiredGoogleScopes(GoogleOAuthTokenSet tokenSet)
     {
         if (string.IsNullOrWhiteSpace(tokenSet.Scope))
         {
-            return;
+            throw new InvalidOperationException("Google authorization is missing scope information. Sign in again.");
         }
 
         var scopes = tokenSet.Scope.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         if (!scopes.Contains("https://www.googleapis.com/auth/drive", StringComparer.Ordinal))
         {
             throw new InvalidOperationException("Google Drive permission was not granted. Sign in again and allow Drive access.");
+        }
+
+        if (!scopes.Contains("openid", StringComparer.Ordinal))
+        {
+            throw new InvalidOperationException("Google identity permission was not granted. Sign in again and allow profile access.");
         }
     }
 }

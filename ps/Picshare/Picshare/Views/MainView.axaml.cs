@@ -123,19 +123,17 @@ public partial class MainView : UserControl
 
     private async void SignInGoogle_Click(object? sender, RoutedEventArgs e)
     {
-        var topLevel = TopLevel.GetTopLevel(this);
-        if (topLevel is null || DataContext is not MainViewModel viewModel)
-        {
-            return;
-        }
+        await SignInGoogleAsync(loadDriveFoldersAfterSignIn: true);
+    }
 
-        await viewModel.SignInGoogleAsync(async uri =>
-        {
-            if (!await topLevel.Launcher.LaunchUriAsync(uri))
-            {
-                throw new InvalidOperationException("Could not open the Google sign-in page in the browser.");
-            }
-        });
+    private async void SettingsSignInGoogle_Click(object? sender, RoutedEventArgs e)
+    {
+        await SignInGoogleAsync(loadDriveFoldersAfterSignIn: false);
+    }
+
+    private async void OpenAlbumSignInGoogle_Click(object? sender, RoutedEventArgs e)
+    {
+        await SignInGoogleAsync(loadDriveFoldersAfterSignIn: false);
     }
 
     private async void DriveItem_Click(object? sender, RoutedEventArgs e)
@@ -291,5 +289,22 @@ public partial class MainView : UserControl
         var x = points[0].X - points[1].X;
         var y = points[0].Y - points[1].Y;
         return Math.Sqrt(x * x + y * y);
+    }
+
+    private async Task SignInGoogleAsync(bool loadDriveFoldersAfterSignIn)
+    {
+        var topLevel = TopLevel.GetTopLevel(this);
+        if (topLevel is null || DataContext is not MainViewModel viewModel)
+        {
+            return;
+        }
+
+        await viewModel.SignInGoogleAsync(async uri =>
+        {
+            if (!await topLevel.Launcher.LaunchUriAsync(uri))
+            {
+                throw new InvalidOperationException("Could not open the Google sign-in page in the browser.");
+            }
+        }, loadDriveFoldersAfterSignIn);
     }
 }

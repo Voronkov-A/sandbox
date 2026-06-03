@@ -30,7 +30,10 @@ public sealed class GoogleOAuthTokenStore
                 token.AccessToken,
                 token.RefreshToken,
                 token.ExpiresAt,
-                token.Scope ?? "");
+                token.Scope ?? "",
+                token.UserId,
+                token.Email,
+                token.DisplayName);
         }
         catch (Exception)
         {
@@ -48,7 +51,10 @@ public sealed class GoogleOAuthTokenStore
             AccessToken = token.AccessToken,
             RefreshToken = token.RefreshToken,
             ExpiresAt = token.ExpiresAt,
-            Scope = token.Scope
+            Scope = token.Scope,
+            UserId = token.UserId,
+            Email = token.Email,
+            DisplayName = token.DisplayName
         };
 
         using var stream = File.Create(path);
@@ -85,4 +91,10 @@ internal sealed record PersistedGoogleOAuthToken
     public DateTimeOffset ExpiresAt { get; init; }
 
     public string? Scope { get; init; }
+
+    public string? UserId { get; init; }
+
+    public string? Email { get; init; }
+
+    public string? DisplayName { get; init; }
 }
