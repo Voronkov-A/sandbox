@@ -1,7 +1,11 @@
 namespace Picshare.Services;
 
+using Avalonia.Media.Imaging;
+using SkiaSharp;
+
 public sealed class ImageCacheService
 {
+    private static readonly SemaphoreSlim DecodeGate = new(2);
     private readonly string _rootPath;
 
     public ImageCacheService()
@@ -62,10 +66,92 @@ public sealed class ImageCacheService
         return Task.CompletedTask;
     }
 
+    public async Task<Bitmap> LoadDisplayBitmapAsync(
+        string albumId,
+        string cacheFileName,
+        string downloadUrl,
+        HttpClient httpClient,
+        int maxPixelWidth,
+        int maxPixelHeight,
+        CancellationToken cancellationToken)
+    {
+        var imagePath = await GetOrDownloadAsync(albumId, cacheFileName, downloadUrl, httpClient, cancellationToken);
+
+        await DecodeGate.WaitAsync(cancellationToken);
+        try
+        {
+            await using var resizedStream = await Task.Run(
+                () => CreateDisplayImageStream(imagePath, maxPixelWidth, maxPixelHeight, cancellationToken),
+                cancellationToken);
+
+            return new Bitmap(resizedStream);
+        }
+        finally
+        {
+            DecodeGate.Release();
+        }
+    }
+
+    public async Task<Bitmap> LoadOriginalBitmapAsync(
+        string albumId,
+        string cacheFileName,
+        string downloadUrl,
+        HttpClient httpClient,
+        CancellationToken cancellationToken)
+    {
+        var imagePath = await GetOrDownloadAsync(albumId, cacheFileName, downloadUrl, httpClient, cancellationToken);
+
+        await DecodeGate.WaitAsync(cancellationToken);
+        try
+        {
+            await using var stream = File.OpenRead(imagePath);
+            return new Bitmap(stream);
+        }
+        finally
+        {
+            DecodeGate.Release();
+        }
+    }
+
     private static string SanitizePathSegment(string value)
     {
         var invalid = Path.GetInvalidFileNameChars();
         var sanitized = new string(value.Select(character => invalid.Contains(character) ? '_' : character).ToArray());
         return string.IsNullOrWhiteSpace(sanitized) ? "_" : sanitized;
+    }
+
+    private static MemoryStream CreateDisplayImageStream(
+        string imagePath,
+        int maxPixelWidth,
+        int maxPixelHeight,
+        CancellationToken cancellationToken)
+    {
+        using var input = File.OpenRead(imagePath);
+        using var codec = SKCodec.Create(input)
+            ?? throw new InvalidOperationException("The cached image could not be decoded.");
+        using var original = SKBitmap.Decode(codec)
+            ?? throw new InvalidOperationException("The cached image could not be decoded.");
+
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var scale = Math.Min(
+            1d,
+            Math.Min((double)maxPixelWidth / original.Width, (double)maxPixelHeight / original.Height));
+        var targetWidth = Math.Max(1, (int)Math.Round(original.Width * scale));
+        var targetHeight = Math.Max(1, (int)Math.Round(original.Height * scale));
+
+        using var displayBitmap = scale < 1d
+            ? original.Resize(new SKImageInfo(targetWidth, targetHeight), SKFilterQuality.Medium)
+                ?? throw new InvalidOperationException("The cached image could not be resized.")
+            : original.Copy();
+
+        using var image = SKImage.FromBitmap(displayBitmap);
+        using var data = image.Encode(SKEncodedImageFormat.Jpeg, 86)
+            ?? throw new InvalidOperationException("The cached image could not be encoded.");
+
+        var output = new MemoryStream();
+        data.SaveTo(output);
+        output.Position = 0;
+        return output;
     }
 }

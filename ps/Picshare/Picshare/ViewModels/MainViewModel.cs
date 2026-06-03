@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using Avalonia.Media.Imaging;
 using Avalonia.Platform.Storage;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -10,6 +11,7 @@ namespace Picshare.ViewModels;
 public partial class MainViewModel : ViewModelBase
 {
     private const string LocalToGoogleDriveAlbumTypeId = "local-to-google-drive";
+    private const int PhotosPerRow = 4;
 
     [ObservableProperty]
     private AlbumTypeOptionViewModel? _selectedAlbumType;
@@ -87,6 +89,18 @@ public partial class MainViewModel : ViewModelBase
     private bool _isSettingsPanelVisible;
 
     [ObservableProperty]
+    private bool _isPhotoViewerVisible;
+
+    [ObservableProperty]
+    private string _photoViewerTitle = "";
+
+    [ObservableProperty]
+    private string _photoViewerStatus = "";
+
+    [ObservableProperty]
+    private Bitmap? _photoViewerImage;
+
+    [ObservableProperty]
     private AlbumPhotoSourceViewModel? _selectedAlbumPhoto;
 
     public ObservableCollection<AlbumTypeOptionViewModel> AlbumTypes { get; } = new()
@@ -119,6 +133,8 @@ public partial class MainViewModel : ViewModelBase
 
     public ObservableCollection<AlbumPhotoViewModel> Photos { get; } = new();
 
+    public ObservableCollection<AlbumPhotoRowViewModel> PhotoRows { get; } = new();
+
     private readonly GoogleDriveAlbumPublisher _publisher = new();
     private readonly AlbumLoader _albumLoader = new();
     private readonly LocalPhotoScanner _photoScanner = new();
@@ -131,6 +147,7 @@ public partial class MainViewModel : ViewModelBase
     private readonly List<DriveFolderLocation> _driveFolderPath = new();
     private GoogleOAuthTokenSet? _googleTokenSet;
     private CancellationTokenSource? _googleSignInCancellation;
+    private CancellationTokenSource? _photoViewerCancellation;
     private string? _driveNextPageToken;
 
     public bool HasMoreDriveItems => !string.IsNullOrWhiteSpace(_driveNextPageToken);
@@ -140,6 +157,61 @@ public partial class MainViewModel : ViewModelBase
         _googleTokenSet = _tokenStore.Load();
         IsGoogleSignedIn = _googleTokenSet is not null;
         ResetCreateInputs();
+    }
+
+    [RelayCommand]
+    private void ClosePhotoViewer()
+    {
+        _photoViewerCancellation?.Cancel();
+        _photoViewerCancellation?.Dispose();
+        _photoViewerCancellation = null;
+        PhotoViewerImage = null;
+        PhotoViewerTitle = "";
+        PhotoViewerStatus = "";
+        IsPhotoViewerVisible = false;
+    }
+
+    public async Task OpenPhotoViewerAsync(AlbumPhotoViewModel photo)
+    {
+        _photoViewerCancellation?.Cancel();
+        _photoViewerCancellation?.Dispose();
+        _photoViewerCancellation = new CancellationTokenSource();
+        var cancellation = _photoViewerCancellation;
+
+        try
+        {
+            IsPhotoViewerVisible = true;
+            PhotoViewerTitle = photo.FileName;
+            PhotoViewerStatus = "Loading";
+            PhotoViewerImage = null;
+
+            var viewerImage = await _imageCache.LoadOriginalBitmapAsync(
+                photo.AlbumId,
+                $"{photo.PhotoId}-full{photo.FileExtension}",
+                photo.DownloadUrl,
+                _imageHttpClient,
+                cancellation.Token);
+
+            if (ReferenceEquals(_photoViewerCancellation, cancellation))
+            {
+                PhotoViewerImage = viewerImage;
+                PhotoViewerStatus = "";
+            }
+            else
+            {
+                viewerImage.Dispose();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            if (ReferenceEquals(_photoViewerCancellation, cancellation))
+            {
+                PhotoViewerStatus = ex.Message;
+            }
+        }
     }
 
     [RelayCommand]
@@ -162,9 +234,11 @@ public partial class MainViewModel : ViewModelBase
             IsBusy = true;
             foreach (var photo in Photos)
             {
+                photo.StopViewportLoad();
                 photo.ReleaseCachedImage();
             }
 
+            ClosePhotoViewer();
             await _imageCache.ClearAsync();
             Status = "Image cache cleared.";
         }
@@ -718,6 +792,7 @@ public partial class MainViewModel : ViewModelBase
     {
         CurrentAlbumTitle = manifest.Title;
         Photos.Clear();
+        PhotoRows.Clear();
 
         foreach (var photo in manifest.Photos)
         {
@@ -729,12 +804,28 @@ public partial class MainViewModel : ViewModelBase
                 photo.ThumbnailDownloadUrl));
         }
 
-        await Task.WhenAll(Photos.Select(photo => photo.LoadThumbnailAsync(_imageCache, _imageHttpClient, CancellationToken.None)));
+        foreach (var row in Photos.Chunk(PhotosPerRow))
+        {
+            PhotoRows.Add(new AlbumPhotoRowViewModel(row));
+        }
     }
 
-    public async Task LoadFullPhotoAsync(AlbumPhotoViewModel photo)
+    public async Task StartPhotoViewportLoadAsync(AlbumPhotoViewModel photo)
     {
-        await photo.LoadFullImageAsync(_imageCache, _imageHttpClient, CancellationToken.None);
+        await photo.StartViewportLoadAsync(_imageCache, _imageHttpClient);
+    }
+
+    public void StopPhotoViewportLoad(AlbumPhotoViewModel photo)
+    {
+        photo.StopViewportLoad();
+    }
+
+    partial void OnPhotoViewerImageChanging(Bitmap? value)
+    {
+        if (PhotoViewerImage is not null && !ReferenceEquals(PhotoViewerImage, value))
+        {
+            PhotoViewerImage.Dispose();
+        }
     }
 
     partial void OnSelectedAlbumTypeChanged(AlbumTypeOptionViewModel? value)

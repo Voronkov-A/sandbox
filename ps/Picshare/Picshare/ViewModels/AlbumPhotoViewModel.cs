@@ -6,6 +6,10 @@ namespace Picshare.ViewModels;
 
 public partial class AlbumPhotoViewModel : ObservableObject
 {
+    private const int ThumbnailPixelSize = 64;
+    private const int DisplayPixelWidth = 220;
+    private const int DisplayPixelHeight = 150;
+
     public AlbumPhotoViewModel(
         string albumId,
         string photoId,
@@ -30,6 +34,15 @@ public partial class AlbumPhotoViewModel : ObservableObject
 
     public string ThumbnailDownloadUrl { get; }
 
+    public string FileExtension
+    {
+        get
+        {
+            var extension = Path.GetExtension(FileName);
+            return string.IsNullOrWhiteSpace(extension) ? ".img" : extension;
+        }
+    }
+
     [ObservableProperty]
     private Bitmap? _image;
 
@@ -39,60 +52,105 @@ public partial class AlbumPhotoViewModel : ObservableObject
     [ObservableProperty]
     private bool _isFullImageLoaded;
 
-    private bool _isFullImageLoading;
+    private CancellationTokenSource? _loadCancellation;
+    private bool _isLoading;
 
-    public async Task LoadThumbnailAsync(ImageCacheService imageCache, HttpClient httpClient, CancellationToken cancellationToken)
+    public async Task StartViewportLoadAsync(ImageCacheService imageCache, HttpClient httpClient)
+    {
+        if (_isLoading)
+        {
+            return;
+        }
+
+        _loadCancellation?.Cancel();
+        _loadCancellation?.Dispose();
+        var cancellation = new CancellationTokenSource();
+        _loadCancellation = cancellation;
+
+        try
+        {
+            _isLoading = true;
+
+            if (Image is null)
+            {
+                await LoadThumbnailAsync(imageCache, httpClient, cancellation.Token);
+            }
+
+            await LoadDisplayImageAsync(imageCache, httpClient, cancellation.Token);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        finally
+        {
+            if (ReferenceEquals(_loadCancellation, cancellation))
+            {
+                _loadCancellation.Dispose();
+                _loadCancellation = null;
+                _isLoading = false;
+            }
+        }
+    }
+
+    public void StopViewportLoad()
+    {
+        _loadCancellation?.Cancel();
+        ReleaseCachedImage();
+    }
+
+    private async Task LoadThumbnailAsync(ImageCacheService imageCache, HttpClient httpClient, CancellationToken cancellationToken)
     {
         try
         {
             Status = "Loading thumbnail";
-            var imagePath = await imageCache.GetOrDownloadAsync(
+            Image = await imageCache.LoadDisplayBitmapAsync(
                 AlbumId,
                 $"{PhotoId}-thumbnail.jpg",
                 ThumbnailDownloadUrl,
                 httpClient,
+                ThumbnailPixelSize,
+                ThumbnailPixelSize,
                 cancellationToken);
 
-            await using var stream = File.OpenRead(imagePath);
-            Image = new Bitmap(stream);
-            Status = IsFullImageLoaded ? "Full image loaded" : "Click to load full image";
+            Status = "Loading full image";
         }
         catch (Exception ex)
         {
-            Status = ex.Message;
+            if (ex is not OperationCanceledException)
+            {
+                Status = ex.Message;
+            }
         }
     }
 
-    public async Task LoadFullImageAsync(ImageCacheService imageCache, HttpClient httpClient, CancellationToken cancellationToken)
+    private async Task LoadDisplayImageAsync(ImageCacheService imageCache, HttpClient httpClient, CancellationToken cancellationToken)
     {
-        if (IsFullImageLoaded || _isFullImageLoading)
+        if (IsFullImageLoaded)
         {
             return;
         }
 
         try
         {
-            _isFullImageLoading = true;
             Status = "Loading full image";
-            var imagePath = await imageCache.GetOrDownloadAsync(
+            Image = await imageCache.LoadDisplayBitmapAsync(
                 AlbumId,
-                $"{PhotoId}-full{GetFileExtension(FileName)}",
+                $"{PhotoId}-full{FileExtension}",
                 DownloadUrl,
                 httpClient,
+                DisplayPixelWidth,
+                DisplayPixelHeight,
                 cancellationToken);
 
-            await using var stream = File.OpenRead(imagePath);
-            Image = new Bitmap(stream);
             IsFullImageLoaded = true;
             Status = "Full image loaded";
         }
         catch (Exception ex)
         {
-            Status = ex.Message;
-        }
-        finally
-        {
-            _isFullImageLoading = false;
+            if (ex is not OperationCanceledException)
+            {
+                Status = ex.Message;
+            }
         }
     }
 
@@ -100,7 +158,7 @@ public partial class AlbumPhotoViewModel : ObservableObject
     {
         Image = null;
         IsFullImageLoaded = false;
-        Status = "Cache cleared";
+        Status = "Loading";
     }
 
     partial void OnImageChanging(Bitmap? value)
@@ -109,11 +167,5 @@ public partial class AlbumPhotoViewModel : ObservableObject
         {
             Image.Dispose();
         }
-    }
-
-    private static string GetFileExtension(string fileName)
-    {
-        var extension = Path.GetExtension(fileName);
-        return string.IsNullOrWhiteSpace(extension) ? ".img" : extension;
     }
 }

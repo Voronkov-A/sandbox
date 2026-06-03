@@ -466,40 +466,61 @@
             </Grid>
           </Border>
 
-          <ScrollViewer Grid.Row="1" Margin="0,16,0,0">
-            <StackPanel Spacing="14">
-              <TextBlock Text="{Binding CurrentAlbumTitle}" FontSize="20" FontWeight="SemiBold"/>
-              <ItemsControl ItemsSource="{Binding Photos}">
-                <ItemsControl.ItemsPanel>
+          <Grid Grid.Row="1" RowDefinitions="Auto,*" Margin="0,16,0,0">
+              <TextBlock Grid.Row="0" Text="{Binding CurrentAlbumTitle}" FontSize="20" FontWeight="SemiBold" Margin="0,0,0,14"/>
+              <ListBox ItemsSource="{Binding PhotoRows}"
+                       Grid.Row="1"
+                       Background="Transparent"
+                       BorderThickness="0"
+                       ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                <ListBox.ItemsPanel>
                   <ItemsPanelTemplate>
-                    <WrapPanel Orientation="Horizontal"/>
+                    <VirtualizingStackPanel/>
                   </ItemsPanelTemplate>
-                </ItemsControl.ItemsPanel>
-                <ItemsControl.ItemTemplate>
-                  <DataTemplate x:DataType="vm:AlbumPhotoViewModel">
-                    <Border Width="220" Height="190" Margin="0,0,12,12" Background="White" BorderBrush="#D6D8D1" BorderThickness="1" CornerRadius="6">
-                      <Grid RowDefinitions="*,Auto">
-                        <Button Click="AlbumPhoto_Click"
-                                Padding="0"
-                                Background="Transparent"
-                                BorderThickness="0"
-                                HorizontalContentAlignment="Stretch"
-                                VerticalContentAlignment="Stretch">
-                          <Image Source="{Binding Image}" Stretch="UniformToFill"/>
-                        </Button>
-                        <Border Grid.Row="1" Background="#F2F2EE" Padding="8">
-                          <StackPanel Spacing="2">
-                            <TextBlock Text="{Binding FileName}" TextTrimming="CharacterEllipsis"/>
-                            <TextBlock Text="{Binding Status}" FontSize="11" Foreground="#7B4B39" TextTrimming="CharacterEllipsis"/>
-                          </StackPanel>
-                        </Border>
-                      </Grid>
-                    </Border>
+                </ListBox.ItemsPanel>
+                <ListBox.ItemTemplate>
+                  <DataTemplate x:DataType="vm:AlbumPhotoRowViewModel">
+                    <ItemsControl ItemsSource="{Binding Photos}">
+                      <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                          <StackPanel Orientation="Horizontal"/>
+                        </ItemsPanelTemplate>
+                      </ItemsControl.ItemsPanel>
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="vm:AlbumPhotoViewModel">
+                          <Border Width="220"
+                                  Height="190"
+                                  Margin="0,0,12,12"
+                                  Background="White"
+                                  BorderBrush="#D6D8D1"
+                                  BorderThickness="1"
+                                  CornerRadius="6"
+                                  Loaded="AlbumPhoto_Loaded"
+                                  Unloaded="AlbumPhoto_Unloaded">
+                            <Grid RowDefinitions="150,40">
+                              <Button Click="AlbumPhoto_Click"
+                                      Padding="0"
+                                      Background="Transparent"
+                                      BorderThickness="0"
+                                      HorizontalContentAlignment="Stretch"
+                                      VerticalContentAlignment="Stretch">
+                                <Image Source="{Binding Image}" Stretch="UniformToFill"/>
+                              </Button>
+                              <Border Grid.Row="1" Background="#F2F2EE" Padding="8">
+                                <StackPanel Spacing="2">
+                                  <TextBlock Text="{Binding FileName}" TextTrimming="CharacterEllipsis"/>
+                                  <TextBlock Text="{Binding Status}" FontSize="11" Foreground="#7B4B39" TextTrimming="CharacterEllipsis"/>
+                                </StackPanel>
+                              </Border>
+                            </Grid>
+                          </Border>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
                   </DataTemplate>
-                </ItemsControl.ItemTemplate>
-              </ItemsControl>
-            </StackPanel>
-          </ScrollViewer>
+                </ListBox.ItemTemplate>
+              </ListBox>
+          </Grid>
         </Grid>
       </TabItem>
     </TabControl>
@@ -545,6 +566,66 @@
           </Grid>
         </StackPanel>
       </Border>
+    </Grid>
+
+    <Grid Grid.RowSpan="3"
+          Background="#F8000000"
+          IsVisible="{Binding IsPhotoViewerVisible}">
+      <Grid RowDefinitions="Auto,*">
+        <Border Grid.Row="0"
+                Background="#CC000000"
+                Padding="14,10">
+          <Grid ColumnDefinitions="*,Auto">
+            <StackPanel Spacing="2" VerticalAlignment="Center">
+              <TextBlock Text="{Binding PhotoViewerTitle}"
+                         Foreground="White"
+                         FontSize="16"
+                         FontWeight="SemiBold"
+                         TextTrimming="CharacterEllipsis"/>
+              <TextBlock Text="{Binding PhotoViewerStatus}"
+                         Foreground="#D9E5E8"
+                         FontSize="12"
+                         TextTrimming="CharacterEllipsis"/>
+            </StackPanel>
+          <Button Grid.Column="1"
+                  Command="{Binding ClosePhotoViewerCommand}"
+                  Width="44"
+                  Height="44"
+                  Padding="0"
+                  Background="#33000000"
+                  BorderBrush="#99FFFFFF"
+                  BorderThickness="1"
+                  HorizontalContentAlignment="Center"
+                  VerticalContentAlignment="Center">
+            <Grid Width="28" Height="28">
+              <TextBlock Text="X" FontSize="28" FontWeight="Bold" Foreground="Black" Margin="-1,-1,0,0"/>
+              <TextBlock Text="X" FontSize="28" FontWeight="Bold" Foreground="Black" Margin="1,-1,0,0"/>
+              <TextBlock Text="X" FontSize="28" FontWeight="Bold" Foreground="Black" Margin="-1,1,0,0"/>
+              <TextBlock Text="X" FontSize="28" FontWeight="Bold" Foreground="Black" Margin="1,1,0,0"/>
+              <TextBlock Text="X" FontSize="28" FontWeight="Bold" Foreground="White"/>
+            </Grid>
+          </Button>
+          </Grid>
+        </Border>
+
+        <Border x:Name="PhotoViewerViewport"
+                Grid.Row="1"
+                Padding="12"
+                PointerPressed="PhotoViewer_PointerPressed"
+                PointerMoved="PhotoViewer_PointerMoved"
+                PointerReleased="PhotoViewer_PointerReleased"
+                PointerWheelChanged="PhotoViewer_PointerWheelChanged">
+          <ScrollViewer x:Name="PhotoViewerScrollViewer"
+                        HorizontalScrollBarVisibility="Auto"
+                        VerticalScrollBarVisibility="Auto">
+            <Image x:Name="PhotoViewerImageControl"
+                   Source="{Binding PhotoViewerImage}"
+                   Stretch="Uniform"
+                   HorizontalAlignment="Center"
+                   VerticalAlignment="Center"/>
+          </ScrollViewer>
+        </Border>
+      </Grid>
     </Grid>
   </Grid>
 </UserControl>
