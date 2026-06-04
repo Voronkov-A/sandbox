@@ -82,8 +82,10 @@ public sealed class GoogleDriveAlbumPublisher
             AlbumId = albumId,
             Title = request.Title,
             CreatedAt = DateTimeOffset.UtcNow,
+            TargetNicePhotoCount = request.TargetNicePhotoCount,
             PhotoBackendType = "local-photos-to-google-drive",
             DatabaseBackendType = "google-drive-folder",
+            Author = request.Author,
             GoogleDrive = new GoogleDriveAlbumDetails
             {
                 AlbumFolderId = albumFolder.Id,

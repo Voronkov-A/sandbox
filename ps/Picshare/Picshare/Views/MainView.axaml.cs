@@ -191,6 +191,21 @@ public partial class MainView : UserControl
         }
     }
 
+    private void AlbumReviewTabs_SelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (DataContext is MainViewModel viewModel &&
+            sender is TabControl { SelectedItem: TabItem { Tag: "Flow" } })
+        {
+            viewModel.SetFlowTabActive(true);
+            return;
+        }
+
+        if (DataContext is MainViewModel inactiveViewModel)
+        {
+            inactiveViewModel.SetFlowTabActive(false);
+        }
+    }
+
     private void PhotoViewer_PointerWheelChanged(object? sender, PointerWheelEventArgs e)
     {
         if (PhotoViewerImageControl.Source is null)

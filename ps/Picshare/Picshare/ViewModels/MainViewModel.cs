@@ -21,6 +21,9 @@ public partial class MainViewModel : ViewModelBase
     private string _albumTitle = "New album";
 
     [ObservableProperty]
+    private int _targetNicePhotoCount;
+
+    [ObservableProperty]
     private DateTimeOffset? _importDate = DateTimeOffset.Now;
 
     [ObservableProperty]
@@ -117,6 +120,24 @@ public partial class MainViewModel : ViewModelBase
     private string _feedbackConflictMessage = "";
 
     [ObservableProperty]
+    private bool _isCommitConfirmationVisible;
+
+    [ObservableProperty]
+    private string _commitConfirmationMessage = "";
+
+    [ObservableProperty]
+    private bool _isFeedbackCommitted;
+
+    [ObservableProperty]
+    private bool _canModifyFeedback;
+
+    [ObservableProperty]
+    private bool _canCommitFeedback;
+
+    [ObservableProperty]
+    private string _commitFeedbackStatus = "";
+
+    [ObservableProperty]
     private bool _canMarkCurrentPhotoUncategorized;
 
     [ObservableProperty]
@@ -132,7 +153,25 @@ public partial class MainViewModel : ViewModelBase
     private bool _canShowCurrentPhotoTrashAction;
 
     [ObservableProperty]
+    private bool _shouldShowCurrentPhotoUncategorizedAction;
+
+    [ObservableProperty]
+    private bool _shouldShowCurrentPhotoNiceAction;
+
+    [ObservableProperty]
+    private bool _shouldShowCurrentPhotoOkAction;
+
+    [ObservableProperty]
+    private bool _shouldShowCurrentPhotoTrashAction;
+
+    [ObservableProperty]
     private bool _canNavigatePhotoViewerCategory;
+
+    [ObservableProperty]
+    private bool _isAuthorFlowVisible;
+
+    [ObservableProperty]
+    private string _flowStatus = "";
 
     [ObservableProperty]
     private AlbumPhotoSourceViewModel? _selectedAlbumPhoto;
@@ -177,6 +216,8 @@ public partial class MainViewModel : ViewModelBase
 
     public ObservableCollection<AlbumPhotoRowViewModel> TrashPhotoRows { get; } = new();
 
+    public ObservableCollection<ReviewerFeedbackFlowItemViewModel> CommittedReviewers { get; } = new();
+
     public string UncategorizedTabHeader => $"Uncategorized ({Photos.Count(photo => string.IsNullOrWhiteSpace(photo.Category))})";
 
     public string NiceTabHeader => $"Nice ({Photos.Count(photo => string.Equals(photo.Category, "nice", StringComparison.Ordinal))})";
@@ -184,6 +225,10 @@ public partial class MainViewModel : ViewModelBase
     public string OkTabHeader => $"Ok ({Photos.Count(photo => string.Equals(photo.Category, "ok", StringComparison.Ordinal))})";
 
     public string TrashTabHeader => $"Trash ({Photos.Count(photo => string.Equals(photo.Category, "trash", StringComparison.Ordinal))})";
+
+    public string FlowTabHeader => "Flow";
+
+    public string CommittedReviewersHeader => $"Committed reviewers ({CommittedReviewers.Count})";
 
     private readonly GoogleDriveAlbumPublisher _publisher = new();
     private readonly AlbumLoader _albumLoader = new();
@@ -201,11 +246,15 @@ public partial class MainViewModel : ViewModelBase
     private CancellationTokenSource? _googleSignInCancellation;
     private CancellationTokenSource? _photoViewerCancellation;
     private CancellationTokenSource? _feedbackSyncCancellation;
+    private CancellationTokenSource? _flowMonitorCancellation;
+    private AlbumManifest? _currentManifest;
     private AlbumManifest? _pendingGoogleAuthorizationManifest;
     private AlbumPhotoViewModel? _selectedViewedPhoto;
     private string _selectedViewedPhotoSourceCategory = "";
     private ReviewerFeedbackSession? _feedbackSession;
     private ReviewerFeedbackDatabase? _feedbackDatabase;
+    private ReviewerFeedbackCommit? _feedbackCommit;
+    private bool _isFlowTabActive;
     private readonly SemaphoreSlim _feedbackSyncGate = new(1);
     private string? _driveNextPageToken;
 
@@ -247,6 +296,61 @@ public partial class MainViewModel : ViewModelBase
     private async Task MarkCurrentPhotoTrashAsync()
     {
         await SetCurrentPhotoCategoryAsync("trash");
+    }
+
+    [RelayCommand]
+    private void CommitFeedback()
+    {
+        if (!CanCommitFeedback)
+        {
+            return;
+        }
+
+        CommitConfirmationMessage = "Commit feedback? You will not be able to modify categories after this.";
+        IsCommitConfirmationVisible = true;
+    }
+
+    [RelayCommand]
+    private void CancelCommitFeedback()
+    {
+        IsCommitConfirmationVisible = false;
+        CommitConfirmationMessage = "";
+    }
+
+    [RelayCommand]
+    private async Task ConfirmCommitFeedbackAsync()
+    {
+        if (_feedbackSession is null || _googleTokenSet is null || !CanCommitFeedback)
+        {
+            IsCommitConfirmationVisible = false;
+            return;
+        }
+
+        IsCommitConfirmationVisible = false;
+        CommitConfirmationMessage = "";
+
+        try
+        {
+            var accessToken = await GetGoogleAccessTokenAsync(CancellationToken.None);
+            var result = await _reviewerFeedbackService.CommitAsync(
+                _feedbackSession,
+                CreateGoogleReviewerIdentity(_googleTokenSet),
+                accessToken,
+                CancellationToken.None);
+
+            _feedbackCommit = result.Commit;
+            IsFeedbackCommitted = true;
+            UpdateFeedbackControlState();
+            UpdateCurrentPhotoActionVisibility();
+            await SyncFeedbackAsync();
+            Status = result.RemoteWon
+                ? "Feedback was already committed remotely. The remote commit was loaded."
+                : "Feedback committed.";
+        }
+        catch (Exception ex)
+        {
+            Status = ex.Message;
+        }
     }
 
     [RelayCommand]
@@ -421,8 +525,10 @@ public partial class MainViewModel : ViewModelBase
                 {
                     Title = string.IsNullOrWhiteSpace(AlbumTitle) ? "Picshare album" : AlbumTitle.Trim(),
                     Photos = AlbumPhotos.Select(photo => photo.Source).ToList(),
+                    TargetNicePhotoCount = Math.Max(0, TargetNicePhotoCount),
                     ParentDriveFolderId = string.IsNullOrWhiteSpace(ParentDriveFolderId) ? null : ParentDriveFolderId.Trim(),
-                    AccessToken = accessToken
+                    AccessToken = accessToken,
+                    Author = CreateGoogleReviewerIdentity(_googleTokenSet!)
                 },
                 CancellationToken.None);
 
@@ -923,13 +1029,23 @@ public partial class MainViewModel : ViewModelBase
             if (await RequiresGoogleAuthorizationPromptAsync(manifest))
             {
                 StopFeedbackSync();
+                StopFlowMonitor();
+                _currentManifest = null;
                 _feedbackSession = null;
                 _feedbackDatabase = null;
+                _feedbackCommit = null;
+                IsFeedbackCommitted = false;
+                IsCommitConfirmationVisible = false;
+                CommitConfirmationMessage = "";
+                IsAuthorFlowVisible = false;
+                CommittedReviewers.Clear();
+                OnPropertyChanged(nameof(CommittedReviewersHeader));
                 _pendingGoogleAuthorizationManifest = manifest;
                 CurrentAlbumTitle = manifest.Title;
                 Photos.Clear();
                 ClearCategoryRows();
                 SelectViewedPhoto(null);
+                UpdateFeedbackControlState();
                 ClosePhotoViewer();
                 GoogleAuthorizationMessage = "Sign in with Google to open this Google Drive album.";
                 IsGoogleAuthorizationRequired = true;
@@ -953,8 +1069,19 @@ public partial class MainViewModel : ViewModelBase
     private async Task LoadAlbumAsync(AlbumManifest manifest)
     {
         StopFeedbackSync();
+        StopFlowMonitor();
+        _currentManifest = manifest;
         _feedbackSession = null;
         _feedbackDatabase = null;
+        _feedbackCommit = null;
+        IsFeedbackCommitted = false;
+        IsCommitConfirmationVisible = false;
+        CommitConfirmationMessage = "";
+        IsAuthorFlowVisible = false;
+        FlowStatus = "";
+        CommittedReviewers.Clear();
+        OnPropertyChanged(nameof(CommittedReviewersHeader));
+        UpdateFeedbackControlState();
 
         CurrentAlbumTitle = manifest.Title;
         Photos.Clear();
@@ -992,7 +1119,7 @@ public partial class MainViewModel : ViewModelBase
 
     private async Task SetCurrentPhotoCategoryAsync(string category)
     {
-        if (_selectedViewedPhoto is null)
+        if (_selectedViewedPhoto is null || IsFeedbackCommitted)
         {
             return;
         }
@@ -1099,6 +1226,10 @@ public partial class MainViewModel : ViewModelBase
 
         _feedbackSession = result.Session;
         _feedbackDatabase = result.Database;
+        _feedbackCommit = result.Commit;
+        IsFeedbackCommitted = _feedbackCommit is not null;
+        IsAuthorFlowVisible = IsCurrentReviewerAuthor(manifest);
+        UpdateFeedbackControlState();
 
         if (result.ConcurrentRemoteUpdate)
         {
@@ -1132,6 +1263,7 @@ public partial class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(NiceTabHeader));
         OnPropertyChanged(nameof(OkTabHeader));
         OnPropertyChanged(nameof(TrashTabHeader));
+        UpdateFeedbackControlState();
     }
 
     private void ClearCategoryRows()
@@ -1203,13 +1335,27 @@ public partial class MainViewModel : ViewModelBase
             if (result.RemoteWon)
             {
                 _feedbackDatabase = result.Database;
+                _feedbackCommit = result.Commit ?? _feedbackCommit;
                 await Dispatcher.UIThread.InvokeAsync(() =>
                 {
                     ApplyFeedbackDatabaseToPhotos();
+                    IsFeedbackCommitted = _feedbackCommit is not null;
+                    UpdateFeedbackControlState();
+                    UpdateCurrentPhotoActionVisibility();
                     if (result.LocalDirtyBeforeSync)
                     {
                         ShowFeedbackConflictNotice();
                     }
+                });
+            }
+            else if (result.Commit is not null && _feedbackCommit is null)
+            {
+                _feedbackCommit = result.Commit;
+                await Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    IsFeedbackCommitted = true;
+                    UpdateFeedbackControlState();
+                    UpdateCurrentPhotoActionVisibility();
                 });
             }
         }
@@ -1223,6 +1369,92 @@ public partial class MainViewModel : ViewModelBase
         finally
         {
             _feedbackSyncGate.Release();
+        }
+    }
+
+    public void SetFlowTabActive(bool isActive)
+    {
+        _isFlowTabActive = isActive;
+        if (_isFlowTabActive && IsAuthorFlowVisible)
+        {
+            StartFlowMonitor();
+        }
+        else
+        {
+            StopFlowMonitor();
+        }
+    }
+
+    private void StartFlowMonitor()
+    {
+        if (_flowMonitorCancellation is not null)
+        {
+            return;
+        }
+
+        _flowMonitorCancellation = new CancellationTokenSource();
+        _ = RunFlowMonitorAsync(_flowMonitorCancellation.Token);
+    }
+
+    private void StopFlowMonitor()
+    {
+        _flowMonitorCancellation?.Cancel();
+        _flowMonitorCancellation?.Dispose();
+        _flowMonitorCancellation = null;
+    }
+
+    private async Task RunFlowMonitorAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await RefreshFlowAsync(cancellationToken);
+            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(30));
+            while (await timer.WaitForNextTickAsync(cancellationToken))
+            {
+                await RefreshFlowAsync(cancellationToken);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private async Task RefreshFlowAsync(CancellationToken cancellationToken)
+    {
+        if (_currentManifest is null || _googleTokenSet is null || !IsAuthorFlowVisible)
+        {
+            return;
+        }
+
+        try
+        {
+            await Dispatcher.UIThread.InvokeAsync(() => FlowStatus = "Refreshing");
+            var accessToken = await GetGoogleAccessTokenAsync(cancellationToken);
+            var reviewers = await _reviewerFeedbackService.LoadCommittedReviewersAsync(
+                _currentManifest.GoogleDrive.FeedbackFolderId,
+                accessToken,
+                cancellationToken);
+
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                CommittedReviewers.Clear();
+                foreach (var reviewer in reviewers)
+                {
+                    CommittedReviewers.Add(new ReviewerFeedbackFlowItemViewModel(reviewer));
+                }
+
+                OnPropertyChanged(nameof(CommittedReviewersHeader));
+                FlowStatus = reviewers.Count == 0
+                    ? "No committed feedback yet."
+                    : "";
+            });
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            await Dispatcher.UIThread.InvokeAsync(() => FlowStatus = $"Flow refresh failed: {ex.Message}");
         }
     }
 
@@ -1253,12 +1485,55 @@ public partial class MainViewModel : ViewModelBase
     private void UpdateCurrentPhotoActionVisibility()
     {
         var category = _selectedViewedPhoto?.Category ?? "";
-        CanMarkCurrentPhotoUncategorized = !string.IsNullOrWhiteSpace(category);
-        CanMarkCurrentPhotoNice = !string.Equals(category, "nice", StringComparison.Ordinal);
-        CanMarkCurrentPhotoOk = !string.Equals(category, "ok", StringComparison.Ordinal);
-        CanMarkCurrentPhotoTrash = !string.Equals(category, "trash", StringComparison.Ordinal);
-        CanShowCurrentPhotoTrashAction = !string.Equals(category, "trash", StringComparison.Ordinal);
+        ShouldShowCurrentPhotoUncategorizedAction = !string.IsNullOrWhiteSpace(category);
+        ShouldShowCurrentPhotoNiceAction = !string.Equals(category, "nice", StringComparison.Ordinal);
+        ShouldShowCurrentPhotoOkAction = !string.Equals(category, "ok", StringComparison.Ordinal);
+        ShouldShowCurrentPhotoTrashAction = !string.Equals(category, "trash", StringComparison.Ordinal);
+        CanMarkCurrentPhotoUncategorized = CanModifyFeedback && ShouldShowCurrentPhotoUncategorizedAction;
+        CanMarkCurrentPhotoNice = CanModifyFeedback && ShouldShowCurrentPhotoNiceAction;
+        CanMarkCurrentPhotoOk = CanModifyFeedback && ShouldShowCurrentPhotoOkAction;
+        CanMarkCurrentPhotoTrash = CanModifyFeedback && ShouldShowCurrentPhotoTrashAction;
+        CanShowCurrentPhotoTrashAction = ShouldShowCurrentPhotoTrashAction;
         CanNavigatePhotoViewerCategory = _selectedViewedPhoto is not null && GetPhotosForCategory(category).Any();
+    }
+
+    private void UpdateFeedbackControlState()
+    {
+        CanModifyFeedback = _feedbackSession is not null && !IsFeedbackCommitted;
+        if (_feedbackSession is null)
+        {
+            CanCommitFeedback = false;
+            CommitFeedbackStatus = "";
+            return;
+        }
+
+        if (IsFeedbackCommitted)
+        {
+            CanCommitFeedback = false;
+            CommitFeedbackStatus = "feedback sent";
+            return;
+        }
+
+        var uncategorizedCount = Photos.Count(photo => string.IsNullOrWhiteSpace(photo.Category));
+        var niceCount = Photos.Count(photo => string.Equals(photo.Category, "nice", StringComparison.Ordinal));
+        var targetNiceCount = _currentManifest?.TargetNicePhotoCount ?? Math.Max(0, TargetNicePhotoCount);
+
+        if (niceCount != targetNiceCount)
+        {
+            CanCommitFeedback = false;
+            CommitFeedbackStatus = $"expecting {targetNiceCount} nice pictures";
+            return;
+        }
+
+        if (uncategorizedCount > 0)
+        {
+            CanCommitFeedback = false;
+            CommitFeedbackStatus = $"{uncategorizedCount} uncategorized pictures left";
+            return;
+        }
+
+        CanCommitFeedback = true;
+        CommitFeedbackStatus = "ready to send";
     }
 
     private async Task MovePhotoViewerInCategoryAsync(int offset)
@@ -1320,9 +1595,49 @@ public partial class MainViewModel : ViewModelBase
                manifest.Photos.Any(photo => string.Equals(photo.BackendType, "google-drive-file", StringComparison.OrdinalIgnoreCase));
     }
 
+    private bool IsCurrentReviewerAuthor(AlbumManifest manifest)
+    {
+        if (_googleTokenSet?.UserId is not { Length: > 0 } reviewerUserId)
+        {
+            return false;
+        }
+
+        return string.Equals(manifest.Author.BackendType, "google", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(manifest.Author.UserId, reviewerUserId, StringComparison.Ordinal);
+    }
+
+    private static FeedbackReviewerIdentity CreateGoogleReviewerIdentity(GoogleOAuthTokenSet token)
+    {
+        return new FeedbackReviewerIdentity
+        {
+            BackendType = "google",
+            UserId = token.UserId ?? throw new InvalidOperationException("Google user id is missing."),
+            DisplayName = token.DisplayName,
+            Email = token.Email
+        };
+    }
+
     partial void OnSelectedAlbumTypeChanged(AlbumTypeOptionViewModel? value)
     {
         OnPropertyChanged(nameof(IsAlbumSettingsVisible));
+    }
+
+    partial void OnIsAuthorFlowVisibleChanged(bool value)
+    {
+        if (value && _isFlowTabActive)
+        {
+            StartFlowMonitor();
+        }
+        else
+        {
+            StopFlowMonitor();
+        }
+    }
+
+    partial void OnIsFeedbackCommittedChanged(bool value)
+    {
+        UpdateFeedbackControlState();
+        UpdateCurrentPhotoActionVisibility();
     }
 
     partial void OnShareLinkChanged(string value)
@@ -1349,6 +1664,7 @@ public partial class MainViewModel : ViewModelBase
     private void ResetCreateInputs()
     {
         AlbumTitle = "New album";
+        TargetNicePhotoCount = 0;
         ImportDate = DateTimeOffset.Now;
         ParentDriveFolderId = "";
         SelectedDriveFolderName = "Please select a folder";

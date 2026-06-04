@@ -10,9 +10,13 @@ public sealed record AlbumManifest
 
     public required DateTimeOffset CreatedAt { get; init; }
 
+    public required int TargetNicePhotoCount { get; init; }
+
     public required string PhotoBackendType { get; init; }
 
     public required string DatabaseBackendType { get; init; }
+
+    public required FeedbackReviewerIdentity Author { get; init; }
 
     public required GoogleDriveAlbumDetails GoogleDrive { get; init; }
 
@@ -51,4 +55,19 @@ public sealed record PhotoReference
     public required string ThumbnailDownloadUrl { get; init; }
 
     public required string ThumbnailContentType { get; init; }
+}
+
+public sealed record FeedbackReviewerIdentity
+{
+    public required string BackendType { get; init; }
+
+    public required string UserId { get; init; }
+
+    public string? DisplayName { get; init; }
+
+    public string? Email { get; init; }
+
+    public string DisplayLabel => string.IsNullOrWhiteSpace(DisplayName)
+        ? string.IsNullOrWhiteSpace(Email) ? UserId : Email
+        : DisplayName;
 }

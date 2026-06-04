@@ -111,6 +111,14 @@
                   </StackPanel>
 
                   <StackPanel Spacing="5">
+                    <TextBlock Text="Target nice pictures"/>
+                    <NumericUpDown Value="{Binding TargetNicePhotoCount}"
+                                   Minimum="0"
+                                   Increment="1"
+                                   FormatString="0"/>
+                  </StackPanel>
+
+                  <StackPanel Spacing="5">
                     <TextBlock Text="Photos"/>
                     <Grid RowDefinitions="Auto,Auto" ColumnDefinitions="*,Auto,Auto">
                       <ListBox x:Name="AlbumPhotosList"
@@ -509,8 +517,21 @@
           </Border>
 
           <Grid Grid.Row="1" RowDefinitions="Auto,*" Margin="0,16,0,0">
-              <TextBlock Grid.Row="0" Text="{Binding CurrentAlbumTitle}" FontSize="20" FontWeight="SemiBold" Margin="0,0,0,14"/>
-              <TabControl Grid.Row="1">
+              <Grid Grid.Row="0" ColumnDefinitions="*,Auto,Auto" Margin="0,0,0,14">
+                <TextBlock Text="{Binding CurrentAlbumTitle}" FontSize="20" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                <TextBlock Grid.Column="1"
+                           Text="{Binding CommitFeedbackStatus}"
+                           Foreground="#6C756F"
+                           VerticalAlignment="Center"
+                           Margin="0,0,10,0"/>
+                <Button Grid.Column="2"
+                        Command="{Binding CommitFeedbackCommand}"
+                        IsEnabled="{Binding CanCommitFeedback}"
+                        Padding="12,8">
+                  Commit feedback
+                </Button>
+              </Grid>
+              <TabControl x:Name="AlbumReviewTabs" Grid.Row="1" SelectionChanged="AlbumReviewTabs_SelectionChanged">
                 <TabItem Header="{Binding UncategorizedTabHeader}">
                   <ListBox ItemsSource="{Binding UncategorizedPhotoRows}"
                            Background="Transparent"
@@ -562,6 +583,37 @@
                       </ItemsPanelTemplate>
                     </ListBox.ItemsPanel>
                   </ListBox>
+                </TabItem>
+                <TabItem Header="{Binding FlowTabHeader}" IsVisible="{Binding IsAuthorFlowVisible}" Tag="Flow">
+                  <Grid RowDefinitions="Auto,Auto,*">
+                    <TextBlock Text="{Binding CommittedReviewersHeader}"
+                               FontWeight="SemiBold"
+                               Margin="0,0,0,4"/>
+                    <TextBlock Grid.Row="1"
+                               Text="{Binding FlowStatus}"
+                               Foreground="#6C756F"
+                               Margin="0,0,0,8"/>
+                    <ListBox Grid.Row="2"
+                             ItemsSource="{Binding CommittedReviewers}"
+                             Background="Transparent"
+                             BorderThickness="0">
+                      <ListBox.ItemTemplate>
+                        <DataTemplate x:DataType="vm:ReviewerFeedbackFlowItemViewModel">
+                          <Border Background="White"
+                                  BorderBrush="#D6D8D1"
+                                  BorderThickness="1"
+                                  CornerRadius="6"
+                                  Padding="12"
+                                  Margin="0,0,0,8">
+                            <StackPanel Spacing="2">
+                              <TextBlock Text="{Binding Name}" FontWeight="SemiBold"/>
+                              <TextBlock Text="{Binding Description}" FontSize="12" Foreground="#6C756F"/>
+                            </StackPanel>
+                          </Border>
+                        </DataTemplate>
+                      </ListBox.ItemTemplate>
+                    </ListBox>
+                  </Grid>
                 </TabItem>
               </TabControl>
           </Grid>
@@ -691,6 +743,38 @@
     </Grid>
 
     <Grid Grid.RowSpan="3"
+          Background="#80000000"
+          IsVisible="{Binding IsCommitConfirmationVisible}">
+      <Border Background="White"
+              BorderBrush="#D6D8D1"
+              BorderThickness="1"
+              CornerRadius="6"
+              Padding="18"
+              Margin="20"
+              MaxWidth="460"
+              HorizontalAlignment="Stretch"
+              VerticalAlignment="Center">
+        <StackPanel Spacing="12">
+          <TextBlock Text="Commit feedback" FontSize="18" FontWeight="SemiBold"/>
+          <TextBlock Text="{Binding CommitConfirmationMessage}" TextWrapping="Wrap"/>
+          <Grid ColumnDefinitions="*,Auto,Auto">
+            <Button Grid.Column="1"
+                    Command="{Binding CancelCommitFeedbackCommand}"
+                    Padding="12,8"
+                    Margin="0,0,8,0">
+              No
+            </Button>
+            <Button Grid.Column="2"
+                    Command="{Binding ConfirmCommitFeedbackCommand}"
+                    Padding="12,8">
+              Yes
+            </Button>
+          </Grid>
+        </StackPanel>
+      </Border>
+    </Grid>
+
+    <Grid Grid.RowSpan="3"
           Background="#F8000000"
           IsVisible="{Binding IsPhotoViewerVisible}">
       <Grid RowDefinitions="Auto,*">
@@ -760,7 +844,7 @@
                     HorizontalAlignment="Center"
                     VerticalAlignment="Bottom"
                     IsVisible="{Binding IsPhotoViewerActionsVisible}">
-              <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,Auto">
+              <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto">
                 <Button Padding="14,10"
                         Margin="0,0,8,0"
                         Command="{Binding ShowPreviousPhotoInCategoryCommand}"
@@ -781,7 +865,8 @@
                         Padding="14,10"
                         Margin="0,0,8,0"
                         Command="{Binding MarkCurrentPhotoUncategorizedCommand}"
-                        IsVisible="{Binding CanMarkCurrentPhotoUncategorized}"
+                        IsVisible="{Binding ShouldShowCurrentPhotoUncategorizedAction}"
+                        IsEnabled="{Binding CanMarkCurrentPhotoUncategorized}"
                         Background="White"
                         Foreground="Black"
                         BorderBrush="Black"
@@ -798,7 +883,8 @@
                         Padding="14,10"
                         Margin="0,0,8,0"
                         Command="{Binding MarkCurrentPhotoNiceCommand}"
-                        IsVisible="{Binding CanMarkCurrentPhotoNice}"
+                        IsVisible="{Binding ShouldShowCurrentPhotoNiceAction}"
+                        IsEnabled="{Binding CanMarkCurrentPhotoNice}"
                         Background="White"
                         Foreground="Black"
                         BorderBrush="Black"
@@ -815,7 +901,8 @@
                         Padding="14,10"
                         Margin="0,0,8,0"
                         Command="{Binding MarkCurrentPhotoOkCommand}"
-                        IsVisible="{Binding CanMarkCurrentPhotoOk}"
+                        IsVisible="{Binding ShouldShowCurrentPhotoOkAction}"
+                        IsEnabled="{Binding CanMarkCurrentPhotoOk}"
                         Background="White"
                         Foreground="Black"
                         BorderBrush="Black"
@@ -846,11 +933,29 @@
                     <MenuFlyout>
                       <MenuItem Header="trash"
                                 Command="{Binding MarkCurrentPhotoTrashCommand}"
-                                IsVisible="{Binding CanShowCurrentPhotoTrashAction}"/>
+                                IsVisible="{Binding CanShowCurrentPhotoTrashAction}"
+                                IsEnabled="{Binding CanMarkCurrentPhotoTrash}"/>
                     </MenuFlyout>
                   </Button.Flyout>
                 </Button>
                 <Button Grid.Column="5"
+                        Padding="14,10"
+                        Margin="0,0,8,0"
+                        Command="{Binding CommitFeedbackCommand}"
+                        IsEnabled="{Binding CanCommitFeedback}"
+                        Background="White"
+                        Foreground="Black"
+                        BorderBrush="Black"
+                        BorderThickness="2">
+                  <Grid>
+                    <TextBlock Text="commit" FontWeight="SemiBold" Foreground="White" Margin="-1,-1,0,0"/>
+                    <TextBlock Text="commit" FontWeight="SemiBold" Foreground="White" Margin="1,-1,0,0"/>
+                    <TextBlock Text="commit" FontWeight="SemiBold" Foreground="White" Margin="-1,1,0,0"/>
+                    <TextBlock Text="commit" FontWeight="SemiBold" Foreground="White" Margin="1,1,0,0"/>
+                    <TextBlock Text="commit" FontWeight="SemiBold" Foreground="Black"/>
+                  </Grid>
+                </Button>
+                <Button Grid.Column="6"
                         Padding="14,10"
                         Command="{Binding ShowNextPhotoInCategoryCommand}"
                         IsEnabled="{Binding CanNavigatePhotoViewerCategory}"

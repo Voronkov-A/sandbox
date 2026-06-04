@@ -6,9 +6,13 @@ public sealed record DriveAlbumPublishRequest
 
     public required IReadOnlyList<PhotoUploadSource> Photos { get; init; }
 
+    public required int TargetNicePhotoCount { get; init; }
+
     public string? ParentDriveFolderId { get; init; }
 
     public required string AccessToken { get; init; }
+
+    public required FeedbackReviewerIdentity Author { get; init; }
 }
 
 public sealed record DriveAlbumPublishResult
