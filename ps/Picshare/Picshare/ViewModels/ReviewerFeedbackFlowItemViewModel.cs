@@ -7,7 +7,7 @@ public sealed class ReviewerFeedbackFlowItemViewModel
     public ReviewerFeedbackFlowItemViewModel(ReviewerFeedbackFlowItem item)
     {
         Name = item.Reviewer.DisplayLabel;
-        Description = item.CommittedAt.ToLocalTime().ToString("g");
+        Description = item.UpdatedAt.ToLocalTime().ToString("g");
     }
 
     public string Name { get; }

@@ -129,6 +129,30 @@ public partial class MainViewModel : ViewModelBase
     private bool _isFeedbackCommitted;
 
     [ObservableProperty]
+    private bool _isPassConfirmationVisible;
+
+    [ObservableProperty]
+    private string _passConfirmationMessage = "";
+
+    [ObservableProperty]
+    private bool _isFeedbackPassed;
+
+    [ObservableProperty]
+    private bool _isCollectFeedbackConfirmationVisible;
+
+    [ObservableProperty]
+    private string _collectFeedbackConfirmationMessage = "";
+
+    [ObservableProperty]
+    private bool _canCollectFeedback;
+
+    [ObservableProperty]
+    private bool _canStartNextRound;
+
+    [ObservableProperty]
+    private bool _canFinalizeFeedback;
+
+    [ObservableProperty]
     private bool _canModifyFeedback;
 
     [ObservableProperty]
@@ -136,6 +160,9 @@ public partial class MainViewModel : ViewModelBase
 
     [ObservableProperty]
     private string _commitFeedbackStatus = "";
+
+    [ObservableProperty]
+    private bool _canPassFeedback;
 
     [ObservableProperty]
     private bool _canMarkCurrentPhotoUncategorized;
@@ -208,15 +235,19 @@ public partial class MainViewModel : ViewModelBase
 
     public ObservableCollection<AlbumPhotoViewModel> Photos { get; } = new();
 
-    public ObservableCollection<AlbumPhotoRowViewModel> UncategorizedPhotoRows { get; } = new();
+    public ObservableCollection<AlbumPhotoGroupViewModel> UncategorizedPhotoGroups { get; } = new();
 
-    public ObservableCollection<AlbumPhotoRowViewModel> NicePhotoRows { get; } = new();
+    public ObservableCollection<AlbumPhotoGroupViewModel> NicePhotoGroups { get; } = new();
 
-    public ObservableCollection<AlbumPhotoRowViewModel> OkPhotoRows { get; } = new();
+    public ObservableCollection<AlbumPhotoGroupViewModel> OkPhotoGroups { get; } = new();
 
-    public ObservableCollection<AlbumPhotoRowViewModel> TrashPhotoRows { get; } = new();
+    public ObservableCollection<AlbumPhotoGroupViewModel> TrashPhotoGroups { get; } = new();
 
     public ObservableCollection<ReviewerFeedbackFlowItemViewModel> CommittedReviewers { get; } = new();
+
+    public ObservableCollection<ReviewerFeedbackFlowItemViewModel> PassedReviewers { get; } = new();
+
+    public ObservableCollection<ReviewerFeedbackFlowItemViewModel> InProgressReviewers { get; } = new();
 
     public string UncategorizedTabHeader => $"Uncategorized ({Photos.Count(photo => string.IsNullOrWhiteSpace(photo.Category))})";
 
@@ -229,6 +260,10 @@ public partial class MainViewModel : ViewModelBase
     public string FlowTabHeader => "Flow";
 
     public string CommittedReviewersHeader => $"Committed reviewers ({CommittedReviewers.Count})";
+
+    public string PassedReviewersHeader => $"Passed ({PassedReviewers.Count})";
+
+    public string InProgressReviewersHeader => $"In progress ({InProgressReviewers.Count})";
 
     private readonly GoogleDriveAlbumPublisher _publisher = new();
     private readonly AlbumLoader _albumLoader = new();
@@ -253,8 +288,9 @@ public partial class MainViewModel : ViewModelBase
     private string _selectedViewedPhotoSourceCategory = "";
     private ReviewerFeedbackSession? _feedbackSession;
     private ReviewerFeedbackDatabase? _feedbackDatabase;
-    private ReviewerFeedbackCommit? _feedbackCommit;
+    private ReviewerFeedbackStatus? _feedbackStatus;
     private bool _isFlowTabActive;
+    private int _unfrozenCollectedPhotoCount;
     private readonly SemaphoreSlim _feedbackSyncGate = new(1);
     private string? _driveNextPageToken;
 
@@ -338,7 +374,7 @@ public partial class MainViewModel : ViewModelBase
                 accessToken,
                 CancellationToken.None);
 
-            _feedbackCommit = result.Commit;
+            _feedbackStatus = result.Status;
             IsFeedbackCommitted = true;
             UpdateFeedbackControlState();
             UpdateCurrentPhotoActionVisibility();
@@ -351,6 +387,156 @@ public partial class MainViewModel : ViewModelBase
         {
             Status = ex.Message;
         }
+    }
+
+    [RelayCommand]
+    private void PassFeedback()
+    {
+        if (!CanPassFeedback)
+        {
+            return;
+        }
+
+        PassConfirmationMessage = "Pass on this album? Your feedback will not be taken into account.";
+        IsPassConfirmationVisible = true;
+    }
+
+    [RelayCommand]
+    private void CancelPassFeedback()
+    {
+        IsPassConfirmationVisible = false;
+        PassConfirmationMessage = "";
+    }
+
+    [RelayCommand]
+    private async Task ConfirmPassFeedbackAsync()
+    {
+        if (_feedbackSession is null || _googleTokenSet is null || !CanPassFeedback)
+        {
+            IsPassConfirmationVisible = false;
+            return;
+        }
+
+        IsPassConfirmationVisible = false;
+        PassConfirmationMessage = "";
+
+        try
+        {
+            var accessToken = await GetGoogleAccessTokenAsync(CancellationToken.None);
+            var result = await _reviewerFeedbackService.PassAsync(
+                _feedbackSession,
+                CreateGoogleReviewerIdentity(_googleTokenSet),
+                accessToken,
+                CancellationToken.None);
+
+            _feedbackStatus = result.Status;
+            IsFeedbackPassed = true;
+            UpdateFeedbackControlState();
+            UpdateCurrentPhotoActionVisibility();
+            await SyncFeedbackAsync();
+            Status = result.RemoteWon
+                ? "Feedback was already passed remotely. The remote pass was loaded."
+                : "Feedback passed.";
+        }
+        catch (Exception ex)
+        {
+            Status = ex.Message;
+        }
+    }
+
+    [RelayCommand]
+    private void CollectFeedback()
+    {
+        if (!CanCollectFeedback)
+        {
+            return;
+        }
+
+        CollectFeedbackConfirmationMessage = "Collect committed feedback and publish the merged categories?";
+        IsCollectFeedbackConfirmationVisible = true;
+    }
+
+    [RelayCommand]
+    private void CancelCollectFeedback()
+    {
+        IsCollectFeedbackConfirmationVisible = false;
+        CollectFeedbackConfirmationMessage = "";
+    }
+
+    [RelayCommand]
+    private async Task ConfirmCollectFeedbackAsync()
+    {
+        if (_currentManifest is null || _googleTokenSet is null || !CanCollectFeedback)
+        {
+            IsCollectFeedbackConfirmationVisible = false;
+            return;
+        }
+
+        IsCollectFeedbackConfirmationVisible = false;
+        CollectFeedbackConfirmationMessage = "";
+
+        try
+        {
+            IsBusy = true;
+            var accessToken = await GetGoogleAccessTokenAsync(CancellationToken.None);
+            var result = await _reviewerFeedbackService.CollectFeedbackAsync(
+                _currentManifest,
+                accessToken,
+                CancellationToken.None);
+
+            await SyncFeedbackAsync();
+            await RefreshFlowAsync(CancellationToken.None);
+            _unfrozenCollectedPhotoCount = result.UnfrozenPhotoCount;
+            UpdateFeedbackControlState();
+            Status = $"Collected {result.ReviewerCount} feedback(s) for {result.PhotoCount} photo(s).";
+        }
+        catch (Exception ex)
+        {
+            Status = ex.Message;
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task StartNextRoundAsync()
+    {
+        if (_currentManifest is null || _googleTokenSet is null || !CanStartNextRound)
+        {
+            return;
+        }
+
+        try
+        {
+            IsBusy = true;
+            var accessToken = await GetGoogleAccessTokenAsync(CancellationToken.None);
+            var reviewerCount = await _reviewerFeedbackService.StartNextRoundAsync(
+                _currentManifest,
+                accessToken,
+                CancellationToken.None);
+
+            await SyncFeedbackAsync();
+            await RefreshFlowAsync(CancellationToken.None);
+            _unfrozenCollectedPhotoCount = 0;
+            UpdateFeedbackControlState();
+            Status = $"Started next round for {reviewerCount} reviewer(s).";
+        }
+        catch (Exception ex)
+        {
+            Status = ex.Message;
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    private void FinalizeFeedback()
+    {
+        Status = "Finalization is not implemented yet.";
     }
 
     [RelayCommand]
@@ -1033,13 +1219,21 @@ public partial class MainViewModel : ViewModelBase
                 _currentManifest = null;
                 _feedbackSession = null;
                 _feedbackDatabase = null;
-                _feedbackCommit = null;
+                _feedbackStatus = null;
                 IsFeedbackCommitted = false;
+                IsFeedbackPassed = false;
                 IsCommitConfirmationVisible = false;
                 CommitConfirmationMessage = "";
+                IsPassConfirmationVisible = false;
+                PassConfirmationMessage = "";
+                IsCollectFeedbackConfirmationVisible = false;
+                CollectFeedbackConfirmationMessage = "";
+                CanCollectFeedback = false;
+                CanStartNextRound = false;
+                CanFinalizeFeedback = false;
+                _unfrozenCollectedPhotoCount = 0;
                 IsAuthorFlowVisible = false;
-                CommittedReviewers.Clear();
-                OnPropertyChanged(nameof(CommittedReviewersHeader));
+                ClearFlowReviewers();
                 _pendingGoogleAuthorizationManifest = manifest;
                 CurrentAlbumTitle = manifest.Title;
                 Photos.Clear();
@@ -1073,14 +1267,22 @@ public partial class MainViewModel : ViewModelBase
         _currentManifest = manifest;
         _feedbackSession = null;
         _feedbackDatabase = null;
-        _feedbackCommit = null;
+        _feedbackStatus = null;
         IsFeedbackCommitted = false;
+        IsFeedbackPassed = false;
         IsCommitConfirmationVisible = false;
         CommitConfirmationMessage = "";
+        IsPassConfirmationVisible = false;
+        PassConfirmationMessage = "";
+        IsCollectFeedbackConfirmationVisible = false;
+        CollectFeedbackConfirmationMessage = "";
+        CanCollectFeedback = false;
+        CanStartNextRound = false;
+        CanFinalizeFeedback = false;
+        _unfrozenCollectedPhotoCount = 0;
         IsAuthorFlowVisible = false;
         FlowStatus = "";
-        CommittedReviewers.Clear();
-        OnPropertyChanged(nameof(CommittedReviewersHeader));
+        ClearFlowReviewers();
         UpdateFeedbackControlState();
 
         CurrentAlbumTitle = manifest.Title;
@@ -1119,7 +1321,7 @@ public partial class MainViewModel : ViewModelBase
 
     private async Task SetCurrentPhotoCategoryAsync(string category)
     {
-        if (_selectedViewedPhoto is null || IsFeedbackCommitted)
+        if (_selectedViewedPhoto is null || _selectedViewedPhoto.IsFrozen || IsFeedbackCommitted || IsFeedbackPassed)
         {
             return;
         }
@@ -1226,9 +1428,12 @@ public partial class MainViewModel : ViewModelBase
 
         _feedbackSession = result.Session;
         _feedbackDatabase = result.Database;
-        _feedbackCommit = result.Commit;
-        IsFeedbackCommitted = _feedbackCommit is not null;
+        _feedbackStatus = result.Status;
+        IsFeedbackCommitted = _feedbackStatus.Status == ReviewerFeedbackStatusKind.Committed;
+        IsFeedbackPassed = _feedbackStatus.Status == ReviewerFeedbackStatusKind.Passed;
         IsAuthorFlowVisible = IsCurrentReviewerAuthor(manifest);
+        CanCollectFeedback = IsAuthorFlowVisible;
+        CanFinalizeFeedback = IsAuthorFlowVisible;
         UpdateFeedbackControlState();
 
         if (result.ConcurrentRemoteUpdate)
@@ -1247,18 +1452,29 @@ public partial class MainViewModel : ViewModelBase
                 _feedbackDatabase.PhotoCategories.TryGetValue(photo.PhotoId, out var category)
                     ? category
                     : "";
+            photo.IsFrozen = _feedbackDatabase?.FrozenPhotoIds.Contains(photo.PhotoId) == true;
         }
 
+        _unfrozenCollectedPhotoCount = _feedbackDatabase?.HasCollectedFeedback == true
+            ? Photos.Count(photo => !photo.IsFrozen)
+            : 0;
+
         RebuildCategoryRows();
+    }
+
+    private void ApplyFeedbackStatus()
+    {
+        IsFeedbackCommitted = _feedbackStatus?.Status == ReviewerFeedbackStatusKind.Committed;
+        IsFeedbackPassed = _feedbackStatus?.Status == ReviewerFeedbackStatusKind.Passed;
     }
 
     private void RebuildCategoryRows()
     {
         ClearCategoryRows();
-        AddRows(UncategorizedPhotoRows, Photos.Where(photo => string.IsNullOrWhiteSpace(photo.Category)));
-        AddRows(NicePhotoRows, Photos.Where(photo => string.Equals(photo.Category, "nice", StringComparison.Ordinal)));
-        AddRows(OkPhotoRows, Photos.Where(photo => string.Equals(photo.Category, "ok", StringComparison.Ordinal)));
-        AddRows(TrashPhotoRows, Photos.Where(photo => string.Equals(photo.Category, "trash", StringComparison.Ordinal)));
+        AddGroups(UncategorizedPhotoGroups, Photos.Where(photo => string.IsNullOrWhiteSpace(photo.Category)));
+        AddGroups(NicePhotoGroups, Photos.Where(photo => string.Equals(photo.Category, "nice", StringComparison.Ordinal)));
+        AddGroups(OkPhotoGroups, Photos.Where(photo => string.Equals(photo.Category, "ok", StringComparison.Ordinal)));
+        AddGroups(TrashPhotoGroups, Photos.Where(photo => string.Equals(photo.Category, "trash", StringComparison.Ordinal)));
         OnPropertyChanged(nameof(UncategorizedTabHeader));
         OnPropertyChanged(nameof(NiceTabHeader));
         OnPropertyChanged(nameof(OkTabHeader));
@@ -1268,18 +1484,41 @@ public partial class MainViewModel : ViewModelBase
 
     private void ClearCategoryRows()
     {
-        UncategorizedPhotoRows.Clear();
-        NicePhotoRows.Clear();
-        OkPhotoRows.Clear();
-        TrashPhotoRows.Clear();
+        UncategorizedPhotoGroups.Clear();
+        NicePhotoGroups.Clear();
+        OkPhotoGroups.Clear();
+        TrashPhotoGroups.Clear();
     }
 
-    private static void AddRows(ObservableCollection<AlbumPhotoRowViewModel> rows, IEnumerable<AlbumPhotoViewModel> photos)
+    private static void AddGroups(ObservableCollection<AlbumPhotoGroupViewModel> groups, IEnumerable<AlbumPhotoViewModel> photos)
     {
-        foreach (var row in photos.Chunk(PhotosPerRow))
+        var materialized = photos.ToList();
+        AddGroup(groups, "Uncommitted", materialized.Where(photo => !photo.IsFrozen));
+        AddGroup(groups, "Committed", materialized.Where(photo => photo.IsFrozen));
+    }
+
+    private static void AddGroup(
+        ObservableCollection<AlbumPhotoGroupViewModel> groups,
+        string header,
+        IEnumerable<AlbumPhotoViewModel> photos)
+    {
+        var materialized = photos.ToList();
+        if (materialized.Count == 0)
         {
-            rows.Add(new AlbumPhotoRowViewModel(row));
+            return;
         }
+
+        groups.Add(new AlbumPhotoGroupViewModel(header, materialized, PhotosPerRow));
+    }
+
+    private void ClearFlowReviewers()
+    {
+        CommittedReviewers.Clear();
+        PassedReviewers.Clear();
+        InProgressReviewers.Clear();
+        OnPropertyChanged(nameof(CommittedReviewersHeader));
+        OnPropertyChanged(nameof(PassedReviewersHeader));
+        OnPropertyChanged(nameof(InProgressReviewersHeader));
     }
 
     private void StartFeedbackSync()
@@ -1335,11 +1574,11 @@ public partial class MainViewModel : ViewModelBase
             if (result.RemoteWon)
             {
                 _feedbackDatabase = result.Database;
-                _feedbackCommit = result.Commit ?? _feedbackCommit;
+                _feedbackStatus = result.Status ?? _feedbackStatus;
                 await Dispatcher.UIThread.InvokeAsync(() =>
                 {
                     ApplyFeedbackDatabaseToPhotos();
-                    IsFeedbackCommitted = _feedbackCommit is not null;
+                    ApplyFeedbackStatus();
                     UpdateFeedbackControlState();
                     UpdateCurrentPhotoActionVisibility();
                     if (result.LocalDirtyBeforeSync)
@@ -1348,12 +1587,12 @@ public partial class MainViewModel : ViewModelBase
                     }
                 });
             }
-            else if (result.Commit is not null && _feedbackCommit is null)
+            else if (result.Status is not null && !Equals(_feedbackStatus?.Status, result.Status.Status))
             {
-                _feedbackCommit = result.Commit;
+                _feedbackStatus = result.Status;
                 await Dispatcher.UIThread.InvokeAsync(() =>
                 {
-                    IsFeedbackCommitted = true;
+                    ApplyFeedbackStatus();
                     UpdateFeedbackControlState();
                     UpdateCurrentPhotoActionVisibility();
                 });
@@ -1430,22 +1669,34 @@ public partial class MainViewModel : ViewModelBase
         {
             await Dispatcher.UIThread.InvokeAsync(() => FlowStatus = "Refreshing");
             var accessToken = await GetGoogleAccessTokenAsync(cancellationToken);
-            var reviewers = await _reviewerFeedbackService.LoadCommittedReviewersAsync(
+            var flow = await _reviewerFeedbackService.LoadFeedbackFlowAsync(
                 _currentManifest.GoogleDrive.FeedbackFolderId,
                 accessToken,
                 cancellationToken);
 
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
-                CommittedReviewers.Clear();
-                foreach (var reviewer in reviewers)
+                ClearFlowReviewers();
+                foreach (var reviewer in flow.Committed)
                 {
                     CommittedReviewers.Add(new ReviewerFeedbackFlowItemViewModel(reviewer));
                 }
 
+                foreach (var reviewer in flow.Passed)
+                {
+                    PassedReviewers.Add(new ReviewerFeedbackFlowItemViewModel(reviewer));
+                }
+
+                foreach (var reviewer in flow.InProgress)
+                {
+                    InProgressReviewers.Add(new ReviewerFeedbackFlowItemViewModel(reviewer));
+                }
+
                 OnPropertyChanged(nameof(CommittedReviewersHeader));
-                FlowStatus = reviewers.Count == 0
-                    ? "No committed feedback yet."
+                OnPropertyChanged(nameof(PassedReviewersHeader));
+                OnPropertyChanged(nameof(InProgressReviewersHeader));
+                FlowStatus = flow.Committed.Count == 0 && flow.Passed.Count == 0 && flow.InProgress.Count == 0
+                    ? "No reviewer activity yet."
                     : "";
             });
         }
@@ -1489,20 +1740,27 @@ public partial class MainViewModel : ViewModelBase
         ShouldShowCurrentPhotoNiceAction = !string.Equals(category, "nice", StringComparison.Ordinal);
         ShouldShowCurrentPhotoOkAction = !string.Equals(category, "ok", StringComparison.Ordinal);
         ShouldShowCurrentPhotoTrashAction = !string.Equals(category, "trash", StringComparison.Ordinal);
-        CanMarkCurrentPhotoUncategorized = CanModifyFeedback && ShouldShowCurrentPhotoUncategorizedAction;
-        CanMarkCurrentPhotoNice = CanModifyFeedback && ShouldShowCurrentPhotoNiceAction;
-        CanMarkCurrentPhotoOk = CanModifyFeedback && ShouldShowCurrentPhotoOkAction;
-        CanMarkCurrentPhotoTrash = CanModifyFeedback && ShouldShowCurrentPhotoTrashAction;
+        var canChangeCurrentPhoto = CanModifyFeedback && _selectedViewedPhoto?.IsFrozen != true;
+        CanMarkCurrentPhotoUncategorized = canChangeCurrentPhoto && ShouldShowCurrentPhotoUncategorizedAction;
+        CanMarkCurrentPhotoNice = canChangeCurrentPhoto && ShouldShowCurrentPhotoNiceAction;
+        CanMarkCurrentPhotoOk = canChangeCurrentPhoto && ShouldShowCurrentPhotoOkAction;
+        CanMarkCurrentPhotoTrash = canChangeCurrentPhoto && ShouldShowCurrentPhotoTrashAction;
         CanShowCurrentPhotoTrashAction = ShouldShowCurrentPhotoTrashAction;
         CanNavigatePhotoViewerCategory = _selectedViewedPhoto is not null && GetPhotosForCategory(category).Any();
     }
 
     private void UpdateFeedbackControlState()
     {
-        CanModifyFeedback = _feedbackSession is not null && !IsFeedbackCommitted;
+        var hasTerminalFeedbackState = IsFeedbackCommitted || IsFeedbackPassed;
+        CanModifyFeedback = _feedbackSession is not null && !hasTerminalFeedbackState;
+        CanPassFeedback = _feedbackSession is not null && !hasTerminalFeedbackState;
+        CanCollectFeedback = IsAuthorFlowVisible;
+        CanFinalizeFeedback = IsAuthorFlowVisible;
+        CanStartNextRound = IsAuthorFlowVisible && _unfrozenCollectedPhotoCount > 0;
         if (_feedbackSession is null)
         {
             CanCommitFeedback = false;
+            CanPassFeedback = false;
             CommitFeedbackStatus = "";
             return;
         }
@@ -1514,21 +1772,28 @@ public partial class MainViewModel : ViewModelBase
             return;
         }
 
-        var uncategorizedCount = Photos.Count(photo => string.IsNullOrWhiteSpace(photo.Category));
-        var niceCount = Photos.Count(photo => string.Equals(photo.Category, "nice", StringComparison.Ordinal));
-        var targetNiceCount = _currentManifest?.TargetNicePhotoCount ?? Math.Max(0, TargetNicePhotoCount);
-
-        if (niceCount != targetNiceCount)
+        if (IsFeedbackPassed)
         {
             CanCommitFeedback = false;
-            CommitFeedbackStatus = $"expecting {targetNiceCount} nice pictures";
+            CommitFeedbackStatus = "feedback passed";
             return;
         }
+
+        var uncategorizedCount = Photos.Count(photo => !photo.IsFrozen && string.IsNullOrWhiteSpace(photo.Category));
+        var niceCount = Photos.Count(photo => string.Equals(photo.Category, "nice", StringComparison.Ordinal));
+        var targetNiceCount = _currentManifest?.TargetNicePhotoCount ?? Math.Max(0, TargetNicePhotoCount);
 
         if (uncategorizedCount > 0)
         {
             CanCommitFeedback = false;
             CommitFeedbackStatus = $"{uncategorizedCount} uncategorized pictures left";
+            return;
+        }
+
+        if (niceCount != targetNiceCount)
+        {
+            CanCommitFeedback = false;
+            CommitFeedbackStatus = $"expecting {targetNiceCount} nice pictures";
             return;
         }
 
@@ -1635,6 +1900,12 @@ public partial class MainViewModel : ViewModelBase
     }
 
     partial void OnIsFeedbackCommittedChanged(bool value)
+    {
+        UpdateFeedbackControlState();
+        UpdateCurrentPhotoActionVisibility();
+    }
+
+    partial void OnIsFeedbackPassedChanged(bool value)
     {
         UpdateFeedbackControlState();
         UpdateCurrentPhotoActionVisibility();

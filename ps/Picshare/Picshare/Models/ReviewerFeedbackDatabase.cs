@@ -10,7 +10,13 @@ public sealed class ReviewerFeedbackDatabase
 
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 
+    public bool HasCollectedFeedback { get; set; }
+
     public Dictionary<string, string> PhotoCategories { get; set; } = new(StringComparer.Ordinal);
+
+    public Dictionary<string, int> PhotoScores { get; set; } = new(StringComparer.Ordinal);
+
+    public HashSet<string> FrozenPhotoIds { get; set; } = new(StringComparer.Ordinal);
 }
 
 public sealed class ReviewerFeedbackLocalState
@@ -23,14 +29,23 @@ public sealed class ReviewerFeedbackLocalState
 
     public bool LocalDirty { get; set; }
 
-    public string? CommitRemoteFileId { get; set; }
+    public string? StatusRemoteFileId { get; set; }
 
-    public DateTimeOffset? CommitRemoteModifiedTime { get; set; }
+    public DateTimeOffset? StatusRemoteModifiedTime { get; set; }
 
-    public bool CommitLocalDirty { get; set; }
+    public bool StatusLocalDirty { get; set; }
+
+    public string? SharedCategoriesVersion { get; set; }
 }
 
-public sealed class ReviewerFeedbackCommit
+public enum ReviewerFeedbackStatusKind
+{
+    InProgress,
+    Committed,
+    Passed
+}
+
+public sealed class ReviewerFeedbackStatus
 {
     public int Version { get; set; } = 1;
 
@@ -38,30 +53,73 @@ public sealed class ReviewerFeedbackCommit
 
     public required FeedbackReviewerIdentity Reviewer { get; set; }
 
-    public DateTimeOffset CommittedAt { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset OpenedAt { get; set; } = DateTimeOffset.UtcNow;
+
+    public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+
+    public ReviewerFeedbackStatusKind Status { get; set; } = ReviewerFeedbackStatusKind.InProgress;
 }
 
 public sealed record ReviewerFeedbackLoadResult(
     ReviewerFeedbackSession Session,
     ReviewerFeedbackDatabase Database,
-    ReviewerFeedbackCommit? Commit,
+    ReviewerFeedbackStatus Status,
     bool ConcurrentRemoteUpdate);
 
 public sealed record ReviewerFeedbackSyncResult(
     ReviewerFeedbackDatabase Database,
     ReviewerFeedbackLocalState State,
-    ReviewerFeedbackCommit? Commit,
+    ReviewerFeedbackStatus? Status,
     bool RemoteWon,
     bool LocalDirtyBeforeSync);
 
-public sealed record ReviewerFeedbackCommitResult(
-    ReviewerFeedbackCommit Commit,
+public sealed record ReviewerFeedbackStatusResult(
+    ReviewerFeedbackStatus Status,
     ReviewerFeedbackLocalState State,
     bool RemoteWon);
 
+public sealed class SharedFeedbackDatabase
+{
+    public int Version { get; set; } = 1;
+
+    public required string AlbumId { get; set; }
+
+    public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+
+    public bool HasCollectedFeedback { get; set; }
+
+    public Dictionary<string, string> PhotoCategories { get; set; } = new(StringComparer.Ordinal);
+
+    public Dictionary<string, int> PhotoScores { get; set; } = new(StringComparer.Ordinal);
+
+    public HashSet<string> FrozenPhotoIds { get; set; } = new(StringComparer.Ordinal);
+}
+
+public sealed class SharedFeedbackVersion
+{
+    public int Version { get; set; } = 1;
+
+    public required string AlbumId { get; set; }
+
+    public required string DatabaseVersion { get; set; }
+
+    public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
+public sealed record ReviewerFeedbackCollectResult(
+    int ReviewerCount,
+    int PhotoCount,
+    int UnfrozenPhotoCount,
+    string DatabaseVersion);
+
 public sealed record ReviewerFeedbackFlowItem(
     FeedbackReviewerIdentity Reviewer,
-    DateTimeOffset CommittedAt);
+    DateTimeOffset UpdatedAt);
+
+public sealed record ReviewerFeedbackFlowSnapshot(
+    IReadOnlyList<ReviewerFeedbackFlowItem> Committed,
+    IReadOnlyList<ReviewerFeedbackFlowItem> Passed,
+    IReadOnlyList<ReviewerFeedbackFlowItem> InProgress);
 
 public sealed class ReviewerFeedbackSession
 {

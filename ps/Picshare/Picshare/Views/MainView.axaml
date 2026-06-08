@@ -50,6 +50,17 @@
         </ItemsControl.ItemTemplate>
       </ItemsControl>
     </DataTemplate>
+
+    <DataTemplate x:Key="AlbumPhotoGroupTemplate" x:DataType="vm:AlbumPhotoGroupViewModel">
+      <StackPanel Spacing="8" Margin="0,0,0,12">
+        <TextBlock Text="{Binding Header}"
+                   FontSize="14"
+                   FontWeight="SemiBold"
+                   Foreground="#27343B"/>
+        <ItemsControl ItemsSource="{Binding Rows}"
+                      ItemTemplate="{StaticResource AlbumPhotoRowTemplate}"/>
+      </StackPanel>
+    </DataTemplate>
   </UserControl.Resources>
 
   <Grid RowDefinitions="Auto,*,Auto" Background="#F7F7F4">
@@ -517,7 +528,7 @@
           </Border>
 
           <Grid Grid.Row="1" RowDefinitions="Auto,*" Margin="0,16,0,0">
-              <Grid Grid.Row="0" ColumnDefinitions="*,Auto,Auto" Margin="0,0,0,14">
+              <Grid Grid.Row="0" ColumnDefinitions="*,Auto,Auto,Auto" Margin="0,0,0,14">
                 <TextBlock Text="{Binding CurrentAlbumTitle}" FontSize="20" FontWeight="SemiBold" VerticalAlignment="Center"/>
                 <TextBlock Grid.Column="1"
                            Text="{Binding CommitFeedbackStatus}"
@@ -527,16 +538,29 @@
                 <Button Grid.Column="2"
                         Command="{Binding CommitFeedbackCommand}"
                         IsEnabled="{Binding CanCommitFeedback}"
+                        Margin="0,0,8,0"
                         Padding="12,8">
                   Commit feedback
+                </Button>
+                <Button Grid.Column="3"
+                        IsEnabled="{Binding CanPassFeedback}"
+                        Padding="12,8">
+                  More
+                  <Button.Flyout>
+                    <MenuFlyout>
+                      <MenuItem Header="pass"
+                                Command="{Binding PassFeedbackCommand}"
+                                IsEnabled="{Binding CanPassFeedback}"/>
+                    </MenuFlyout>
+                  </Button.Flyout>
                 </Button>
               </Grid>
               <TabControl x:Name="AlbumReviewTabs" Grid.Row="1" SelectionChanged="AlbumReviewTabs_SelectionChanged">
                 <TabItem Header="{Binding UncategorizedTabHeader}">
-                  <ListBox ItemsSource="{Binding UncategorizedPhotoRows}"
+                  <ListBox ItemsSource="{Binding UncategorizedPhotoGroups}"
                            Background="Transparent"
                            BorderThickness="0"
-                           ItemTemplate="{StaticResource AlbumPhotoRowTemplate}"
+                           ItemTemplate="{StaticResource AlbumPhotoGroupTemplate}"
                            ScrollViewer.HorizontalScrollBarVisibility="Disabled">
                     <ListBox.ItemsPanel>
                       <ItemsPanelTemplate>
@@ -546,10 +570,10 @@
                   </ListBox>
                 </TabItem>
                 <TabItem Header="{Binding NiceTabHeader}">
-                  <ListBox ItemsSource="{Binding NicePhotoRows}"
+                  <ListBox ItemsSource="{Binding NicePhotoGroups}"
                            Background="Transparent"
                            BorderThickness="0"
-                           ItemTemplate="{StaticResource AlbumPhotoRowTemplate}"
+                           ItemTemplate="{StaticResource AlbumPhotoGroupTemplate}"
                            ScrollViewer.HorizontalScrollBarVisibility="Disabled">
                     <ListBox.ItemsPanel>
                       <ItemsPanelTemplate>
@@ -559,10 +583,10 @@
                   </ListBox>
                 </TabItem>
                 <TabItem Header="{Binding OkTabHeader}">
-                  <ListBox ItemsSource="{Binding OkPhotoRows}"
+                  <ListBox ItemsSource="{Binding OkPhotoGroups}"
                            Background="Transparent"
                            BorderThickness="0"
-                           ItemTemplate="{StaticResource AlbumPhotoRowTemplate}"
+                           ItemTemplate="{StaticResource AlbumPhotoGroupTemplate}"
                            ScrollViewer.HorizontalScrollBarVisibility="Disabled">
                     <ListBox.ItemsPanel>
                       <ItemsPanelTemplate>
@@ -572,10 +596,10 @@
                   </ListBox>
                 </TabItem>
                 <TabItem Header="{Binding TrashTabHeader}">
-                  <ListBox ItemsSource="{Binding TrashPhotoRows}"
+                  <ListBox ItemsSource="{Binding TrashPhotoGroups}"
                            Background="Transparent"
                            BorderThickness="0"
-                           ItemTemplate="{StaticResource AlbumPhotoRowTemplate}"
+                           ItemTemplate="{StaticResource AlbumPhotoGroupTemplate}"
                            ScrollViewer.HorizontalScrollBarVisibility="Disabled">
                     <ListBox.ItemsPanel>
                       <ItemsPanelTemplate>
@@ -585,35 +609,102 @@
                   </ListBox>
                 </TabItem>
                 <TabItem Header="{Binding FlowTabHeader}" IsVisible="{Binding IsAuthorFlowVisible}" Tag="Flow">
-                  <Grid RowDefinitions="Auto,Auto,*">
-                    <TextBlock Text="{Binding CommittedReviewersHeader}"
-                               FontWeight="SemiBold"
-                               Margin="0,0,0,4"/>
-                    <TextBlock Grid.Row="1"
-                               Text="{Binding FlowStatus}"
-                               Foreground="#6C756F"
-                               Margin="0,0,0,8"/>
-                    <ListBox Grid.Row="2"
-                             ItemsSource="{Binding CommittedReviewers}"
-                             Background="Transparent"
-                             BorderThickness="0">
-                      <ListBox.ItemTemplate>
-                        <DataTemplate x:DataType="vm:ReviewerFeedbackFlowItemViewModel">
-                          <Border Background="White"
-                                  BorderBrush="#D6D8D1"
-                                  BorderThickness="1"
-                                  CornerRadius="6"
-                                  Padding="12"
-                                  Margin="0,0,0,8">
-                            <StackPanel Spacing="2">
-                              <TextBlock Text="{Binding Name}" FontWeight="SemiBold"/>
-                              <TextBlock Text="{Binding Description}" FontSize="12" Foreground="#6C756F"/>
-                            </StackPanel>
-                          </Border>
-                        </DataTemplate>
-                      </ListBox.ItemTemplate>
-                    </ListBox>
-                  </Grid>
+                  <ScrollViewer>
+                    <StackPanel Spacing="16">
+                      <Grid ColumnDefinitions="*,Auto,Auto,Auto">
+                        <TextBlock Text="{Binding FlowStatus}"
+                                   Foreground="#6C756F"
+                                   VerticalAlignment="Center"/>
+                        <Button Grid.Column="1"
+                                Command="{Binding CollectFeedbackCommand}"
+                                IsEnabled="{Binding CanCollectFeedback}"
+                                Margin="0,0,8,0"
+                                Padding="12,8">
+                          Collect the feedback
+                        </Button>
+                        <Button Grid.Column="2"
+                                Command="{Binding StartNextRoundCommand}"
+                                IsVisible="{Binding CanStartNextRound}"
+                                IsEnabled="{Binding CanStartNextRound}"
+                                Margin="0,0,8,0"
+                                Padding="12,8">
+                          Next round
+                        </Button>
+                        <Button Grid.Column="3"
+                                Command="{Binding FinalizeFeedbackCommand}"
+                                IsEnabled="{Binding CanFinalizeFeedback}"
+                                Padding="12,8">
+                          Finalize
+                        </Button>
+                      </Grid>
+                      <StackPanel Spacing="6">
+                        <TextBlock Text="{Binding CommittedReviewersHeader}" FontWeight="SemiBold"/>
+                        <ListBox ItemsSource="{Binding CommittedReviewers}"
+                                 Background="Transparent"
+                                 BorderThickness="0">
+                          <ListBox.ItemTemplate>
+                            <DataTemplate x:DataType="vm:ReviewerFeedbackFlowItemViewModel">
+                              <Border Background="White"
+                                      BorderBrush="#D6D8D1"
+                                      BorderThickness="1"
+                                      CornerRadius="6"
+                                      Padding="12"
+                                      Margin="0,0,0,8">
+                                <StackPanel Spacing="2">
+                                  <TextBlock Text="{Binding Name}" FontWeight="SemiBold"/>
+                                  <TextBlock Text="{Binding Description}" FontSize="12" Foreground="#6C756F"/>
+                                </StackPanel>
+                              </Border>
+                            </DataTemplate>
+                          </ListBox.ItemTemplate>
+                        </ListBox>
+                      </StackPanel>
+                      <StackPanel Spacing="6">
+                        <TextBlock Text="{Binding PassedReviewersHeader}" FontWeight="SemiBold"/>
+                        <ListBox ItemsSource="{Binding PassedReviewers}"
+                                 Background="Transparent"
+                                 BorderThickness="0">
+                          <ListBox.ItemTemplate>
+                            <DataTemplate x:DataType="vm:ReviewerFeedbackFlowItemViewModel">
+                              <Border Background="White"
+                                      BorderBrush="#D6D8D1"
+                                      BorderThickness="1"
+                                      CornerRadius="6"
+                                      Padding="12"
+                                      Margin="0,0,0,8">
+                                <StackPanel Spacing="2">
+                                  <TextBlock Text="{Binding Name}" FontWeight="SemiBold"/>
+                                  <TextBlock Text="{Binding Description}" FontSize="12" Foreground="#6C756F"/>
+                                </StackPanel>
+                              </Border>
+                            </DataTemplate>
+                          </ListBox.ItemTemplate>
+                        </ListBox>
+                      </StackPanel>
+                      <StackPanel Spacing="6">
+                        <TextBlock Text="{Binding InProgressReviewersHeader}" FontWeight="SemiBold"/>
+                        <ListBox ItemsSource="{Binding InProgressReviewers}"
+                                 Background="Transparent"
+                                 BorderThickness="0">
+                          <ListBox.ItemTemplate>
+                            <DataTemplate x:DataType="vm:ReviewerFeedbackFlowItemViewModel">
+                              <Border Background="White"
+                                      BorderBrush="#D6D8D1"
+                                      BorderThickness="1"
+                                      CornerRadius="6"
+                                      Padding="12"
+                                      Margin="0,0,0,8">
+                                <StackPanel Spacing="2">
+                                  <TextBlock Text="{Binding Name}" FontWeight="SemiBold"/>
+                                  <TextBlock Text="{Binding Description}" FontSize="12" Foreground="#6C756F"/>
+                                </StackPanel>
+                              </Border>
+                            </DataTemplate>
+                          </ListBox.ItemTemplate>
+                        </ListBox>
+                      </StackPanel>
+                    </StackPanel>
+                  </ScrollViewer>
                 </TabItem>
               </TabControl>
           </Grid>
@@ -766,6 +857,70 @@
             </Button>
             <Button Grid.Column="2"
                     Command="{Binding ConfirmCommitFeedbackCommand}"
+                    Padding="12,8">
+              Yes
+            </Button>
+          </Grid>
+        </StackPanel>
+      </Border>
+    </Grid>
+
+    <Grid Grid.RowSpan="3"
+          Background="#80000000"
+          IsVisible="{Binding IsPassConfirmationVisible}">
+      <Border Background="White"
+              BorderBrush="#D6D8D1"
+              BorderThickness="1"
+              CornerRadius="6"
+              Padding="18"
+              Margin="20"
+              MaxWidth="460"
+              HorizontalAlignment="Stretch"
+              VerticalAlignment="Center">
+        <StackPanel Spacing="12">
+          <TextBlock Text="Pass on feedback" FontSize="18" FontWeight="SemiBold"/>
+          <TextBlock Text="{Binding PassConfirmationMessage}" TextWrapping="Wrap"/>
+          <Grid ColumnDefinitions="*,Auto,Auto">
+            <Button Grid.Column="1"
+                    Command="{Binding CancelPassFeedbackCommand}"
+                    Padding="12,8"
+                    Margin="0,0,8,0">
+              No
+            </Button>
+            <Button Grid.Column="2"
+                    Command="{Binding ConfirmPassFeedbackCommand}"
+                    Padding="12,8">
+              Yes
+            </Button>
+          </Grid>
+        </StackPanel>
+      </Border>
+    </Grid>
+
+    <Grid Grid.RowSpan="3"
+          Background="#80000000"
+          IsVisible="{Binding IsCollectFeedbackConfirmationVisible}">
+      <Border Background="White"
+              BorderBrush="#D6D8D1"
+              BorderThickness="1"
+              CornerRadius="6"
+              Padding="18"
+              Margin="20"
+              MaxWidth="460"
+              HorizontalAlignment="Stretch"
+              VerticalAlignment="Center">
+        <StackPanel Spacing="12">
+          <TextBlock Text="Collect feedback" FontSize="18" FontWeight="SemiBold"/>
+          <TextBlock Text="{Binding CollectFeedbackConfirmationMessage}" TextWrapping="Wrap"/>
+          <Grid ColumnDefinitions="*,Auto,Auto">
+            <Button Grid.Column="1"
+                    Command="{Binding CancelCollectFeedbackCommand}"
+                    Padding="12,8"
+                    Margin="0,0,8,0">
+              No
+            </Button>
+            <Button Grid.Column="2"
+                    Command="{Binding ConfirmCollectFeedbackCommand}"
                     Padding="12,8">
               Yes
             </Button>
