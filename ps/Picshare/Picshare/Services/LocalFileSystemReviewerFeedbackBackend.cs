@@ -9,6 +9,7 @@ public sealed class LocalFileSystemReviewerFeedbackBackend : IReviewerFeedbackBa
     private const string StatusFileName = "status.json";
     private const string SharedFeedbackFileName = "shared-feedback.json";
     private const string SharedFeedbackVersionFileName = "shared-feedback-version.json";
+    private const string AlbumDeletionMarkerFileName = "album-deletion.json";
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -100,6 +101,19 @@ public sealed class LocalFileSystemReviewerFeedbackBackend : IReviewerFeedbackBa
     {
         Directory.CreateDirectory(_feedbackFolderPath);
         return await SaveJsonAsync(Path.Combine(_feedbackFolderPath, SharedFeedbackVersionFileName), version, cancellationToken);
+    }
+
+    public async Task<StoredDocument<AlbumDeletionMarker>?> LoadAlbumDeletionMarkerAsync(CancellationToken cancellationToken)
+    {
+        return await LoadJsonAsync<AlbumDeletionMarker>(Path.Combine(_feedbackFolderPath, AlbumDeletionMarkerFileName), cancellationToken);
+    }
+
+    public async Task<StoredDocument<AlbumDeletionMarker>> SaveAlbumDeletionMarkerAsync(
+        AlbumDeletionMarker marker,
+        CancellationToken cancellationToken)
+    {
+        Directory.CreateDirectory(_feedbackFolderPath);
+        return await SaveJsonAsync(Path.Combine(_feedbackFolderPath, AlbumDeletionMarkerFileName), marker, cancellationToken);
     }
 
     private static async Task<StoredDocument<T>?> LoadJsonAsync<T>(string path, CancellationToken cancellationToken)

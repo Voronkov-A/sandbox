@@ -37,6 +37,12 @@ public interface IReviewerFeedbackBackend
     Task<StoredDocument<SharedFeedbackVersion>> SaveSharedFeedbackVersionAsync(
         SharedFeedbackVersion version,
         CancellationToken cancellationToken);
+
+    Task<StoredDocument<AlbumDeletionMarker>?> LoadAlbumDeletionMarkerAsync(CancellationToken cancellationToken);
+
+    Task<StoredDocument<AlbumDeletionMarker>> SaveAlbumDeletionMarkerAsync(
+        AlbumDeletionMarker marker,
+        CancellationToken cancellationToken);
 }
 
 public sealed record ReviewerFeedbackStoreRef(

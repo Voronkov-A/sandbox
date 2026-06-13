@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
@@ -23,10 +24,35 @@ public partial class MainView : UserControl
     private bool _photoViewerPointerMoved;
     private bool _photoViewerPinchActive;
     private Point _photoViewerPointerStart;
+    private INotifyPropertyChanged? _viewModelPropertyChanged;
 
     public MainView()
     {
         InitializeComponent();
+    }
+
+    protected override void OnDataContextChanged(EventArgs e)
+    {
+        if (_viewModelPropertyChanged is not null)
+        {
+            _viewModelPropertyChanged.PropertyChanged -= ViewModel_PropertyChanged;
+        }
+
+        _viewModelPropertyChanged = DataContext as INotifyPropertyChanged;
+        if (_viewModelPropertyChanged is not null)
+        {
+            _viewModelPropertyChanged.PropertyChanged += ViewModel_PropertyChanged;
+        }
+
+        base.OnDataContextChanged(e);
+    }
+
+    private void ViewModel_PropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is nameof(MainViewModel.PhotoViewerImage) or nameof(MainViewModel.PhotoViewerRotationDegrees))
+        {
+            _ = Dispatcher.UIThread.InvokeAsync(ResetPhotoViewerZoom, DispatcherPriority.Render);
+        }
     }
 
     private async void ManualPhotoImport_Click(object? sender, RoutedEventArgs e)
@@ -439,7 +465,11 @@ public partial class MainView : UserControl
         var viewportHeight = Math.Max(1, PhotoViewerScrollViewer.Bounds.Height > 1 ? PhotoViewerScrollViewer.Bounds.Height : Bounds.Height);
         var pixelWidth = Math.Max(1, image.PixelSize.Width);
         var pixelHeight = Math.Max(1, image.PixelSize.Height);
-        var fitScale = Math.Min(viewportWidth / pixelWidth, viewportHeight / pixelHeight);
+        var isQuarterTurn = DataContext is MainViewModel viewModel &&
+            viewModel.PhotoViewerRotationDegrees is 90 or 270;
+        var effectiveWidth = isQuarterTurn ? pixelHeight : pixelWidth;
+        var effectiveHeight = isQuarterTurn ? pixelWidth : pixelHeight;
+        var fitScale = Math.Min(viewportWidth / effectiveWidth, viewportHeight / effectiveHeight);
 
         _photoViewerBaseWidth = pixelWidth * fitScale;
         _photoViewerBaseHeight = pixelHeight * fitScale;

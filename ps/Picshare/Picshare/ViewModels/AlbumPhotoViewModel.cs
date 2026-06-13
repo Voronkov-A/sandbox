@@ -63,6 +63,9 @@ public partial class AlbumPhotoViewModel : ObservableObject
     [ObservableProperty]
     private bool _isFrozen;
 
+    [ObservableProperty]
+    private int _rotationDegrees;
+
     public IBrush CardBorderBrush => IsSelectedForViewing
         ? Brushes.DeepSkyBlue
         : new SolidColorBrush(Color.Parse("#D6D8D1"));

@@ -182,6 +182,21 @@ public sealed class GoogleDriveRestClient
         await EnsureSuccessAsync(response, cancellationToken);
     }
 
+    public async Task DeleteFileAsync(string fileId, CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(
+            HttpMethod.Delete,
+            $"https://www.googleapis.com/drive/v3/files/{Uri.EscapeDataString(fileId)}?supportsAllDrives=true");
+
+        using var response = await _httpClient.SendAsync(request, cancellationToken);
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            return;
+        }
+
+        await EnsureSuccessAsync(response, cancellationToken);
+    }
+
     public static string CreatePublicDownloadUrl(string fileId)
     {
         return $"https://drive.google.com/uc?export=download&id={Uri.EscapeDataString(fileId)}";

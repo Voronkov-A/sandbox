@@ -116,6 +116,32 @@ public sealed class ReviewerFeedbackService
         session.State = state;
     }
 
+    public async Task SaveLocalPhotoRotationAsync(
+        ReviewerFeedbackSession session,
+        ReviewerFeedbackDatabase database,
+        string photoId,
+        int rotationDegrees,
+        CancellationToken cancellationToken)
+    {
+        var normalizedRotation = NormalizeRotationDegrees(rotationDegrees);
+        if (normalizedRotation == 0)
+        {
+            database.PhotoRotations.Remove(photoId);
+        }
+        else
+        {
+            database.PhotoRotations[photoId] = normalizedRotation;
+        }
+
+        database.UpdatedAt = DateTimeOffset.UtcNow;
+        var state = session.State;
+        state.LocalDirty = true;
+
+        await SaveLocalDatabaseAsync(session.LocalFolderPath, database, cancellationToken);
+        await SaveLocalStateAsync(session.LocalFolderPath, state, cancellationToken);
+        session.State = state;
+    }
+
     public async Task<ReviewerFeedbackSyncResult> SyncAsync(
         ReviewerFeedbackSession session,
         ReviewerFeedbackDatabase localDatabase,
@@ -539,6 +565,17 @@ public sealed class ReviewerFeedbackService
         return new ReviewerFeedbackFinalizeResult(updatedReviewers, manifest.Photos.Count, databaseVersion);
     }
 
+    public Task DeleteLocalAlbumStateAsync(string albumId)
+    {
+        var path = Path.Combine(_localStorageRootPath, "Picshare", "feedback", Sanitize(albumId));
+        if (Directory.Exists(path))
+        {
+            Directory.Delete(path, recursive: true);
+        }
+
+        return Task.CompletedTask;
+    }
+
     private static async Task<(
         ReviewerFeedbackDatabase Database,
         ReviewerFeedbackLocalState State,
@@ -679,7 +716,8 @@ public sealed class ReviewerFeedbackService
             IsFinalized = sharedDatabase.IsFinalized,
             PhotoCategories = new Dictionary<string, string>(sharedDatabase.PhotoCategories, StringComparer.Ordinal),
             PhotoScores = new Dictionary<string, int>(sharedDatabase.PhotoScores, StringComparer.Ordinal),
-            FrozenPhotoIds = new HashSet<string>(sharedDatabase.FrozenPhotoIds, StringComparer.Ordinal)
+            FrozenPhotoIds = new HashSet<string>(sharedDatabase.FrozenPhotoIds, StringComparer.Ordinal),
+            PhotoRotations = new Dictionary<string, int>(currentDatabase.PhotoRotations, StringComparer.Ordinal)
         };
 
         await SaveLocalDatabaseAsync(localFolderPath, reviewerDatabase, cancellationToken);
@@ -836,6 +874,12 @@ public sealed class ReviewerFeedbackService
         return knownRevision is null ||
             remoteRevision is not null &&
             !string.Equals(remoteRevision, knownRevision, StringComparison.Ordinal);
+    }
+
+    private static int NormalizeRotationDegrees(int rotationDegrees)
+    {
+        var normalized = rotationDegrees % 360;
+        return normalized < 0 ? normalized + 360 : normalized;
     }
 
     private static async Task<ReviewerFeedbackDatabase?> LoadLocalDatabaseAsync(string localFolderPath, CancellationToken cancellationToken)

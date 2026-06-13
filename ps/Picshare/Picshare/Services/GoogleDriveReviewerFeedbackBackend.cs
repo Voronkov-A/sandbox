@@ -9,6 +9,7 @@ public sealed class GoogleDriveReviewerFeedbackBackend : IReviewerFeedbackBacken
     private const string StatusFileName = "status.json";
     private const string SharedFeedbackFileName = "shared-feedback.json";
     private const string SharedFeedbackVersionFileName = "shared-feedback-version.json";
+    private const string AlbumDeletionMarkerFileName = "album-deletion.json";
     private const string FolderMimeType = "application/vnd.google-apps.folder";
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
@@ -112,6 +113,18 @@ public sealed class GoogleDriveReviewerFeedbackBackend : IReviewerFeedbackBacken
         CancellationToken cancellationToken)
     {
         return await SaveJsonAsync(_feedbackFolderId, SharedFeedbackVersionFileName, version, cancellationToken);
+    }
+
+    public async Task<StoredDocument<AlbumDeletionMarker>?> LoadAlbumDeletionMarkerAsync(CancellationToken cancellationToken)
+    {
+        return await LoadJsonAsync<AlbumDeletionMarker>(_feedbackFolderId, AlbumDeletionMarkerFileName, cancellationToken);
+    }
+
+    public async Task<StoredDocument<AlbumDeletionMarker>> SaveAlbumDeletionMarkerAsync(
+        AlbumDeletionMarker marker,
+        CancellationToken cancellationToken)
+    {
+        return await SaveJsonAsync(_feedbackFolderId, AlbumDeletionMarkerFileName, marker, cancellationToken);
     }
 
     private async Task<StoredDocument<T>?> LoadJsonAsync<T>(

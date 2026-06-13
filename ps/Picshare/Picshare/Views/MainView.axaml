@@ -34,9 +34,16 @@
                         Padding="0"
                         Background="Transparent"
                         BorderThickness="0"
+                        ClipToBounds="True"
                         HorizontalContentAlignment="Stretch"
                         VerticalContentAlignment="Stretch">
-                  <Image Source="{Binding Image}" Stretch="UniformToFill"/>
+                  <Image Source="{Binding Image}"
+                         Stretch="UniformToFill"
+                         RenderTransformOrigin="50%,50%">
+                    <Image.RenderTransform>
+                      <RotateTransform Angle="{Binding RotationDegrees}"/>
+                    </Image.RenderTransform>
+                  </Image>
                 </Button>
                 <Border Grid.Row="1" Background="#F2F2EE" Padding="8">
                   <StackPanel Spacing="2">
@@ -647,7 +654,7 @@
                 <TabItem Header="{Binding FlowTabHeader}" IsVisible="{Binding IsAuthorFlowVisible}" Tag="Flow">
                   <ScrollViewer>
                     <StackPanel Spacing="16">
-                      <Grid ColumnDefinitions="*,Auto,Auto,Auto">
+                      <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto">
                         <TextBlock Text="{Binding FlowStatus}"
                                    Foreground="#6C756F"
                                    VerticalAlignment="Center"/>
@@ -671,8 +678,19 @@
                                 Command="{Binding FinalizeFeedbackCommand}"
                                 IsVisible="{Binding CanFinalizeFeedback}"
                                 IsEnabled="{Binding CanFinalizeFeedback}"
+                                Margin="0,0,8,0"
                                 Padding="12,8">
                           Finalize
+                        </Button>
+                        <Button Grid.Column="4"
+                                Command="{Binding DeleteAlbumCommand}"
+                                IsVisible="{Binding CanDeleteAlbum}"
+                                IsEnabled="{Binding CanDeleteAlbum}"
+                                Background="#B42318"
+                                Foreground="White"
+                                BorderBrush="#7A271A"
+                                Padding="12,8">
+                          Delete the album
                         </Button>
                       </Grid>
                       <StackPanel Spacing="6" IsVisible="{Binding IsRegularFlowVisible}">
@@ -1159,6 +1177,64 @@
     </Grid>
 
     <Grid Grid.RowSpan="3"
+          Background="#99000000"
+          IsVisible="{Binding IsDeleteAlbumConfirmationVisible}">
+      <Border Background="White"
+              BorderBrush="#B42318"
+              BorderThickness="2"
+              CornerRadius="6"
+              Padding="18"
+              Margin="20"
+              MaxWidth="520"
+              HorizontalAlignment="Stretch"
+              VerticalAlignment="Center">
+        <Grid ColumnDefinitions="64,*" RowDefinitions="Auto,Auto,Auto">
+          <Border Grid.RowSpan="3"
+                  Width="48"
+                  Height="48"
+                  CornerRadius="24"
+                  Background="#FEE4E2"
+                  BorderBrush="#B42318"
+                  BorderThickness="2"
+                  VerticalAlignment="Top">
+            <TextBlock Text="X"
+                       Foreground="#B42318"
+                       FontSize="30"
+                       FontWeight="Bold"
+                       HorizontalAlignment="Center"
+                       VerticalAlignment="Center"/>
+          </Border>
+          <TextBlock Grid.Column="1"
+                     Text="Delete album"
+                     FontSize="18"
+                     FontWeight="SemiBold"
+                     Foreground="#7A271A"/>
+          <TextBlock Grid.Row="1"
+                     Grid.Column="1"
+                     Text="{Binding DeleteAlbumConfirmationMessage}"
+                     TextWrapping="Wrap"
+                     Margin="0,8,0,14"/>
+          <Grid Grid.Row="2" Grid.Column="1" ColumnDefinitions="*,Auto,Auto">
+            <Button Grid.Column="1"
+                    Command="{Binding CancelDeleteAlbumCommand}"
+                    Padding="12,8"
+                    Margin="0,0,8,0">
+              No
+            </Button>
+            <Button Grid.Column="2"
+                    Command="{Binding ConfirmDeleteAlbumCommand}"
+                    Background="#B42318"
+                    Foreground="White"
+                    BorderBrush="#7A271A"
+                    Padding="12,8">
+              Yes, delete
+            </Button>
+          </Grid>
+        </Grid>
+      </Border>
+    </Grid>
+
+    <Grid Grid.RowSpan="3"
           Background="#80000000"
           IsVisible="{Binding IsLeaveConfirmationVisible}">
       <Border Background="White"
@@ -1250,8 +1326,13 @@
               <Image x:Name="PhotoViewerImageControl"
                      Source="{Binding PhotoViewerImage}"
                      Stretch="Uniform"
+                     RenderTransformOrigin="50%,50%"
                      HorizontalAlignment="Center"
-                     VerticalAlignment="Center"/>
+                     VerticalAlignment="Center">
+                <Image.RenderTransform>
+                  <RotateTransform Angle="{Binding PhotoViewerRotationDegrees}"/>
+                </Image.RenderTransform>
+              </Image>
             </ScrollViewer>
             <Border Background="#99000000"
                     CornerRadius="6"
@@ -1347,6 +1428,12 @@
                   </Grid>
                   <Button.Flyout>
                     <MenuFlyout>
+                      <MenuItem Header="Rotate left"
+                                Command="{Binding RotateCurrentPhotoLeftCommand}"
+                                IsEnabled="{Binding CanDownloadCurrentPhoto}"/>
+                      <MenuItem Header="Rotate right"
+                                Command="{Binding RotateCurrentPhotoRightCommand}"
+                                IsEnabled="{Binding CanDownloadCurrentPhoto}"/>
                       <MenuItem Header="trash"
                                 Command="{Binding MarkCurrentPhotoTrashCommand}"
                                 IsVisible="{Binding CanShowCurrentPhotoTrashAction}"

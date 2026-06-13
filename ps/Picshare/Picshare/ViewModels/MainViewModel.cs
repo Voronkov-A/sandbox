@@ -133,6 +133,9 @@ public partial class MainViewModel : ViewModelBase
     private Bitmap? _photoViewerImage;
 
     [ObservableProperty]
+    private int _photoViewerRotationDegrees;
+
+    [ObservableProperty]
     private bool _isPhotoViewerActionsVisible = true;
 
     [ObservableProperty]
@@ -185,6 +188,15 @@ public partial class MainViewModel : ViewModelBase
 
     [ObservableProperty]
     private string _finalizeConfirmationMessage = "";
+
+    [ObservableProperty]
+    private bool _isDeleteAlbumConfirmationVisible;
+
+    [ObservableProperty]
+    private string _deleteAlbumConfirmationMessage = "";
+
+    [ObservableProperty]
+    private bool _canDeleteAlbum;
 
     [ObservableProperty]
     private bool _canCollectFeedback;
@@ -375,6 +387,7 @@ public partial class MainViewModel : ViewModelBase
     private readonly GoogleOAuthTokenStore _tokenStore;
     private readonly ReviewerFeedbackService _reviewerFeedbackService;
     private readonly ImageCacheService _imageCache;
+    private readonly AlbumDeletionService _albumDeletionService;
     private readonly HttpClient _imageHttpClient = new();
     private readonly List<IStorageFolder> _folderDateImportFolders = new();
     private readonly List<DriveFolderLocation> _driveFolderPath = new();
@@ -407,6 +420,10 @@ public partial class MainViewModel : ViewModelBase
         _tokenStore = new GoogleOAuthTokenStore(_settingsProvider.LocalStorageRootPath);
         _reviewerFeedbackService = new ReviewerFeedbackService(_settingsProvider.LocalStorageRootPath);
         _imageCache = new ImageCacheService(_settingsProvider.LocalStorageRootPath);
+        _albumDeletionService = new AlbumDeletionService(
+            _reviewerFeedbackService,
+            _imageCache,
+            _settingsProvider.LocalStorageRootPath);
         var localSettings = _localUserSettingsStore.Load();
         AnonymousReviewerName = localSettings.AnonymousReviewerName;
         PictureDefaultDownloadDirectoryPath = GetConfiguredOrDefaultDownloadDirectoryPath(localSettings.PictureDefaultDownloadDirectoryPath);
@@ -417,6 +434,7 @@ public partial class MainViewModel : ViewModelBase
         _googleTokenSet = _tokenStore.Load();
         IsGoogleSignedIn = _googleTokenSet is not null;
         ResetCreateInputs();
+        _ = ResumePendingAlbumDeletionsAsync();
     }
 
     [RelayCommand]
@@ -448,6 +466,18 @@ public partial class MainViewModel : ViewModelBase
     private async Task MarkCurrentPhotoTrashAsync()
     {
         await SetCurrentPhotoCategoryAsync("trash");
+    }
+
+    [RelayCommand]
+    private async Task RotateCurrentPhotoLeftAsync()
+    {
+        await RotateCurrentPhotoAsync(-90);
+    }
+
+    [RelayCommand]
+    private async Task RotateCurrentPhotoRightAsync()
+    {
+        await RotateCurrentPhotoAsync(90);
     }
 
     [RelayCommand]
@@ -873,6 +903,57 @@ public partial class MainViewModel : ViewModelBase
     }
 
     [RelayCommand]
+    private void DeleteAlbum()
+    {
+        if (_currentManifest is null || !CanDeleteAlbum)
+        {
+            return;
+        }
+
+        DeleteAlbumConfirmationMessage = "Delete this album permanently? This will remove the album photos, manifest, and feedback database from its storage backend.";
+        IsDeleteAlbumConfirmationVisible = true;
+    }
+
+    [RelayCommand]
+    private void CancelDeleteAlbum()
+    {
+        IsDeleteAlbumConfirmationVisible = false;
+        DeleteAlbumConfirmationMessage = "";
+    }
+
+    [RelayCommand]
+    private async Task ConfirmDeleteAlbumAsync()
+    {
+        if (_currentManifest is null || _currentReviewerIdentity is null || !CanDeleteAlbum)
+        {
+            IsDeleteAlbumConfirmationVisible = false;
+            return;
+        }
+
+        IsDeleteAlbumConfirmationVisible = false;
+        DeleteAlbumConfirmationMessage = "";
+        var manifest = _currentManifest;
+        var reviewer = _currentReviewerIdentity;
+
+        try
+        {
+            IsBusy = true;
+            Status = "Deleting album...";
+            PrepareOpenAlbumForDeletion();
+            var backend = await CreateFeedbackBackendAsync(manifest, CancellationToken.None);
+            await ExecuteAlbumDeletionAsync(manifest, reviewer, backend, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            Status = ex.Message;
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    [RelayCommand]
     private async Task ShowPreviousPhotoInCategoryAsync()
     {
         await MovePhotoViewerInCategoryAsync(-1);
@@ -891,6 +972,7 @@ public partial class MainViewModel : ViewModelBase
         _photoViewerCancellation?.Dispose();
         _photoViewerCancellation = null;
         PhotoViewerImage = null;
+        PhotoViewerRotationDegrees = 0;
         PhotoViewerTitle = "";
         PhotoViewerStatus = "";
         IsPhotoViewerVisible = false;
@@ -915,6 +997,7 @@ public partial class MainViewModel : ViewModelBase
             IsPhotoViewerVisible = true;
             IsPhotoViewerActionsVisible = true;
             PhotoViewerTitle = photo.FileName;
+            PhotoViewerRotationDegrees = photo.RotationDegrees;
             PhotoViewerStatus = "Loading";
             PhotoViewerImage = null;
 
@@ -1732,7 +1815,10 @@ public partial class MainViewModel : ViewModelBase
             }
 
             await LoadAlbumAsync(manifest);
-            Status = $"Opened {manifest.Title} with {manifest.Photos.Count} photo(s).";
+            if (_currentManifest is not null)
+            {
+                Status = $"Opened {manifest.Title} with {manifest.Photos.Count} photo(s).";
+            }
         }
         catch (Exception ex)
         {
@@ -1766,10 +1852,13 @@ public partial class MainViewModel : ViewModelBase
         CollectFeedbackConfirmationMessage = "";
         IsFinalizeConfirmationVisible = false;
         FinalizeConfirmationMessage = "";
+        IsDeleteAlbumConfirmationVisible = false;
+        DeleteAlbumConfirmationMessage = "";
         CanCollectFeedback = false;
         IsCollectFeedbackVisible = false;
         CanStartNextRound = false;
         CanFinalizeFeedback = false;
+        CanDeleteAlbum = false;
         _unfrozenCollectedPhotoCount = 0;
         _hasCollectedFeedback = false;
         _isFeedbackFinalized = false;
@@ -1854,6 +1943,34 @@ public partial class MainViewModel : ViewModelBase
             : $"{changedPhoto.FileName} marked as {category}.";
 
         await AdvanceFullImageViewerAfterCategoryChangeAsync(sourceCategory, changedPhotoIndex);
+    }
+
+    private async Task RotateCurrentPhotoAsync(int degrees)
+    {
+        if (_selectedViewedPhoto is null)
+        {
+            return;
+        }
+
+        var photo = _selectedViewedPhoto;
+        var rotation = NormalizeRotationDegrees(photo.RotationDegrees + degrees);
+        photo.RotationDegrees = rotation;
+        PhotoViewerRotationDegrees = rotation;
+
+        if (_feedbackSession is not null && _feedbackDatabase is not null)
+        {
+            await _reviewerFeedbackService.SaveLocalPhotoRotationAsync(
+                _feedbackSession,
+                _feedbackDatabase,
+                photo.PhotoId,
+                rotation,
+                CancellationToken.None);
+            _ = SyncFeedbackAsync();
+        }
+
+        Status = rotation == 0
+            ? $"{photo.FileName} rotation reset."
+            : $"{photo.FileName} rotated {rotation} degrees.";
     }
 
     partial void OnPhotoViewerImageChanging(Bitmap? value)
@@ -2151,7 +2268,10 @@ public partial class MainViewModel : ViewModelBase
         IsGoogleAuthorizationRequired = false;
         GoogleAuthorizationMessage = "";
         await LoadAlbumAsync(manifest);
-        Status = $"Opened {manifest.Title} with {manifest.Photos.Count} photo(s).";
+        if (_currentManifest is not null)
+        {
+            Status = $"Opened {manifest.Title} with {manifest.Photos.Count} photo(s).";
+        }
     }
 
     private async Task LoadReviewerFeedbackAsync(AlbumManifest manifest)
@@ -2169,6 +2289,26 @@ public partial class MainViewModel : ViewModelBase
         }
 
         var backend = await CreateFeedbackBackendAsync(manifest, CancellationToken.None);
+        var deletionMarker = await backend.LoadAlbumDeletionMarkerAsync(CancellationToken.None);
+        if (deletionMarker is not null)
+        {
+            if (IsCurrentReviewerAuthor(manifest))
+            {
+                _currentReviewerIdentity = reviewerIdentity;
+                IsAuthorFlowVisible = true;
+                Status = "Album deletion was already started. Continuing deletion...";
+                PrepareOpenAlbumForDeletion();
+                await ExecuteAlbumDeletionAsync(manifest, reviewerIdentity, backend, CancellationToken.None);
+            }
+            else
+            {
+                ClearOpenedAlbumState();
+                Status = "This album is being deleted by its author.";
+            }
+
+            return;
+        }
+
         var result = await _reviewerFeedbackService.LoadAsync(
             manifest,
             reviewerIdentity,
@@ -2195,6 +2335,108 @@ public partial class MainViewModel : ViewModelBase
         StartFeedbackSync();
     }
 
+    private async Task ExecuteAlbumDeletionAsync(
+        AlbumManifest manifest,
+        FeedbackReviewerIdentity reviewer,
+        IReviewerFeedbackBackend backend,
+        CancellationToken cancellationToken)
+    {
+        await _albumDeletionService.RequestDeletionAsync(
+            manifest,
+            reviewer,
+            backend,
+            GetGoogleAccessTokenAsync,
+            cancellationToken);
+
+        ClearOpenedAlbumState();
+        Status = "Album deleted.";
+    }
+
+    private void PrepareOpenAlbumForDeletion()
+    {
+        StopFeedbackSync();
+        StopFlowMonitor();
+        _albumDownloadCancellation?.Cancel();
+        IsAlbumDownloadDialogVisible = false;
+        IsAlbumDownloadProgressVisible = false;
+
+        foreach (var photo in Photos)
+        {
+            photo.StopViewportLoad();
+            photo.ReleaseCachedImage();
+        }
+
+        ClosePhotoViewer();
+    }
+
+    private void ClearOpenedAlbumState()
+    {
+        StopFeedbackSync();
+        StopFlowMonitor();
+        _currentManifest = null;
+        _feedbackSession = null;
+        _feedbackDatabase = null;
+        _feedbackStatus = null;
+        _currentReviewerIdentity = null;
+        _hasCollectedFeedback = false;
+        _isFeedbackFinalized = false;
+        _unfrozenCollectedPhotoCount = 0;
+        IsFeedbackCommitted = false;
+        IsFeedbackPassed = false;
+        IsFeedbackLeft = false;
+        IsAuthorFlowVisible = false;
+        CanCollectFeedback = false;
+        IsCollectFeedbackVisible = false;
+        CanStartNextRound = false;
+        CanFinalizeFeedback = false;
+        CanDeleteAlbum = false;
+        CurrentAlbumTitle = "";
+        FlowStatus = "";
+        Photos.Clear();
+        ClearCategoryRows();
+        SelectViewedPhoto(null);
+        ClosePhotoViewer();
+        ClearFlowReviewers();
+        UpdateFeedbackControlState();
+        UpdateCurrentPhotoActionVisibility();
+    }
+
+    private async Task ResumePendingAlbumDeletionsAsync()
+    {
+        try
+        {
+            var pendingDeletions = await _albumDeletionService.LoadPendingDeletionsAsync(CancellationToken.None);
+            foreach (var pendingDeletion in pendingDeletions)
+            {
+                try
+                {
+                    var manifest = pendingDeletion.Manifest;
+                    if (manifest.LocalFileSystem is not null &&
+                        !Directory.Exists(manifest.LocalFileSystem.RootPath))
+                    {
+                        await _albumDeletionService.DeleteLocalStateAsync(manifest.AlbumId);
+                        _albumDeletionService.ForgetPendingDeletion(manifest.AlbumId);
+                        continue;
+                    }
+
+                    var backend = await CreateFeedbackBackendAsync(manifest, CancellationToken.None);
+                    await _albumDeletionService.RequestDeletionAsync(
+                        manifest,
+                        pendingDeletion.RequestedBy,
+                        backend,
+                        GetGoogleAccessTokenAsync,
+                        CancellationToken.None);
+                }
+                catch
+                {
+                }
+            }
+        }
+        catch
+        {
+        }
+    }
+
     private void ApplyFeedbackDatabaseToPhotos()
     {
         foreach (var photo in Photos)
@@ -2204,6 +2446,10 @@ public partial class MainViewModel : ViewModelBase
                     ? category
                     : "";
             photo.IsFrozen = _feedbackDatabase?.FrozenPhotoIds.Contains(photo.PhotoId) == true;
+            photo.RotationDegrees = _feedbackDatabase is not null &&
+                _feedbackDatabase.PhotoRotations.TryGetValue(photo.PhotoId, out var rotation)
+                    ? NormalizeRotationDegrees(rotation)
+                    : 0;
         }
 
         _hasCollectedFeedback = _feedbackDatabase?.HasCollectedFeedback == true;
@@ -2213,6 +2459,10 @@ public partial class MainViewModel : ViewModelBase
             : 0;
 
         RebuildCategoryRows();
+        if (_selectedViewedPhoto is not null)
+        {
+            PhotoViewerRotationDegrees = _selectedViewedPhoto.RotationDegrees;
+        }
     }
 
     private void ApplyFeedbackStatus()
@@ -2527,6 +2777,7 @@ public partial class MainViewModel : ViewModelBase
         CanCollectFeedback = IsCollectFeedbackVisible;
         CanFinalizeFeedback = IsAuthorFlowVisible && !_isFeedbackFinalized;
         CanStartNextRound = IsAuthorFlowVisible && !_isFeedbackFinalized && _unfrozenCollectedPhotoCount > 0;
+        CanDeleteAlbum = IsAuthorFlowVisible && _currentManifest is not null;
         IsRegularFlowVisible = IsAuthorFlowVisible && !_isFeedbackFinalized;
         IsFinalizedFlowVisible = IsAuthorFlowVisible && _isFeedbackFinalized;
         FinalizedFeedbackMessage = _isFeedbackFinalized
@@ -2709,6 +2960,12 @@ public partial class MainViewModel : ViewModelBase
         }
 
         throw new InvalidOperationException("The album feedback backend is not supported.");
+    }
+
+    private static int NormalizeRotationDegrees(int rotationDegrees)
+    {
+        var normalized = rotationDegrees % 360;
+        return normalized < 0 ? normalized + 360 : normalized;
     }
 
     private FeedbackReviewerIdentity? CreateReviewerIdentity(AlbumManifest manifest)

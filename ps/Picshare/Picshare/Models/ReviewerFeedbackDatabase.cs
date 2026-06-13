@@ -19,6 +19,8 @@ public sealed class ReviewerFeedbackDatabase
     public Dictionary<string, int> PhotoScores { get; set; } = new(StringComparer.Ordinal);
 
     public HashSet<string> FrozenPhotoIds { get; set; } = new(StringComparer.Ordinal);
+
+    public Dictionary<string, int> PhotoRotations { get; set; } = new(StringComparer.Ordinal);
 }
 
 public sealed class ReviewerFeedbackLocalState

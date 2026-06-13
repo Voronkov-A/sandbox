@@ -77,6 +77,17 @@ public sealed class ImageCacheService
         return Task.CompletedTask;
     }
 
+    public Task ClearAlbumAsync(string albumId)
+    {
+        var albumPath = Path.Combine(_rootPath, SanitizePathSegment(albumId));
+        if (Directory.Exists(albumPath))
+        {
+            Directory.Delete(albumPath, recursive: true);
+        }
+
+        return Task.CompletedTask;
+    }
+
     public async Task<Bitmap> LoadDisplayBitmapAsync(
         string albumId,
         string cacheFileName,
