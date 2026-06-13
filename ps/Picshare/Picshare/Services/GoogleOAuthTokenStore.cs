@@ -9,6 +9,13 @@ public sealed class GoogleOAuthTokenStore
         WriteIndented = true
     };
 
+    private readonly string _rootPath;
+
+    public GoogleOAuthTokenStore(string? localStorageRootPath = null)
+    {
+        _rootPath = GetLocalStorageRootPath(localStorageRootPath);
+    }
+
     public GoogleOAuthTokenSet? Load()
     {
         var path = GetTokenFilePath();
@@ -70,15 +77,20 @@ public sealed class GoogleOAuthTokenStore
         }
     }
 
-    private static string GetTokenFilePath()
+    private string GetTokenFilePath()
     {
-        var folder = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        if (string.IsNullOrWhiteSpace(folder))
+        return Path.Combine(_rootPath, "Picshare", "google-oauth-token.json");
+    }
+
+    private static string GetLocalStorageRootPath(string? configuredRootPath)
+    {
+        if (!string.IsNullOrWhiteSpace(configuredRootPath))
         {
-            folder = AppContext.BaseDirectory;
+            return configuredRootPath;
         }
 
-        return Path.Combine(folder, "Picshare", "google-oauth-token.json");
+        var folder = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        return string.IsNullOrWhiteSpace(folder) ? AppContext.BaseDirectory : folder;
     }
 }
 

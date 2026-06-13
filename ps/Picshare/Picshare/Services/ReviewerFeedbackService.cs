@@ -5,69 +5,65 @@ namespace Picshare.Services;
 
 public sealed class ReviewerFeedbackService
 {
-    private const string FeedbackFileName = "feedback.json";
-    private const string StatusFileName = "status.json";
-    private const string SharedFeedbackFileName = "shared-feedback.json";
-    private const string SharedFeedbackVersionFileName = "shared-feedback-version.json";
     private const string LocalFeedbackFileName = "feedback.json";
     private const string LocalStatusFileName = "status.json";
     private const string LocalStateFileName = "sync-state.json";
-    private const string FolderMimeType = "application/vnd.google-apps.folder";
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         WriteIndented = true
     };
 
+    private readonly string _localStorageRootPath;
+
+    public ReviewerFeedbackService(string? localStorageRootPath = null)
+    {
+        _localStorageRootPath = GetLocalStorageRootPath(localStorageRootPath);
+    }
+
     public async Task<ReviewerFeedbackLoadResult> LoadAsync(
         AlbumManifest manifest,
-        GoogleOAuthTokenSet token,
-        string accessToken,
+        FeedbackReviewerIdentity reviewer,
+        IReviewerFeedbackBackend backend,
         CancellationToken cancellationToken)
     {
-        var reviewerUserId = token.UserId ?? throw new InvalidOperationException("Google reviewer id is missing.");
-        var reviewerIdentity = CreateGoogleReviewerIdentity(token);
-        var localFolderPath = GetLocalFolderPath(manifest.AlbumId, reviewerUserId);
+        var localFolderPath = GetLocalFolderPath(manifest.AlbumId, reviewer.BackendType, reviewer.UserId);
         Directory.CreateDirectory(localFolderPath);
 
         var localDatabase = await LoadLocalDatabaseAsync(localFolderPath, cancellationToken);
         var localState = await LoadLocalStateAsync(localFolderPath, cancellationToken);
-        var client = new GoogleDriveRestClient(accessToken);
-        var reviewerFolder = await EnsureReviewerFolderAsync(client, manifest.GoogleDrive.FeedbackFolderId, reviewerUserId, cancellationToken);
-        localState.ReviewerFolderId = reviewerFolder.Id;
+        var reviewerStore = await backend.EnsureReviewerStoreAsync(reviewer.UserId, cancellationToken);
+        localState.ReviewerStoreId = reviewerStore.Id;
 
         var databaseLoad = await LoadDatabaseAsync(
-            client,
-            reviewerFolder.Id,
+            backend,
+            reviewerStore.Id,
             localFolderPath,
             localState,
             localDatabase,
             manifest.AlbumId,
-            reviewerUserId,
+            reviewer.UserId,
             cancellationToken);
-
         localState = databaseLoad.State;
 
         var statusLoad = await LoadStatusAsync(
-            client,
-            reviewerFolder.Id,
+            backend,
+            reviewerStore.Id,
             localFolderPath,
             localState,
             manifest.AlbumId,
-            reviewerIdentity,
+            reviewer,
             cancellationToken);
-
         localState = statusLoad.State;
 
         var sharedApply = await TryApplySharedFeedbackAsync(
-            client,
-            manifest.GoogleDrive.FeedbackFolderId,
-            reviewerFolder.Id,
+            backend,
+            reviewerStore.Id,
             localFolderPath,
             localState,
             databaseLoad.Database,
             manifest.AlbumId,
-            reviewerUserId,
+            reviewer.UserId,
             cancellationToken);
         localState = sharedApply.State;
 
@@ -77,8 +73,8 @@ public sealed class ReviewerFeedbackService
             new ReviewerFeedbackSession
             {
                 AlbumId = manifest.AlbumId,
-                ReviewerUserId = reviewerUserId,
-                FeedbackFolderId = manifest.GoogleDrive.FeedbackFolderId,
+                ReviewerUserId = reviewer.UserId,
+                ReviewerStoreId = reviewerStore.Id,
                 LocalFolderPath = localFolderPath,
                 State = localState
             },
@@ -123,16 +119,15 @@ public sealed class ReviewerFeedbackService
     public async Task<ReviewerFeedbackSyncResult> SyncAsync(
         ReviewerFeedbackSession session,
         ReviewerFeedbackDatabase localDatabase,
-        string accessToken,
+        IReviewerFeedbackBackend backend,
         CancellationToken cancellationToken)
     {
-        var client = new GoogleDriveRestClient(accessToken);
         var state = await LoadLocalStateAsync(session.LocalFolderPath, cancellationToken);
         var localDirtyBeforeSync = state.LocalDirty;
         var status = await LoadLocalStatusAsync(session.LocalFolderPath, cancellationToken);
         var statusSync = await SyncStatusAsync(
-            client,
-            session.State.ReviewerFolderId!,
+            backend,
+            session.ReviewerStoreId,
             session.LocalFolderPath,
             state,
             status,
@@ -140,9 +135,8 @@ public sealed class ReviewerFeedbackService
 
         state = statusSync.State;
         var sharedApply = await TryApplySharedFeedbackAsync(
-            client,
-            session.FeedbackFolderId,
-            session.State.ReviewerFolderId!,
+            backend,
+            session.ReviewerStoreId,
             session.LocalFolderPath,
             state,
             localDatabase,
@@ -162,13 +156,12 @@ public sealed class ReviewerFeedbackService
         }
 
         var databaseSync = await SyncDatabaseAsync(
-            client,
-            session.State.ReviewerFolderId!,
+            backend,
+            session.ReviewerStoreId,
             session.LocalFolderPath,
             sharedApply.State,
             localDatabase,
             cancellationToken);
-
         session.State = databaseSync.State;
 
         return new ReviewerFeedbackSyncResult(
@@ -182,51 +175,49 @@ public sealed class ReviewerFeedbackService
     public async Task<ReviewerFeedbackStatusResult> CommitAsync(
         ReviewerFeedbackSession session,
         FeedbackReviewerIdentity reviewer,
-        string accessToken,
+        IReviewerFeedbackBackend backend,
         CancellationToken cancellationToken)
     {
-        return await SetStatusAsync(
-            session,
-            reviewer,
-            accessToken,
-            ReviewerFeedbackStatusKind.Committed,
-            cancellationToken);
+        return await SetStatusAsync(session, reviewer, backend, ReviewerFeedbackStatusKind.Committed, cancellationToken);
     }
 
     public async Task<ReviewerFeedbackStatusResult> PassAsync(
         ReviewerFeedbackSession session,
         FeedbackReviewerIdentity reviewer,
-        string accessToken,
+        IReviewerFeedbackBackend backend,
         CancellationToken cancellationToken)
     {
-        return await SetStatusAsync(
-            session,
-            reviewer,
-            accessToken,
-            ReviewerFeedbackStatusKind.Passed,
-            cancellationToken);
+        return await SetStatusAsync(session, reviewer, backend, ReviewerFeedbackStatusKind.Passed, cancellationToken);
+    }
+
+    public async Task<ReviewerFeedbackStatusResult> LeaveAsync(
+        ReviewerFeedbackSession session,
+        FeedbackReviewerIdentity reviewer,
+        IReviewerFeedbackBackend backend,
+        CancellationToken cancellationToken)
+    {
+        return await SetStatusAsync(session, reviewer, backend, ReviewerFeedbackStatusKind.Left, cancellationToken);
     }
 
     public async Task<ReviewerFeedbackFlowSnapshot> LoadFeedbackFlowAsync(
-        string feedbackFolderId,
-        string accessToken,
+        IReviewerFeedbackBackend backend,
         CancellationToken cancellationToken)
     {
-        var client = new GoogleDriveRestClient(accessToken);
-        var folders = await ListReviewerFoldersAsync(client, feedbackFolderId, cancellationToken);
-
+        var stores = await backend.ListReviewerStoresAsync(cancellationToken);
         var committed = new List<ReviewerFeedbackFlowItem>();
         var passed = new List<ReviewerFeedbackFlowItem>();
+        var left = new List<ReviewerFeedbackFlowItem>();
         var inProgress = new List<ReviewerFeedbackFlowItem>();
-        foreach (var folder in folders)
+
+        foreach (var store in stores)
         {
-            var statusFile = await client.FindChildByNameAsync(folder.Id, StatusFileName, null, cancellationToken);
+            var statusFile = await backend.LoadReviewerStatusAsync(store.Id, cancellationToken);
             if (statusFile is null)
             {
                 continue;
             }
 
-            var status = await DownloadStatusAsync(client, statusFile.Id, cancellationToken);
+            var status = statusFile.Value;
             var item = new ReviewerFeedbackFlowItem(status.Reviewer, status.UpdatedAt);
             switch (status.Status)
             {
@@ -235,6 +226,9 @@ public sealed class ReviewerFeedbackService
                     break;
                 case ReviewerFeedbackStatusKind.Passed:
                     passed.Add(item);
+                    break;
+                case ReviewerFeedbackStatusKind.Left:
+                    left.Add(item);
                     break;
                 default:
                     inProgress.Add(item);
@@ -245,36 +239,41 @@ public sealed class ReviewerFeedbackService
         return new ReviewerFeedbackFlowSnapshot(
             SortFlowItems(committed),
             SortFlowItems(passed),
+            SortFlowItems(left),
             SortFlowItems(inProgress));
     }
 
     public async Task<ReviewerFeedbackCollectResult> CollectFeedbackAsync(
         AlbumManifest manifest,
-        string accessToken,
+        IReviewerFeedbackBackend backend,
         CancellationToken cancellationToken)
     {
-        var client = new GoogleDriveRestClient(accessToken);
-        var folders = await ListReviewerFoldersAsync(client, manifest.GoogleDrive.FeedbackFolderId, cancellationToken);
+        var stores = await backend.ListReviewerStoresAsync(cancellationToken);
         var committedDatabases = new List<ReviewerFeedbackDatabase>();
+        var terminalReviewerCount = 0;
 
-        foreach (var folder in folders)
+        foreach (var store in stores)
         {
-            var statusFile = await client.FindChildByNameAsync(folder.Id, StatusFileName, null, cancellationToken);
+            var statusFile = await backend.LoadReviewerStatusAsync(store.Id, cancellationToken);
             if (statusFile is null)
             {
                 continue;
             }
 
-            var status = await DownloadStatusAsync(client, statusFile.Id, cancellationToken);
-            if (status.Status != ReviewerFeedbackStatusKind.Committed)
+            if (statusFile.Value.Status is ReviewerFeedbackStatusKind.Committed or ReviewerFeedbackStatusKind.Passed)
+            {
+                terminalReviewerCount++;
+            }
+
+            if (statusFile.Value.Status != ReviewerFeedbackStatusKind.Committed)
             {
                 continue;
             }
 
-            var feedbackFile = await client.FindChildByNameAsync(folder.Id, FeedbackFileName, null, cancellationToken);
+            var feedbackFile = await backend.LoadReviewerFeedbackAsync(store.Id, cancellationToken);
             if (feedbackFile is not null)
             {
-                committedDatabases.Add(await DownloadDatabaseAsync(client, feedbackFile.Id, cancellationToken));
+                committedDatabases.Add(feedbackFile.Value);
             }
         }
 
@@ -283,17 +282,46 @@ public sealed class ReviewerFeedbackService
             throw new InvalidOperationException("There are no committed feedbacks to collect.");
         }
 
+        var previousSharedDatabase = (await backend.LoadSharedFeedbackAsync(cancellationToken))?.Value;
+        var shouldAddRoundScores = previousSharedDatabase?.HasCollectedFeedback != true;
+        var previousCategories = previousSharedDatabase?.PhotoCategories ?? new Dictionary<string, string>(StringComparer.Ordinal);
+        var previousScores = previousSharedDatabase?.PhotoScores ?? new Dictionary<string, int>(StringComparer.Ordinal);
+        var previousFrozenPhotoIds = previousSharedDatabase?.FrozenPhotoIds ?? new HashSet<string>(StringComparer.Ordinal);
+
         var mergedCategories = new Dictionary<string, string>(StringComparer.Ordinal);
         var photoScores = new Dictionary<string, int>(StringComparer.Ordinal);
         var frozenPhotoIds = new HashSet<string>(StringComparer.Ordinal);
         foreach (var photo in manifest.Photos)
         {
-            var niceScore = committedDatabases.Count(database =>
+            var previousScore = previousScores.TryGetValue(photo.Id, out var storedScore)
+                ? storedScore
+                : 0;
+            var wasFrozen = previousFrozenPhotoIds.Contains(photo.Id);
+            var previousCategory = previousCategories.TryGetValue(photo.Id, out var storedCategory)
+                ? storedCategory
+                : "";
+
+            if (wasFrozen && !string.IsNullOrWhiteSpace(previousCategory))
+            {
+                var frozenNiceScore = previousScore;
+                if (shouldAddRoundScores && string.Equals(previousCategory, "nice", StringComparison.Ordinal))
+                {
+                    frozenNiceScore += terminalReviewerCount;
+                }
+
+                mergedCategories[photo.Id] = previousCategory;
+                photoScores[photo.Id] = frozenNiceScore;
+                frozenPhotoIds.Add(photo.Id);
+                continue;
+            }
+
+            var currentRoundNiceScore = committedDatabases.Count(database =>
                 database.PhotoCategories.TryGetValue(photo.Id, out var category) &&
                 string.Equals(category, "nice", StringComparison.Ordinal));
+            var niceScore = previousScore + (shouldAddRoundScores ? currentRoundNiceScore : 0);
             photoScores[photo.Id] = niceScore;
 
-            if (niceScore > 0)
+            if (currentRoundNiceScore > 0)
             {
                 mergedCategories[photo.Id] = "nice";
                 continue;
@@ -312,7 +340,14 @@ public sealed class ReviewerFeedbackService
             .Where(photoId => string.Equals(mergedCategories[photoId], "nice", StringComparison.Ordinal))
             .ToList();
 
-        if (nicePhotoIds.Count > manifest.TargetNicePhotoCount)
+        if (nicePhotoIds.Count <= manifest.TargetNicePhotoCount)
+        {
+            foreach (var photoId in nicePhotoIds)
+            {
+                frozenPhotoIds.Add(photoId);
+            }
+        }
+        else
         {
             if (manifest.TargetNicePhotoCount <= 0)
             {
@@ -332,6 +367,11 @@ public sealed class ReviewerFeedbackService
 
                 foreach (var photoId in nicePhotoIds)
                 {
+                    if (previousFrozenPhotoIds.Contains(photoId))
+                    {
+                        continue;
+                    }
+
                     var score = photoScores[photoId];
                     if (score > boundaryScore)
                     {
@@ -352,6 +392,7 @@ public sealed class ReviewerFeedbackService
             AlbumId = manifest.AlbumId,
             UpdatedAt = DateTimeOffset.UtcNow,
             HasCollectedFeedback = true,
+            IsFinalized = previousSharedDatabase?.IsFinalized == true,
             PhotoCategories = mergedCategories,
             PhotoScores = photoScores,
             FrozenPhotoIds = frozenPhotoIds
@@ -364,8 +405,8 @@ public sealed class ReviewerFeedbackService
             UpdatedAt = sharedDatabase.UpdatedAt
         };
 
-        await UploadSharedDatabaseAsync(client, manifest.GoogleDrive.FeedbackFolderId, sharedDatabase, cancellationToken);
-        await UploadSharedVersionAsync(client, manifest.GoogleDrive.FeedbackFolderId, sharedVersion, cancellationToken);
+        await backend.SaveSharedFeedbackAsync(sharedDatabase, cancellationToken);
+        await backend.SaveSharedFeedbackVersionAsync(sharedVersion, cancellationToken);
 
         var unfrozenCount = manifest.Photos.Count(photo => !frozenPhotoIds.Contains(photo.Id));
         return new ReviewerFeedbackCollectResult(committedDatabases.Count, mergedCategories.Count, unfrozenCount, databaseVersion);
@@ -373,32 +414,31 @@ public sealed class ReviewerFeedbackService
 
     public async Task<int> StartNextRoundAsync(
         AlbumManifest manifest,
-        string accessToken,
+        IReviewerFeedbackBackend backend,
         CancellationToken cancellationToken)
     {
-        var client = new GoogleDriveRestClient(accessToken);
-        var folders = await ListReviewerFoldersAsync(client, manifest.GoogleDrive.FeedbackFolderId, cancellationToken);
+        var stores = await backend.ListReviewerStoresAsync(cancellationToken);
         var updated = 0;
 
-        foreach (var folder in folders)
+        foreach (var store in stores)
         {
-            var statusFile = await client.FindChildByNameAsync(folder.Id, StatusFileName, null, cancellationToken);
+            var statusFile = await backend.LoadReviewerStatusAsync(store.Id, cancellationToken);
             if (statusFile is null)
             {
                 continue;
             }
 
-            var status = await DownloadStatusAsync(client, statusFile.Id, cancellationToken);
+            var status = statusFile.Value;
             status.Status = ReviewerFeedbackStatusKind.InProgress;
             status.UpdatedAt = DateTimeOffset.UtcNow;
-            await UploadOrUpdateJsonFileAsync(client, folder.Id, StatusFileName, status, cancellationToken);
+            await backend.SaveReviewerStatusAsync(store.Id, status, cancellationToken);
             updated++;
         }
 
-        var sharedDatabaseFile = await client.FindChildByNameAsync(manifest.GoogleDrive.FeedbackFolderId, SharedFeedbackFileName, null, cancellationToken);
+        var sharedDatabaseFile = await backend.LoadSharedFeedbackAsync(cancellationToken);
         if (sharedDatabaseFile is not null)
         {
-            var sharedDatabase = await DownloadSharedDatabaseAsync(client, sharedDatabaseFile.Id, cancellationToken);
+            var sharedDatabase = sharedDatabaseFile.Value;
             foreach (var photo in manifest.Photos)
             {
                 if (!sharedDatabase.FrozenPhotoIds.Contains(photo.Id) &&
@@ -410,6 +450,7 @@ public sealed class ReviewerFeedbackService
             }
 
             sharedDatabase.HasCollectedFeedback = false;
+            sharedDatabase.IsFinalized = false;
             sharedDatabase.UpdatedAt = DateTimeOffset.UtcNow;
             var sharedVersion = new SharedFeedbackVersion
             {
@@ -418,19 +459,92 @@ public sealed class ReviewerFeedbackService
                 UpdatedAt = sharedDatabase.UpdatedAt
             };
 
-            await UploadSharedDatabaseAsync(client, manifest.GoogleDrive.FeedbackFolderId, sharedDatabase, cancellationToken);
-            await UploadSharedVersionAsync(client, manifest.GoogleDrive.FeedbackFolderId, sharedVersion, cancellationToken);
+            await backend.SaveSharedFeedbackAsync(sharedDatabase, cancellationToken);
+            await backend.SaveSharedFeedbackVersionAsync(sharedVersion, cancellationToken);
         }
 
         return updated;
+    }
+
+    public async Task<ReviewerFeedbackFinalizeResult> FinalizeAsync(
+        AlbumManifest manifest,
+        IReviewerFeedbackBackend backend,
+        CancellationToken cancellationToken)
+    {
+        var stores = await backend.ListReviewerStoresAsync(cancellationToken);
+        var updatedReviewers = 0;
+
+        foreach (var store in stores)
+        {
+            var statusFile = await backend.LoadReviewerStatusAsync(store.Id, cancellationToken);
+            if (statusFile is null)
+            {
+                continue;
+            }
+
+            var status = statusFile.Value;
+            if (status.Status != ReviewerFeedbackStatusKind.Left)
+            {
+                status.Status = ReviewerFeedbackStatusKind.InProgress;
+                status.UpdatedAt = DateTimeOffset.UtcNow;
+                await backend.SaveReviewerStatusAsync(store.Id, status, cancellationToken);
+                updatedReviewers++;
+            }
+        }
+
+        var previousSharedDatabase = (await backend.LoadSharedFeedbackAsync(cancellationToken))?.Value;
+        var categories = previousSharedDatabase is null
+            ? new Dictionary<string, string>(StringComparer.Ordinal)
+            : new Dictionary<string, string>(previousSharedDatabase.PhotoCategories, StringComparer.Ordinal);
+        var scores = previousSharedDatabase is null
+            ? new Dictionary<string, int>(StringComparer.Ordinal)
+            : new Dictionary<string, int>(previousSharedDatabase.PhotoScores, StringComparer.Ordinal);
+        var frozenPhotoIds = new HashSet<string>(manifest.Photos.Select(photo => photo.Id), StringComparer.Ordinal);
+
+        foreach (var photo in manifest.Photos)
+        {
+            if (!categories.ContainsKey(photo.Id))
+            {
+                categories[photo.Id] = "ok";
+            }
+
+            if (!scores.ContainsKey(photo.Id))
+            {
+                scores[photo.Id] = 0;
+            }
+        }
+
+        var databaseVersion = Guid.NewGuid().ToString("N");
+        var sharedDatabase = new SharedFeedbackDatabase
+        {
+            AlbumId = manifest.AlbumId,
+            UpdatedAt = DateTimeOffset.UtcNow,
+            HasCollectedFeedback = true,
+            IsFinalized = true,
+            PhotoCategories = categories,
+            PhotoScores = scores,
+            FrozenPhotoIds = frozenPhotoIds
+        };
+
+        var sharedVersion = new SharedFeedbackVersion
+        {
+            AlbumId = manifest.AlbumId,
+            DatabaseVersion = databaseVersion,
+            UpdatedAt = sharedDatabase.UpdatedAt
+        };
+
+        await backend.SaveSharedFeedbackAsync(sharedDatabase, cancellationToken);
+        await backend.SaveSharedFeedbackVersionAsync(sharedVersion, cancellationToken);
+
+        return new ReviewerFeedbackFinalizeResult(updatedReviewers, manifest.Photos.Count, databaseVersion);
     }
 
     private static async Task<(
         ReviewerFeedbackDatabase Database,
         ReviewerFeedbackLocalState State,
         bool ConcurrentRemoteUpdate)> LoadDatabaseAsync(
-        GoogleDriveRestClient client,
-        string reviewerFolderId,
+        IReviewerFeedbackBackend backend,
+        string reviewerStoreId,
         string localFolderPath,
         ReviewerFeedbackLocalState localState,
         ReviewerFeedbackDatabase? localDatabase,
@@ -438,35 +552,33 @@ public sealed class ReviewerFeedbackService
         string reviewerUserId,
         CancellationToken cancellationToken)
     {
-        var remoteFile = await client.FindChildByNameAsync(reviewerFolderId, FeedbackFileName, null, cancellationToken);
+        var remoteFile = await backend.LoadReviewerFeedbackAsync(reviewerStoreId, cancellationToken);
         ReviewerFeedbackDatabase database;
         var concurrentRemoteUpdate = false;
 
         if (remoteFile is null)
         {
             database = localDatabase ?? CreateEmptyDatabase(albumId, reviewerUserId);
-            localState = await UploadDatabaseAsync(client, reviewerFolderId, localState, database, cancellationToken);
+            var saved = await backend.SaveReviewerFeedbackAsync(reviewerStoreId, database, cancellationToken);
+            localState.RemoteRevision = saved.Revision;
+            localState.LocalDirty = false;
         }
         else
         {
-            var remoteChanged = localState.RemoteModifiedTime is not null &&
-                remoteFile.ModifiedTime is not null &&
-                remoteFile.ModifiedTime != localState.RemoteModifiedTime;
-
+            var remoteChanged = HasRemoteChanged(localState.RemoteRevision, remoteFile.Revision);
             if (localDatabase is null || !localState.LocalDirty || remoteChanged)
             {
                 concurrentRemoteUpdate = localState.LocalDirty && remoteChanged;
-                database = await DownloadDatabaseAsync(client, remoteFile.Id, cancellationToken);
-                localState.RemoteFileId = remoteFile.Id;
-                localState.RemoteModifiedTime = remoteFile.ModifiedTime;
+                database = remoteFile.Value;
+                localState.RemoteRevision = remoteFile.Revision;
                 localState.LocalDirty = false;
             }
             else
             {
                 database = localDatabase;
-                localState.RemoteFileId = remoteFile.Id;
-                localState.RemoteModifiedTime = remoteFile.ModifiedTime;
-                localState = await UploadDatabaseAsync(client, reviewerFolderId, localState, database, cancellationToken);
+                var saved = await backend.SaveReviewerFeedbackAsync(reviewerStoreId, database, cancellationToken);
+                localState.RemoteRevision = saved.Revision;
+                localState.LocalDirty = false;
             }
         }
 
@@ -474,84 +586,12 @@ public sealed class ReviewerFeedbackService
         return (database, localState, concurrentRemoteUpdate);
     }
 
-    private static async Task<IReadOnlyList<DriveItemInfo>> ListReviewerFoldersAsync(
-        GoogleDriveRestClient client,
-        string feedbackFolderId,
-        CancellationToken cancellationToken)
-    {
-        var folders = new List<DriveItemInfo>();
-        string? pageToken = null;
-
-        do
-        {
-            var page = await client.ListChildrenAsync(feedbackFolderId, pageToken, 100, cancellationToken);
-            folders.AddRange(page.Files.Where(file => string.Equals(file.MimeType, FolderMimeType, StringComparison.Ordinal)));
-            pageToken = page.NextPageToken;
-        }
-        while (!string.IsNullOrWhiteSpace(pageToken));
-
-        return folders;
-    }
-
-    private static async Task<(
-        ReviewerFeedbackDatabase Database,
-        ReviewerFeedbackLocalState State,
-        bool RemoteWon)> SyncDatabaseAsync(
-        GoogleDriveRestClient client,
-        string reviewerFolderId,
-        string localFolderPath,
-        ReviewerFeedbackLocalState state,
-        ReviewerFeedbackDatabase localDatabase,
-        CancellationToken cancellationToken)
-    {
-        var remoteFile = !string.IsNullOrWhiteSpace(state.RemoteFileId)
-            ? await client.GetFileMetadataAsync(state.RemoteFileId, cancellationToken)
-            : null;
-
-        if (remoteFile is null)
-        {
-            var foundFile = await client.FindChildByNameAsync(reviewerFolderId, FeedbackFileName, null, cancellationToken);
-            if (foundFile is not null)
-            {
-                remoteFile = new DriveFileInfo
-                {
-                    Id = foundFile.Id,
-                    Name = foundFile.Name,
-                    ModifiedTime = foundFile.ModifiedTime
-                };
-            }
-        }
-
-        if (remoteFile is not null &&
-            state.RemoteModifiedTime is not null &&
-            remoteFile.ModifiedTime is not null &&
-            remoteFile.ModifiedTime != state.RemoteModifiedTime)
-        {
-            var remoteDatabase = await DownloadDatabaseAsync(client, remoteFile.Id, cancellationToken);
-            state.RemoteFileId = remoteFile.Id;
-            state.RemoteModifiedTime = remoteFile.ModifiedTime;
-            state.LocalDirty = false;
-
-            await SaveLocalDatabaseAsync(localFolderPath, remoteDatabase, cancellationToken);
-            await SaveLocalStateAsync(localFolderPath, state, cancellationToken);
-            return (remoteDatabase, state, RemoteWon: true);
-        }
-
-        if (state.LocalDirty)
-        {
-            state = await UploadDatabaseAsync(client, reviewerFolderId, state, localDatabase, cancellationToken);
-            await SaveLocalStateAsync(localFolderPath, state, cancellationToken);
-        }
-
-        return (localDatabase, state, RemoteWon: false);
-    }
-
     private static async Task<(
         ReviewerFeedbackStatus Status,
         ReviewerFeedbackLocalState State,
         bool ConcurrentRemoteUpdate)> LoadStatusAsync(
-        GoogleDriveRestClient client,
-        string reviewerFolderId,
+        IReviewerFeedbackBackend backend,
+        string reviewerStoreId,
         string localFolderPath,
         ReviewerFeedbackLocalState localState,
         string albumId,
@@ -559,7 +599,7 @@ public sealed class ReviewerFeedbackService
         CancellationToken cancellationToken)
     {
         var localStatus = await LoadLocalStatusAsync(localFolderPath, cancellationToken);
-        var remoteFile = await client.FindChildByNameAsync(reviewerFolderId, StatusFileName, null, cancellationToken);
+        var remoteFile = await backend.LoadReviewerStatusAsync(reviewerStoreId, cancellationToken);
         ReviewerFeedbackStatus status;
         var concurrentRemoteUpdate = false;
 
@@ -569,23 +609,20 @@ public sealed class ReviewerFeedbackService
         }
         else
         {
-            var remoteChanged = localState.StatusRemoteModifiedTime is null ||
-                remoteFile.ModifiedTime is not null &&
-                remoteFile.ModifiedTime != localState.StatusRemoteModifiedTime;
+            var remoteChanged = localState.StatusRemoteRevision is null ||
+                HasRemoteChanged(localState.StatusRemoteRevision, remoteFile.Revision);
 
             if (localStatus is null || !localState.StatusLocalDirty || remoteChanged)
             {
                 concurrentRemoteUpdate = localState.StatusLocalDirty && remoteChanged;
-                status = await DownloadStatusAsync(client, remoteFile.Id, cancellationToken);
-                localState.StatusRemoteFileId = remoteFile.Id;
-                localState.StatusRemoteModifiedTime = remoteFile.ModifiedTime;
+                status = remoteFile.Value;
+                localState.StatusRemoteRevision = remoteFile.Revision;
                 localState.StatusLocalDirty = false;
             }
             else
             {
                 status = localStatus;
-                localState.StatusRemoteFileId = remoteFile.Id;
-                localState.StatusRemoteModifiedTime = remoteFile.ModifiedTime;
+                localState.StatusRemoteRevision = remoteFile.Revision;
             }
         }
 
@@ -598,7 +635,9 @@ public sealed class ReviewerFeedbackService
         await SaveLocalStatusAsync(localFolderPath, status, cancellationToken);
         if (localState.StatusLocalDirty)
         {
-            localState = await UploadStatusAsync(client, reviewerFolderId, localState, status, cancellationToken);
+            var saved = await backend.SaveReviewerStatusAsync(reviewerStoreId, status, cancellationToken);
+            localState.StatusRemoteRevision = saved.Revision;
+            localState.StatusLocalDirty = false;
         }
 
         return (status, localState, concurrentRemoteUpdate);
@@ -608,9 +647,8 @@ public sealed class ReviewerFeedbackService
         ReviewerFeedbackDatabase Database,
         ReviewerFeedbackLocalState State,
         bool Applied)> TryApplySharedFeedbackAsync(
-        GoogleDriveRestClient client,
-        string feedbackFolderId,
-        string reviewerFolderId,
+        IReviewerFeedbackBackend backend,
+        string reviewerStoreId,
         string localFolderPath,
         ReviewerFeedbackLocalState state,
         ReviewerFeedbackDatabase currentDatabase,
@@ -618,39 +656,36 @@ public sealed class ReviewerFeedbackService
         string reviewerUserId,
         CancellationToken cancellationToken)
     {
-        var versionFile = await client.FindChildByNameAsync(feedbackFolderId, SharedFeedbackVersionFileName, null, cancellationToken);
-        if (versionFile is null)
+        var versionFile = await backend.LoadSharedFeedbackVersionAsync(cancellationToken);
+        if (versionFile is null ||
+            string.Equals(state.SharedCategoriesVersion, versionFile.Value.DatabaseVersion, StringComparison.Ordinal))
         {
             return (currentDatabase, state, Applied: false);
         }
 
-        var sharedVersion = await DownloadSharedVersionAsync(client, versionFile.Id, cancellationToken);
-        if (string.Equals(state.SharedCategoriesVersion, sharedVersion.DatabaseVersion, StringComparison.Ordinal))
-        {
-            return (currentDatabase, state, Applied: false);
-        }
-
-        var databaseFile = await client.FindChildByNameAsync(feedbackFolderId, SharedFeedbackFileName, null, cancellationToken);
+        var databaseFile = await backend.LoadSharedFeedbackAsync(cancellationToken);
         if (databaseFile is null)
         {
             return (currentDatabase, state, Applied: false);
         }
 
-        var sharedDatabase = await DownloadSharedDatabaseAsync(client, databaseFile.Id, cancellationToken);
+        var sharedDatabase = databaseFile.Value;
         var reviewerDatabase = new ReviewerFeedbackDatabase
         {
             AlbumId = albumId,
             ReviewerUserId = reviewerUserId,
             UpdatedAt = sharedDatabase.UpdatedAt,
             HasCollectedFeedback = sharedDatabase.HasCollectedFeedback,
+            IsFinalized = sharedDatabase.IsFinalized,
             PhotoCategories = new Dictionary<string, string>(sharedDatabase.PhotoCategories, StringComparer.Ordinal),
             PhotoScores = new Dictionary<string, int>(sharedDatabase.PhotoScores, StringComparer.Ordinal),
             FrozenPhotoIds = new HashSet<string>(sharedDatabase.FrozenPhotoIds, StringComparer.Ordinal)
         };
 
         await SaveLocalDatabaseAsync(localFolderPath, reviewerDatabase, cancellationToken);
-        state = await UploadDatabaseAsync(client, reviewerFolderId, state, reviewerDatabase, cancellationToken);
-        state.SharedCategoriesVersion = sharedVersion.DatabaseVersion;
+        var saved = await backend.SaveReviewerFeedbackAsync(reviewerStoreId, reviewerDatabase, cancellationToken);
+        state.SharedCategoriesVersion = versionFile.Value.DatabaseVersion;
+        state.RemoteRevision = saved.Revision;
         state.LocalDirty = false;
         await SaveLocalStateAsync(localFolderPath, state, cancellationToken);
 
@@ -662,76 +697,87 @@ public sealed class ReviewerFeedbackService
         ReviewerFeedbackLocalState State,
         bool RemoteWon,
         bool LocalDirtyBeforeSync)> SyncStatusAsync(
-        GoogleDriveRestClient client,
-        string reviewerFolderId,
+        IReviewerFeedbackBackend backend,
+        string reviewerStoreId,
         string localFolderPath,
         ReviewerFeedbackLocalState state,
         ReviewerFeedbackStatus? localStatus,
         CancellationToken cancellationToken)
     {
         var localDirtyBeforeSync = state.StatusLocalDirty;
-        var remoteFile = !string.IsNullOrWhiteSpace(state.StatusRemoteFileId)
-            ? await client.GetFileMetadataAsync(state.StatusRemoteFileId, cancellationToken)
-            : null;
-
-        if (remoteFile is null)
+        var remoteFile = await backend.LoadReviewerStatusAsync(reviewerStoreId, cancellationToken);
+        if (remoteFile is not null && HasRemoteChanged(state.StatusRemoteRevision, remoteFile.Revision))
         {
-            var foundFile = await client.FindChildByNameAsync(reviewerFolderId, StatusFileName, null, cancellationToken);
-            if (foundFile is not null)
-            {
-                remoteFile = new DriveFileInfo
-                {
-                    Id = foundFile.Id,
-                    Name = foundFile.Name,
-                    ModifiedTime = foundFile.ModifiedTime
-                };
-            }
-        }
-
-        if (remoteFile is not null &&
-            (state.StatusRemoteModifiedTime is null ||
-             remoteFile.ModifiedTime is not null &&
-             remoteFile.ModifiedTime != state.StatusRemoteModifiedTime))
-        {
-            var remoteStatus = await DownloadStatusAsync(client, remoteFile.Id, cancellationToken);
-            state.StatusRemoteFileId = remoteFile.Id;
-            state.StatusRemoteModifiedTime = remoteFile.ModifiedTime;
+            state.StatusRemoteRevision = remoteFile.Revision;
             state.StatusLocalDirty = false;
-            await SaveLocalStatusAsync(localFolderPath, remoteStatus, cancellationToken);
+            await SaveLocalStatusAsync(localFolderPath, remoteFile.Value, cancellationToken);
             await SaveLocalStateAsync(localFolderPath, state, cancellationToken);
-            return (remoteStatus, state, RemoteWon: true, localDirtyBeforeSync);
+            return (remoteFile.Value, state, RemoteWon: true, localDirtyBeforeSync);
         }
 
         if (localStatus is not null && state.StatusLocalDirty)
         {
-            state = await UploadStatusAsync(client, reviewerFolderId, state, localStatus, cancellationToken);
+            var saved = await backend.SaveReviewerStatusAsync(reviewerStoreId, localStatus, cancellationToken);
+            state.StatusRemoteRevision = saved.Revision;
+            state.StatusLocalDirty = false;
             await SaveLocalStateAsync(localFolderPath, state, cancellationToken);
         }
 
         return (localStatus, state, RemoteWon: false, localDirtyBeforeSync);
     }
 
+    private static async Task<(
+        ReviewerFeedbackDatabase Database,
+        ReviewerFeedbackLocalState State,
+        bool RemoteWon)> SyncDatabaseAsync(
+        IReviewerFeedbackBackend backend,
+        string reviewerStoreId,
+        string localFolderPath,
+        ReviewerFeedbackLocalState state,
+        ReviewerFeedbackDatabase localDatabase,
+        CancellationToken cancellationToken)
+    {
+        var remoteFile = await backend.LoadReviewerFeedbackAsync(reviewerStoreId, cancellationToken);
+        if (remoteFile is not null && HasRemoteChanged(state.RemoteRevision, remoteFile.Revision))
+        {
+            state.RemoteRevision = remoteFile.Revision;
+            state.LocalDirty = false;
+            await SaveLocalDatabaseAsync(localFolderPath, remoteFile.Value, cancellationToken);
+            await SaveLocalStateAsync(localFolderPath, state, cancellationToken);
+            return (remoteFile.Value, state, RemoteWon: true);
+        }
+
+        if (state.LocalDirty)
+        {
+            var saved = await backend.SaveReviewerFeedbackAsync(reviewerStoreId, localDatabase, cancellationToken);
+            state.RemoteRevision = saved.Revision;
+            state.LocalDirty = false;
+            await SaveLocalStateAsync(localFolderPath, state, cancellationToken);
+        }
+
+        return (localDatabase, state, RemoteWon: false);
+    }
+
     private static async Task<ReviewerFeedbackStatusResult> SetStatusAsync(
         ReviewerFeedbackSession session,
         FeedbackReviewerIdentity reviewer,
-        string accessToken,
+        IReviewerFeedbackBackend backend,
         ReviewerFeedbackStatusKind statusKind,
         CancellationToken cancellationToken)
     {
-        var client = new GoogleDriveRestClient(accessToken);
         var state = await LoadLocalStateAsync(session.LocalFolderPath, cancellationToken);
         var localStatus = await LoadLocalStatusAsync(session.LocalFolderPath, cancellationToken) ??
             CreateStatus(session.AlbumId, reviewer, ReviewerFeedbackStatusKind.InProgress);
 
         var sync = await SyncStatusAsync(
-            client,
-            session.State.ReviewerFolderId!,
+            backend,
+            session.ReviewerStoreId,
             session.LocalFolderPath,
             state,
             localStatus,
             cancellationToken);
 
-        if (sync.RemoteWon && sync.Status is { Status: ReviewerFeedbackStatusKind.Committed or ReviewerFeedbackStatusKind.Passed })
+        if (sync.RemoteWon && sync.Status is { Status: ReviewerFeedbackStatusKind.Committed or ReviewerFeedbackStatusKind.Passed or ReviewerFeedbackStatusKind.Left })
         {
             session.State = sync.State;
             return new ReviewerFeedbackStatusResult(sync.Status, sync.State, RemoteWon: true);
@@ -743,7 +789,9 @@ public sealed class ReviewerFeedbackService
         state = sync.State;
         state.StatusLocalDirty = true;
         await SaveLocalStatusAsync(session.LocalFolderPath, status, cancellationToken);
-        state = await UploadStatusAsync(client, session.State.ReviewerFolderId!, state, status, cancellationToken);
+        var saved = await backend.SaveReviewerStatusAsync(session.ReviewerStoreId, status, cancellationToken);
+        state.StatusRemoteRevision = saved.Revision;
+        state.StatusLocalDirty = false;
         await SaveLocalStateAsync(session.LocalFolderPath, state, cancellationToken);
         session.State = state;
 
@@ -783,150 +831,11 @@ public sealed class ReviewerFeedbackService
         };
     }
 
-    private static async Task<DriveFileInfo> EnsureReviewerFolderAsync(
-        GoogleDriveRestClient client,
-        string feedbackFolderId,
-        string reviewerUserId,
-        CancellationToken cancellationToken)
+    private static bool HasRemoteChanged(string? knownRevision, string? remoteRevision)
     {
-        var folder = await client.FindChildByNameAsync(feedbackFolderId, reviewerUserId, FolderMimeType, cancellationToken);
-        return folder is null
-            ? await client.CreateFolderAsync(reviewerUserId, feedbackFolderId, cancellationToken)
-            : new DriveFileInfo
-            {
-                Id = folder.Id,
-                Name = folder.Name,
-                ModifiedTime = folder.ModifiedTime
-            };
-    }
-
-    private static async Task<ReviewerFeedbackDatabase> DownloadDatabaseAsync(
-        GoogleDriveRestClient client,
-        string fileId,
-        CancellationToken cancellationToken)
-    {
-        await using var stream = await client.DownloadFileAsync(fileId, cancellationToken);
-        return await JsonSerializer.DeserializeAsync<ReviewerFeedbackDatabase>(stream, JsonOptions, cancellationToken)
-            ?? throw new InvalidOperationException("Remote feedback database is empty or invalid.");
-    }
-
-    private static async Task<ReviewerFeedbackStatus> DownloadStatusAsync(
-        GoogleDriveRestClient client,
-        string fileId,
-        CancellationToken cancellationToken)
-    {
-        await using var stream = await client.DownloadFileAsync(fileId, cancellationToken);
-        return await JsonSerializer.DeserializeAsync<ReviewerFeedbackStatus>(stream, JsonOptions, cancellationToken)
-            ?? throw new InvalidOperationException("Remote reviewer status is empty or invalid.");
-    }
-
-    private static async Task<SharedFeedbackDatabase> DownloadSharedDatabaseAsync(
-        GoogleDriveRestClient client,
-        string fileId,
-        CancellationToken cancellationToken)
-    {
-        await using var stream = await client.DownloadFileAsync(fileId, cancellationToken);
-        return await JsonSerializer.DeserializeAsync<SharedFeedbackDatabase>(stream, JsonOptions, cancellationToken)
-            ?? throw new InvalidOperationException("Remote shared feedback database is empty or invalid.");
-    }
-
-    private static async Task<SharedFeedbackVersion> DownloadSharedVersionAsync(
-        GoogleDriveRestClient client,
-        string fileId,
-        CancellationToken cancellationToken)
-    {
-        await using var stream = await client.DownloadFileAsync(fileId, cancellationToken);
-        return await JsonSerializer.DeserializeAsync<SharedFeedbackVersion>(stream, JsonOptions, cancellationToken)
-            ?? throw new InvalidOperationException("Remote shared feedback version is empty or invalid.");
-    }
-
-    private static async Task<ReviewerFeedbackLocalState> UploadDatabaseAsync(
-        GoogleDriveRestClient client,
-        string reviewerFolderId,
-        ReviewerFeedbackLocalState state,
-        ReviewerFeedbackDatabase database,
-        CancellationToken cancellationToken)
-    {
-        await using var stream = new MemoryStream(JsonSerializer.SerializeToUtf8Bytes(database, JsonOptions));
-
-        DriveFileInfo metadata;
-        if (string.IsNullOrWhiteSpace(state.RemoteFileId))
-        {
-            metadata = await client.UploadFileAsync(FeedbackFileName, reviewerFolderId, stream, "application/json", cancellationToken);
-        }
-        else
-        {
-            await client.UpdateFileContentAsync(state.RemoteFileId, stream, "application/json", cancellationToken);
-            metadata = await client.GetFileMetadataAsync(state.RemoteFileId, cancellationToken);
-        }
-
-        state.RemoteFileId = metadata.Id;
-        state.RemoteModifiedTime = metadata.ModifiedTime;
-        state.LocalDirty = false;
-        return state;
-    }
-
-    private static async Task<ReviewerFeedbackLocalState> UploadStatusAsync(
-        GoogleDriveRestClient client,
-        string reviewerFolderId,
-        ReviewerFeedbackLocalState state,
-        ReviewerFeedbackStatus status,
-        CancellationToken cancellationToken)
-    {
-        await using var stream = new MemoryStream(JsonSerializer.SerializeToUtf8Bytes(status, JsonOptions));
-
-        DriveFileInfo metadata;
-        if (string.IsNullOrWhiteSpace(state.StatusRemoteFileId))
-        {
-            metadata = await client.UploadFileAsync(StatusFileName, reviewerFolderId, stream, "application/json", cancellationToken);
-        }
-        else
-        {
-            await client.UpdateFileContentAsync(state.StatusRemoteFileId, stream, "application/json", cancellationToken);
-            metadata = await client.GetFileMetadataAsync(state.StatusRemoteFileId, cancellationToken);
-        }
-
-        state.StatusRemoteFileId = metadata.Id;
-        state.StatusRemoteModifiedTime = metadata.ModifiedTime;
-        state.StatusLocalDirty = false;
-        return state;
-    }
-
-    private static async Task UploadSharedDatabaseAsync(
-        GoogleDriveRestClient client,
-        string feedbackFolderId,
-        SharedFeedbackDatabase database,
-        CancellationToken cancellationToken)
-    {
-        await UploadOrUpdateJsonFileAsync(client, feedbackFolderId, SharedFeedbackFileName, database, cancellationToken);
-    }
-
-    private static async Task UploadSharedVersionAsync(
-        GoogleDriveRestClient client,
-        string feedbackFolderId,
-        SharedFeedbackVersion version,
-        CancellationToken cancellationToken)
-    {
-        await UploadOrUpdateJsonFileAsync(client, feedbackFolderId, SharedFeedbackVersionFileName, version, cancellationToken);
-    }
-
-    private static async Task UploadOrUpdateJsonFileAsync<T>(
-        GoogleDriveRestClient client,
-        string parentFolderId,
-        string fileName,
-        T payload,
-        CancellationToken cancellationToken)
-    {
-        var file = await client.FindChildByNameAsync(parentFolderId, fileName, null, cancellationToken);
-        await using var stream = new MemoryStream(JsonSerializer.SerializeToUtf8Bytes(payload, JsonOptions));
-        if (file is null)
-        {
-            await client.UploadFileAsync(fileName, parentFolderId, stream, "application/json", cancellationToken);
-        }
-        else
-        {
-            await client.UpdateFileContentAsync(file.Id, stream, "application/json", cancellationToken);
-        }
+        return knownRevision is null ||
+            remoteRevision is not null &&
+            !string.Equals(remoteRevision, knownRevision, StringComparison.Ordinal);
     }
 
     private static async Task<ReviewerFeedbackDatabase?> LoadLocalDatabaseAsync(string localFolderPath, CancellationToken cancellationToken)
@@ -999,15 +908,26 @@ public sealed class ReviewerFeedbackService
         await JsonSerializer.SerializeAsync(stream, state, JsonOptions, cancellationToken);
     }
 
-    private static string GetLocalFolderPath(string albumId, string reviewerUserId)
+    private string GetLocalFolderPath(string albumId, string reviewerBackendType, string reviewerUserId)
     {
-        var basePath = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        if (string.IsNullOrWhiteSpace(basePath))
+        return Path.Combine(
+            _localStorageRootPath,
+            "Picshare",
+            "feedback",
+            Sanitize(albumId),
+            Sanitize(reviewerBackendType),
+            Sanitize(reviewerUserId));
+    }
+
+    private static string GetLocalStorageRootPath(string? configuredRootPath)
+    {
+        if (!string.IsNullOrWhiteSpace(configuredRootPath))
         {
-            basePath = AppContext.BaseDirectory;
+            return configuredRootPath;
         }
 
-        return Path.Combine(basePath, "Picshare", "feedback", Sanitize(albumId), Sanitize(reviewerUserId));
+        var basePath = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        return string.IsNullOrWhiteSpace(basePath) ? AppContext.BaseDirectory : basePath;
     }
 
     private static string Sanitize(string value)
@@ -1015,16 +935,5 @@ public sealed class ReviewerFeedbackService
         var invalid = Path.GetInvalidFileNameChars();
         var sanitized = new string(value.Select(character => invalid.Contains(character) ? '_' : character).ToArray());
         return string.IsNullOrWhiteSpace(sanitized) ? "_" : sanitized;
-    }
-
-    private static FeedbackReviewerIdentity CreateGoogleReviewerIdentity(GoogleOAuthTokenSet token)
-    {
-        return new FeedbackReviewerIdentity
-        {
-            BackendType = "google",
-            UserId = token.UserId ?? throw new InvalidOperationException("Google reviewer id is missing."),
-            DisplayName = token.DisplayName,
-            Email = token.Email
-        };
     }
 }

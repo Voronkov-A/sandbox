@@ -2,6 +2,8 @@ namespace Picshare.Services;
 
 public static class AlbumLinkParser
 {
+    private const string LocalManifestQueryKey = "localManifest";
+
     public static string? TryGetManifestFileId(string? value)
     {
         if (string.IsNullOrWhiteSpace(value))
@@ -14,6 +16,11 @@ public static class AlbumLinkParser
         if (Uri.TryCreate(value, UriKind.Absolute, out var uri))
         {
             var query = ParseQuery(uri.Query);
+            if (!string.IsNullOrWhiteSpace(GetQueryValue(query, LocalManifestQueryKey)))
+            {
+                return null;
+            }
+
             var manifest = GetQueryValue(query, "manifest") ?? GetQueryValue(query, "manifestFileId");
             if (!string.IsNullOrWhiteSpace(manifest))
             {
@@ -37,9 +44,40 @@ public static class AlbumLinkParser
         return value.Contains(' ', StringComparison.Ordinal) ? null : value;
     }
 
+    public static string? TryGetLocalManifestPath(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        value = value.Trim();
+        if (Uri.TryCreate(value, UriKind.Absolute, out var uri))
+        {
+            if (uri.IsFile)
+            {
+                return File.Exists(uri.LocalPath) ? uri.LocalPath : null;
+            }
+
+            var query = ParseQuery(uri.Query);
+            var localManifest = GetQueryValue(query, LocalManifestQueryKey);
+            if (!string.IsNullOrWhiteSpace(localManifest))
+            {
+                return File.Exists(localManifest) ? localManifest : null;
+            }
+        }
+
+        return File.Exists(value) ? value : null;
+    }
+
     public static string CreatePicshareLink(string manifestFileId, string albumFolderId)
     {
         return $"picshare://album?manifest={Uri.EscapeDataString(manifestFileId)}&folder={Uri.EscapeDataString(albumFolderId)}";
+    }
+
+    public static string CreateLocalPicshareLink(string manifestFilePath)
+    {
+        return $"picshare://album?{LocalManifestQueryKey}={Uri.EscapeDataString(manifestFilePath)}";
     }
 
     private static Dictionary<string, string> ParseQuery(string query)

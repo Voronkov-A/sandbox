@@ -8,14 +8,9 @@ public sealed class ImageCacheService
     private static readonly SemaphoreSlim DecodeGate = new(2);
     private readonly string _rootPath;
 
-    public ImageCacheService()
+    public ImageCacheService(string? localStorageRootPath = null)
     {
-        var basePath = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        if (string.IsNullOrWhiteSpace(basePath))
-        {
-            basePath = Path.GetTempPath();
-        }
-
+        var basePath = GetLocalStorageRootPath(localStorageRootPath);
         _rootPath = Path.Combine(basePath, "Picshare", "cache", "images");
     }
 
@@ -38,7 +33,7 @@ public sealed class ImageCacheService
         var tempPath = Path.Combine(albumPath, $".{Guid.NewGuid():N}.tmp");
         try
         {
-            await using (var remoteStream = await httpClient.GetStreamAsync(downloadUrl, cancellationToken))
+            await using (var remoteStream = await OpenSourceStreamAsync(downloadUrl, httpClient, cancellationToken))
             await using (var fileStream = new FileStream(tempPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
             {
                 await remoteStream.CopyToAsync(fileStream, cancellationToken);
@@ -54,6 +49,22 @@ public sealed class ImageCacheService
                 File.Delete(tempPath);
             }
         }
+    }
+
+    public async Task CopyOriginalToAsync(
+        string albumId,
+        string cacheFileName,
+        string downloadUrl,
+        HttpClient httpClient,
+        Stream destination,
+        CancellationToken cancellationToken)
+    {
+        var cachePath = GetCachedPath(albumId, cacheFileName);
+        await using var source = cachePath is null
+            ? await OpenSourceStreamAsync(downloadUrl, httpClient, cancellationToken)
+            : File.OpenRead(cachePath);
+
+        await source.CopyToAsync(destination, cancellationToken);
     }
 
     public Task ClearAsync()
@@ -118,6 +129,42 @@ public sealed class ImageCacheService
         var invalid = Path.GetInvalidFileNameChars();
         var sanitized = new string(value.Select(character => invalid.Contains(character) ? '_' : character).ToArray());
         return string.IsNullOrWhiteSpace(sanitized) ? "_" : sanitized;
+    }
+
+    private string? GetCachedPath(string albumId, string cacheFileName)
+    {
+        var albumPath = Path.Combine(_rootPath, SanitizePathSegment(albumId));
+        var cachePath = Path.Combine(albumPath, SanitizePathSegment(cacheFileName));
+        return File.Exists(cachePath) ? cachePath : null;
+    }
+
+    private static string GetLocalStorageRootPath(string? configuredRootPath)
+    {
+        if (!string.IsNullOrWhiteSpace(configuredRootPath))
+        {
+            return configuredRootPath;
+        }
+
+        var basePath = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        return string.IsNullOrWhiteSpace(basePath) ? Path.GetTempPath() : basePath;
+    }
+
+    private static async Task<Stream> OpenSourceStreamAsync(
+        string downloadUrl,
+        HttpClient httpClient,
+        CancellationToken cancellationToken)
+    {
+        if (Uri.TryCreate(downloadUrl, UriKind.Absolute, out var uri) && uri.IsFile)
+        {
+            return File.OpenRead(uri.LocalPath);
+        }
+
+        if (File.Exists(downloadUrl))
+        {
+            return File.OpenRead(downloadUrl);
+        }
+
+        return await httpClient.GetStreamAsync(downloadUrl, cancellationToken);
     }
 
     private static MemoryStream CreateDisplayImageStream(

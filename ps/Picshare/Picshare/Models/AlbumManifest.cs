@@ -18,7 +18,9 @@ public sealed record AlbumManifest
 
     public required FeedbackReviewerIdentity Author { get; init; }
 
-    public required GoogleDriveAlbumDetails GoogleDrive { get; init; }
+    public GoogleDriveAlbumDetails? GoogleDrive { get; init; }
+
+    public LocalFileSystemAlbumDetails? LocalFileSystem { get; init; }
 
     public required IReadOnlyList<PhotoReference> Photos { get; init; }
 }
@@ -36,6 +38,17 @@ public sealed record GoogleDriveAlbumDetails
     public required string AlbumFolderUrl { get; init; }
 }
 
+public sealed record LocalFileSystemAlbumDetails
+{
+    public required string RootPath { get; init; }
+
+    public required string PhotosFolderPath { get; init; }
+
+    public required string FeedbackFolderPath { get; init; }
+
+    public required string ManifestFilePath { get; init; }
+}
+
 public sealed record PhotoReference
 {
     public required string Id { get; init; }
@@ -46,11 +59,11 @@ public sealed record PhotoReference
 
     public required string BackendType { get; init; }
 
-    public required string DriveFileId { get; init; }
+    public string? DriveFileId { get; init; }
 
     public required string DownloadUrl { get; init; }
 
-    public required string ThumbnailDriveFileId { get; init; }
+    public string? ThumbnailDriveFileId { get; init; }
 
     public required string ThumbnailDownloadUrl { get; init; }
 

@@ -54,6 +54,141 @@ public partial class MainView : UserControl
         }
     }
 
+    private async void ChooseLocalAlbumDestination_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is MainViewModel viewModel && TopLevel.GetTopLevel(this) is { } topLevel)
+        {
+            var folders = await topLevel.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+            {
+                Title = "Choose local album destination",
+                AllowMultiple = false
+            });
+
+            if (folders.Count > 0)
+            {
+                viewModel.SetLocalAlbumDestination(folders[0]);
+            }
+        }
+    }
+
+    private async void ChoosePictureDefaultDownloadDirectory_Click(object? sender, RoutedEventArgs e)
+    {
+        await ChooseSettingsDownloadDirectoryAsync(
+            "Choose picture default download directory",
+            viewModel => viewModel.PictureDefaultDownloadDirectoryPath,
+            (viewModel, folder) => viewModel.SetPictureDefaultDownloadDirectory(folder));
+    }
+
+    private async void ChooseUncategorizedDefaultDownloadDirectory_Click(object? sender, RoutedEventArgs e)
+    {
+        await ChooseSettingsDownloadDirectoryAsync(
+            "Choose uncategorized default download directory",
+            viewModel => viewModel.UncategorizedDefaultDownloadDirectoryPath,
+            (viewModel, folder) => viewModel.SetUncategorizedDefaultDownloadDirectory(folder));
+    }
+
+    private async void ChooseNiceDefaultDownloadDirectory_Click(object? sender, RoutedEventArgs e)
+    {
+        await ChooseSettingsDownloadDirectoryAsync(
+            "Choose nice default download directory",
+            viewModel => viewModel.NiceDefaultDownloadDirectoryPath,
+            (viewModel, folder) => viewModel.SetNiceDefaultDownloadDirectory(folder));
+    }
+
+    private async void ChooseOkDefaultDownloadDirectory_Click(object? sender, RoutedEventArgs e)
+    {
+        await ChooseSettingsDownloadDirectoryAsync(
+            "Choose ok default download directory",
+            viewModel => viewModel.OkDefaultDownloadDirectoryPath,
+            (viewModel, folder) => viewModel.SetOkDefaultDownloadDirectory(folder));
+    }
+
+    private async void ChooseTrashDefaultDownloadDirectory_Click(object? sender, RoutedEventArgs e)
+    {
+        await ChooseSettingsDownloadDirectoryAsync(
+            "Choose trash default download directory",
+            viewModel => viewModel.TrashDefaultDownloadDirectoryPath,
+            (viewModel, folder) => viewModel.SetTrashDefaultDownloadDirectory(folder));
+    }
+
+    private async void DownloadCurrentPhoto_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is MainViewModel viewModel && TopLevel.GetTopLevel(this) is { } topLevel)
+        {
+            var folders = await OpenSingleFolderPickerAsync(
+                topLevel,
+                "Choose download folder",
+                viewModel.PictureDefaultDownloadDirectoryPath);
+
+            if (folders.Count > 0)
+            {
+                await viewModel.DownloadCurrentPhotoAsync(folders[0].TryGetLocalPath() ?? "");
+            }
+        }
+    }
+
+    private async void ChooseAlbumDownloadCategoryDestination_Click(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Control { DataContext: AlbumDownloadCategoryViewModel category } ||
+            TopLevel.GetTopLevel(this) is not { } topLevel)
+        {
+            return;
+        }
+
+        var folders = await OpenSingleFolderPickerAsync(
+            topLevel,
+            $"Choose destination for {category.CategoryName}",
+            category.DestinationDirectoryPath);
+
+        if (folders.Count > 0 && folders[0].TryGetLocalPath() is { } destinationPath)
+        {
+            category.DestinationDirectoryPath = destinationPath;
+        }
+    }
+
+    private async Task ChooseSettingsDownloadDirectoryAsync(
+        string title,
+        Func<MainViewModel, string> getCurrentPath,
+        Action<MainViewModel, IStorageFolder> setFolder)
+    {
+        if (DataContext is not MainViewModel viewModel || TopLevel.GetTopLevel(this) is not { } topLevel)
+        {
+            return;
+        }
+
+        var folders = await OpenSingleFolderPickerAsync(topLevel, title, getCurrentPath(viewModel));
+        if (folders.Count > 0)
+        {
+            setFolder(viewModel, folders[0]);
+        }
+    }
+
+    private static async Task<IReadOnlyList<IStorageFolder>> OpenSingleFolderPickerAsync(
+        TopLevel topLevel,
+        string title,
+        string? suggestedStartPath)
+    {
+        IStorageFolder? suggestedStartLocation = null;
+        if (!string.IsNullOrWhiteSpace(suggestedStartPath))
+        {
+            try
+            {
+                suggestedStartLocation = await topLevel.StorageProvider.TryGetFolderFromPathAsync(suggestedStartPath);
+            }
+            catch
+            {
+                suggestedStartLocation = null;
+            }
+        }
+
+        return await topLevel.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+        {
+            Title = title,
+            AllowMultiple = false,
+            SuggestedStartLocation = suggestedStartLocation
+        });
+    }
+
     private static async Task OpenManualPhotoPickerAsync(TopLevel topLevel, MainViewModel viewModel)
     {
         var files = await topLevel.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions

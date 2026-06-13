@@ -12,6 +12,8 @@ public sealed class ReviewerFeedbackDatabase
 
     public bool HasCollectedFeedback { get; set; }
 
+    public bool IsFinalized { get; set; }
+
     public Dictionary<string, string> PhotoCategories { get; set; } = new(StringComparer.Ordinal);
 
     public Dictionary<string, int> PhotoScores { get; set; } = new(StringComparer.Ordinal);
@@ -21,17 +23,23 @@ public sealed class ReviewerFeedbackDatabase
 
 public sealed class ReviewerFeedbackLocalState
 {
+    public string? ReviewerStoreId { get; set; }
+
     public string? ReviewerFolderId { get; set; }
 
     public string? RemoteFileId { get; set; }
 
     public DateTimeOffset? RemoteModifiedTime { get; set; }
 
+    public string? RemoteRevision { get; set; }
+
     public bool LocalDirty { get; set; }
 
     public string? StatusRemoteFileId { get; set; }
 
     public DateTimeOffset? StatusRemoteModifiedTime { get; set; }
+
+    public string? StatusRemoteRevision { get; set; }
 
     public bool StatusLocalDirty { get; set; }
 
@@ -42,7 +50,8 @@ public enum ReviewerFeedbackStatusKind
 {
     InProgress,
     Committed,
-    Passed
+    Passed,
+    Left
 }
 
 public sealed class ReviewerFeedbackStatus
@@ -88,6 +97,8 @@ public sealed class SharedFeedbackDatabase
 
     public bool HasCollectedFeedback { get; set; }
 
+    public bool IsFinalized { get; set; }
+
     public Dictionary<string, string> PhotoCategories { get; set; } = new(StringComparer.Ordinal);
 
     public Dictionary<string, int> PhotoScores { get; set; } = new(StringComparer.Ordinal);
@@ -112,6 +123,11 @@ public sealed record ReviewerFeedbackCollectResult(
     int UnfrozenPhotoCount,
     string DatabaseVersion);
 
+public sealed record ReviewerFeedbackFinalizeResult(
+    int ReviewerCount,
+    int PhotoCount,
+    string DatabaseVersion);
+
 public sealed record ReviewerFeedbackFlowItem(
     FeedbackReviewerIdentity Reviewer,
     DateTimeOffset UpdatedAt);
@@ -119,6 +135,7 @@ public sealed record ReviewerFeedbackFlowItem(
 public sealed record ReviewerFeedbackFlowSnapshot(
     IReadOnlyList<ReviewerFeedbackFlowItem> Committed,
     IReadOnlyList<ReviewerFeedbackFlowItem> Passed,
+    IReadOnlyList<ReviewerFeedbackFlowItem> Left,
     IReadOnlyList<ReviewerFeedbackFlowItem> InProgress);
 
 public sealed class ReviewerFeedbackSession
@@ -127,7 +144,7 @@ public sealed class ReviewerFeedbackSession
 
     public required string ReviewerUserId { get; init; }
 
-    public required string FeedbackFolderId { get; init; }
+    public required string ReviewerStoreId { get; init; }
 
     public required string LocalFolderPath { get; init; }
 

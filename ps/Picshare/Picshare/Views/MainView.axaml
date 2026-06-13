@@ -114,7 +114,7 @@
                 </StackPanel>
 
                 <StackPanel Spacing="12" IsVisible="{Binding IsAlbumSettingsVisible}">
-                  <TextBlock Text="Upload local photos to Google Drive" FontSize="15" FontWeight="SemiBold"/>
+                  <TextBlock Text="Album details" FontSize="15" FontWeight="SemiBold"/>
 
                   <StackPanel Spacing="5">
                     <TextBlock Text="Album name"/>
@@ -202,7 +202,7 @@
                     </Grid>
                   </StackPanel>
 
-                  <StackPanel Spacing="8">
+                  <StackPanel Spacing="8" IsVisible="{Binding IsGoogleDriveAlbumSettingsVisible}">
                     <TextBlock Text="Google Drive" FontWeight="SemiBold"/>
 
                     <Grid ColumnDefinitions="*,Auto">
@@ -252,6 +252,21 @@
                     </StackPanel>
                   </StackPanel>
 
+                  <StackPanel Spacing="8" IsVisible="{Binding IsLocalAlbumSettingsVisible}">
+                    <TextBlock Text="Local storage" FontWeight="SemiBold"/>
+                    <StackPanel Spacing="5">
+                      <TextBlock Text="Album destination"/>
+                      <Grid ColumnDefinitions="*,Auto">
+                        <TextBox Text="{Binding SelectedLocalAlbumDestinationName}" IsReadOnly="True" Margin="0,0,8,0"/>
+                        <Button Grid.Column="1"
+                                Click="ChooseLocalAlbumDestination_Click"
+                                Padding="12,8">
+                          Select
+                        </Button>
+                      </Grid>
+                    </StackPanel>
+                  </StackPanel>
+
                   <Grid ColumnDefinitions="*,Auto">
                     <Button Command="{Binding CreateAlbumCommand}"
                             HorizontalAlignment="Stretch"
@@ -281,7 +296,7 @@
                 </StackPanel>
 
                 <StackPanel Spacing="5">
-                  <TextBlock Text="Google Drive folder"/>
+                  <TextBlock Text="Album location"/>
                   <TextBox Text="{Binding DriveFolderLink}" IsReadOnly="True" TextWrapping="Wrap"/>
                 </StackPanel>
               </StackPanel>
@@ -532,27 +547,48 @@
                 <TextBlock Text="{Binding CurrentAlbumTitle}" FontSize="20" FontWeight="SemiBold" VerticalAlignment="Center"/>
                 <TextBlock Grid.Column="1"
                            Text="{Binding CommitFeedbackStatus}"
+                           IsVisible="{Binding IsStandardFeedbackActionsVisible}"
                            Foreground="#6C756F"
                            VerticalAlignment="Center"
                            Margin="0,0,10,0"/>
                 <Button Grid.Column="2"
                         Command="{Binding CommitFeedbackCommand}"
+                        IsVisible="{Binding IsStandardFeedbackActionsVisible}"
                         IsEnabled="{Binding CanCommitFeedback}"
                         Margin="0,0,8,0"
                         Padding="12,8">
                   Commit feedback
                 </Button>
                 <Button Grid.Column="3"
-                        IsEnabled="{Binding CanPassFeedback}"
+                        IsEnabled="{Binding CanUseAlbumMoreMenu}"
                         Padding="12,8">
                   More
                   <Button.Flyout>
                     <MenuFlyout>
                       <MenuItem Header="pass"
                                 Command="{Binding PassFeedbackCommand}"
+                                IsVisible="{Binding CanPassFeedback}"
                                 IsEnabled="{Binding CanPassFeedback}"/>
+                      <MenuItem Header="Download the album..."
+                                Command="{Binding OpenAlbumDownloadDialogCommand}"
+                                IsEnabled="{Binding CanUseAlbumMoreMenu}"/>
                     </MenuFlyout>
                   </Button.Flyout>
+                </Button>
+                <TextBlock Grid.Column="1"
+                           Text="{Binding FinalizedFeedbackMessage}"
+                           IsVisible="{Binding IsLeaveFeedbackVisible}"
+                           Foreground="#6C756F"
+                           VerticalAlignment="Center"
+                           TextWrapping="Wrap"
+                           MaxWidth="520"
+                           Margin="0,0,10,0"/>
+                <Button Grid.Column="2"
+                        Command="{Binding LeaveFeedbackCommand}"
+                        IsVisible="{Binding IsLeaveFeedbackVisible}"
+                        IsEnabled="{Binding CanLeaveFeedback}"
+                        Padding="12,8">
+                  Leave
                 </Button>
               </Grid>
               <TabControl x:Name="AlbumReviewTabs" Grid.Row="1" SelectionChanged="AlbumReviewTabs_SelectionChanged">
@@ -617,6 +653,7 @@
                                    VerticalAlignment="Center"/>
                         <Button Grid.Column="1"
                                 Command="{Binding CollectFeedbackCommand}"
+                                IsVisible="{Binding IsCollectFeedbackVisible}"
                                 IsEnabled="{Binding CanCollectFeedback}"
                                 Margin="0,0,8,0"
                                 Padding="12,8">
@@ -632,12 +669,13 @@
                         </Button>
                         <Button Grid.Column="3"
                                 Command="{Binding FinalizeFeedbackCommand}"
+                                IsVisible="{Binding CanFinalizeFeedback}"
                                 IsEnabled="{Binding CanFinalizeFeedback}"
                                 Padding="12,8">
                           Finalize
                         </Button>
                       </Grid>
-                      <StackPanel Spacing="6">
+                      <StackPanel Spacing="6" IsVisible="{Binding IsRegularFlowVisible}">
                         <TextBlock Text="{Binding CommittedReviewersHeader}" FontWeight="SemiBold"/>
                         <ListBox ItemsSource="{Binding CommittedReviewers}"
                                  Background="Transparent"
@@ -659,9 +697,31 @@
                           </ListBox.ItemTemplate>
                         </ListBox>
                       </StackPanel>
-                      <StackPanel Spacing="6">
+                      <StackPanel Spacing="6" IsVisible="{Binding IsRegularFlowVisible}">
                         <TextBlock Text="{Binding PassedReviewersHeader}" FontWeight="SemiBold"/>
                         <ListBox ItemsSource="{Binding PassedReviewers}"
+                                 Background="Transparent"
+                                 BorderThickness="0">
+                          <ListBox.ItemTemplate>
+                            <DataTemplate x:DataType="vm:ReviewerFeedbackFlowItemViewModel">
+                              <Border Background="White"
+                                      BorderBrush="#D6D8D1"
+                                      BorderThickness="1"
+                                      CornerRadius="6"
+                                      Padding="12"
+                                      Margin="0,0,0,8">
+                                <StackPanel Spacing="2">
+                                  <TextBlock Text="{Binding Name}" FontWeight="SemiBold"/>
+                                  <TextBlock Text="{Binding Description}" FontSize="12" Foreground="#6C756F"/>
+                                </StackPanel>
+                              </Border>
+                            </DataTemplate>
+                          </ListBox.ItemTemplate>
+                        </ListBox>
+                      </StackPanel>
+                      <StackPanel Spacing="6" IsVisible="{Binding IsFinalizedFlowVisible}">
+                        <TextBlock Text="{Binding LeftReviewersHeader}" FontWeight="SemiBold"/>
+                        <ListBox ItemsSource="{Binding LeftReviewers}"
                                  Background="Transparent"
                                  BorderThickness="0">
                           <ListBox.ItemTemplate>
@@ -728,11 +788,46 @@
               CornerRadius="6"
               Padding="18"
               Margin="20"
-              MaxWidth="420"
+              MaxWidth="680"
               HorizontalAlignment="Stretch"
               VerticalAlignment="Center">
         <StackPanel Spacing="12">
           <TextBlock Text="Settings" FontSize="18" FontWeight="SemiBold"/>
+          <StackPanel Spacing="5">
+            <TextBlock Text="Anonymous reviewer name" FontWeight="SemiBold"/>
+            <TextBox Text="{Binding AnonymousReviewerName}"
+                     Watermark="Name shown in local album flow lists"/>
+          </StackPanel>
+          <StackPanel Spacing="5">
+            <TextBlock Text="Default download directories" FontWeight="SemiBold"/>
+            <Grid ColumnDefinitions="150,*,Auto,Auto" RowDefinitions="Auto,Auto,Auto,Auto,Auto">
+              <TextBlock Text="Picture" VerticalAlignment="Center" Margin="0,0,8,8"/>
+              <TextBox Grid.Column="1" Text="{Binding PictureDefaultDownloadDirectoryPath}" Margin="0,0,8,8"/>
+              <Button Grid.Column="2" Click="ChoosePictureDefaultDownloadDirectory_Click" Padding="12,8" Margin="0,0,8,8">Select</Button>
+              <Button Grid.Column="3" Command="{Binding SetPictureDefaultDownloadDirectoryToDefaultCommand}" Padding="12,8" Margin="0,0,0,8">Set to default</Button>
+
+              <TextBlock Grid.Row="1" Text="Uncategorized" VerticalAlignment="Center" Margin="0,0,8,8"/>
+              <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding UncategorizedDefaultDownloadDirectoryPath}" Margin="0,0,8,8"/>
+              <Button Grid.Row="1" Grid.Column="2" Click="ChooseUncategorizedDefaultDownloadDirectory_Click" Padding="12,8" Margin="0,0,8,8">Select</Button>
+              <Button Grid.Row="1" Grid.Column="3" Command="{Binding SetUncategorizedDefaultDownloadDirectoryToDefaultCommand}" Padding="12,8" Margin="0,0,0,8">Set to default</Button>
+
+              <TextBlock Grid.Row="2" Text="Nice" VerticalAlignment="Center" Margin="0,0,8,8"/>
+              <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding NiceDefaultDownloadDirectoryPath}" Margin="0,0,8,8"/>
+              <Button Grid.Row="2" Grid.Column="2" Click="ChooseNiceDefaultDownloadDirectory_Click" Padding="12,8" Margin="0,0,8,8">Select</Button>
+              <Button Grid.Row="2" Grid.Column="3" Command="{Binding SetNiceDefaultDownloadDirectoryToDefaultCommand}" Padding="12,8" Margin="0,0,0,8">Set to default</Button>
+
+              <TextBlock Grid.Row="3" Text="Ok" VerticalAlignment="Center" Margin="0,0,8,8"/>
+              <TextBox Grid.Row="3" Grid.Column="1" Text="{Binding OkDefaultDownloadDirectoryPath}" Margin="0,0,8,8"/>
+              <Button Grid.Row="3" Grid.Column="2" Click="ChooseOkDefaultDownloadDirectory_Click" Padding="12,8" Margin="0,0,8,8">Select</Button>
+              <Button Grid.Row="3" Grid.Column="3" Command="{Binding SetOkDefaultDownloadDirectoryToDefaultCommand}" Padding="12,8" Margin="0,0,0,8">Set to default</Button>
+
+              <TextBlock Grid.Row="4" Text="Trash" VerticalAlignment="Center" Margin="0,0,8,0"/>
+              <TextBox Grid.Row="4" Grid.Column="1" Text="{Binding TrashDefaultDownloadDirectoryPath}" Margin="0,0,8,0"/>
+              <Button Grid.Row="4" Grid.Column="2" Click="ChooseTrashDefaultDownloadDirectory_Click" Padding="12,8" Margin="0,0,8,0">Select</Button>
+              <Button Grid.Row="4" Grid.Column="3" Command="{Binding SetTrashDefaultDownloadDirectoryToDefaultCommand}" Padding="12,8">Set to default</Button>
+            </Grid>
+          </StackPanel>
+          <Border Height="1" Background="#D6D8D1"/>
           <Grid ColumnDefinitions="*,Auto">
             <TextBlock Text="Downloaded thumbnails and full images"
                        VerticalAlignment="Center"
@@ -801,6 +896,108 @@
                     Click="OpenAlbumSignInGoogle_Click"
                     Padding="12,8">
               Sign in with Google
+            </Button>
+          </Grid>
+        </StackPanel>
+      </Border>
+    </Grid>
+
+    <Grid Grid.RowSpan="3"
+          Background="#80000000"
+          IsVisible="{Binding IsAlbumDownloadDialogVisible}">
+      <Border Background="White"
+              BorderBrush="#D6D8D1"
+              BorderThickness="1"
+              CornerRadius="6"
+              Padding="18"
+              Margin="20"
+              MaxWidth="780"
+              HorizontalAlignment="Stretch"
+              VerticalAlignment="Center">
+        <Grid RowDefinitions="Auto,*,Auto" MaxHeight="560">
+          <TextBlock Text="Download album" FontSize="18" FontWeight="SemiBold"/>
+          <ScrollViewer Grid.Row="1" Margin="0,12,0,12">
+            <ItemsControl ItemsSource="{Binding AlbumDownloadCategories}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="vm:AlbumDownloadCategoryViewModel">
+                  <Border BorderBrush="#D6D8D1"
+                          BorderThickness="1"
+                          CornerRadius="6"
+                          Padding="10"
+                          Margin="0,0,0,8">
+                    <Grid ColumnDefinitions="150,170,*,Auto">
+                      <TextBlock Text="{Binding Header}"
+                                 FontWeight="SemiBold"
+                                 VerticalAlignment="Center"
+                                 Margin="0,0,10,0"/>
+                      <ComboBox Grid.Column="1"
+                                ItemsSource="{Binding ModeOptions}"
+                                SelectedItem="{Binding SelectedMode}"
+                                Margin="0,0,10,0">
+                        <ComboBox.ItemTemplate>
+                          <DataTemplate x:DataType="vm:AlbumDownloadModeViewModel">
+                            <TextBlock Text="{Binding Name}"/>
+                          </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                      </ComboBox>
+                      <TextBox Grid.Column="2"
+                               Text="{Binding DestinationDirectoryPath}"
+                               IsEnabled="{Binding IsDestinationDirectoryEnabled}"
+                               Watermark="Destination directory"
+                               Margin="0,0,10,0"/>
+                      <Button Grid.Column="3"
+                              Click="ChooseAlbumDownloadCategoryDestination_Click"
+                              IsEnabled="{Binding IsDestinationDirectoryEnabled}"
+                              Padding="12,8">
+                        Select
+                      </Button>
+                    </Grid>
+                  </Border>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </ScrollViewer>
+          <Grid Grid.Row="2" ColumnDefinitions="*,Auto,Auto">
+            <Button Grid.Column="1"
+                    Command="{Binding CancelAlbumDownloadDialogCommand}"
+                    Padding="12,8"
+                    Margin="0,0,8,0">
+              Cancel
+            </Button>
+            <Button Grid.Column="2"
+                    Command="{Binding DownloadAlbumCommand}"
+                    Padding="12,8">
+              Download
+            </Button>
+          </Grid>
+        </Grid>
+      </Border>
+    </Grid>
+
+    <Grid Grid.RowSpan="3"
+          Background="#80000000"
+          IsVisible="{Binding IsAlbumDownloadProgressVisible}">
+      <Border Background="White"
+              BorderBrush="#D6D8D1"
+              BorderThickness="1"
+              CornerRadius="6"
+              Padding="18"
+              Margin="20"
+              MaxWidth="520"
+              HorizontalAlignment="Stretch"
+              VerticalAlignment="Center">
+        <StackPanel Spacing="12">
+          <TextBlock Text="Downloading album" FontSize="18" FontWeight="SemiBold"/>
+          <TextBlock Text="{Binding AlbumDownloadProgressMessage}" TextWrapping="Wrap"/>
+          <ProgressBar Minimum="0"
+                       Maximum="{Binding AlbumDownloadProgressMaximum}"
+                       Value="{Binding AlbumDownloadProgressValue}"
+                       Height="10"/>
+          <Grid ColumnDefinitions="*,Auto">
+            <Button Grid.Column="1"
+                    Command="{Binding CancelAlbumDownloadProgressCommand}"
+                    Padding="12,8">
+              Cancel
             </Button>
           </Grid>
         </StackPanel>
@@ -921,6 +1118,70 @@
             </Button>
             <Button Grid.Column="2"
                     Command="{Binding ConfirmCollectFeedbackCommand}"
+                    Padding="12,8">
+              Yes
+            </Button>
+          </Grid>
+        </StackPanel>
+      </Border>
+    </Grid>
+
+    <Grid Grid.RowSpan="3"
+          Background="#80000000"
+          IsVisible="{Binding IsFinalizeConfirmationVisible}">
+      <Border Background="White"
+              BorderBrush="#D6D8D1"
+              BorderThickness="1"
+              CornerRadius="6"
+              Padding="18"
+              Margin="20"
+              MaxWidth="460"
+              HorizontalAlignment="Stretch"
+              VerticalAlignment="Center">
+        <StackPanel Spacing="12">
+          <TextBlock Text="Finalize album" FontSize="18" FontWeight="SemiBold"/>
+          <TextBlock Text="{Binding FinalizeConfirmationMessage}" TextWrapping="Wrap"/>
+          <Grid ColumnDefinitions="*,Auto,Auto">
+            <Button Grid.Column="1"
+                    Command="{Binding CancelFinalizeFeedbackCommand}"
+                    Padding="12,8"
+                    Margin="0,0,8,0">
+              No
+            </Button>
+            <Button Grid.Column="2"
+                    Command="{Binding ConfirmFinalizeFeedbackCommand}"
+                    Padding="12,8">
+              Yes
+            </Button>
+          </Grid>
+        </StackPanel>
+      </Border>
+    </Grid>
+
+    <Grid Grid.RowSpan="3"
+          Background="#80000000"
+          IsVisible="{Binding IsLeaveConfirmationVisible}">
+      <Border Background="White"
+              BorderBrush="#D6D8D1"
+              BorderThickness="1"
+              CornerRadius="6"
+              Padding="18"
+              Margin="20"
+              MaxWidth="460"
+              HorizontalAlignment="Stretch"
+              VerticalAlignment="Center">
+        <StackPanel Spacing="12">
+          <TextBlock Text="Leave album" FontSize="18" FontWeight="SemiBold"/>
+          <TextBlock Text="{Binding LeaveConfirmationMessage}" TextWrapping="Wrap"/>
+          <Grid ColumnDefinitions="*,Auto,Auto">
+            <Button Grid.Column="1"
+                    Command="{Binding CancelLeaveFeedbackCommand}"
+                    Padding="12,8"
+                    Margin="0,0,8,0">
+              No
+            </Button>
+            <Button Grid.Column="2"
+                    Command="{Binding ConfirmLeaveFeedbackCommand}"
                     Padding="12,8">
               Yes
             </Button>
@@ -1090,6 +1351,9 @@
                                 Command="{Binding MarkCurrentPhotoTrashCommand}"
                                 IsVisible="{Binding CanShowCurrentPhotoTrashAction}"
                                 IsEnabled="{Binding CanMarkCurrentPhotoTrash}"/>
+                      <MenuItem Header="Download..."
+                                Click="DownloadCurrentPhoto_Click"
+                                IsEnabled="{Binding CanDownloadCurrentPhoto}"/>
                     </MenuFlyout>
                   </Button.Flyout>
                 </Button>
@@ -1097,6 +1361,7 @@
                         Padding="14,10"
                         Margin="0,0,8,0"
                         Command="{Binding CommitFeedbackCommand}"
+                        IsVisible="{Binding IsStandardFeedbackActionsVisible}"
                         IsEnabled="{Binding CanCommitFeedback}"
                         Background="White"
                         Foreground="Black"

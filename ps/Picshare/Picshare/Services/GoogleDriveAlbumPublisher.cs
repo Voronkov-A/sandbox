@@ -39,54 +39,41 @@ public sealed class GoogleDriveAlbumPublisher
 
         await client.ShareWithAnyoneAsync(albumFolder.Id, "writer", cancellationToken);
 
-        var photoReferences = new List<PhotoReference>();
-        foreach (var photo in request.Photos)
-        {
-            var photoId = Guid.NewGuid().ToString("N");
-            var contentType = GetContentType(photo.FileName);
-
-            await using var thumbnailSourceStream = await photo.OpenReadAsync();
-            await using var thumbnailStream = PhotoThumbnailGenerator.CreateJpegThumbnail(thumbnailSourceStream);
-
-            await using var stream = await photo.OpenReadAsync();
-            var driveFile = await client.UploadFileAsync(
-                photo.FileName,
-                photosFolder.Id,
-                stream,
-                contentType,
-                cancellationToken);
-
-            var thumbnailFile = await client.UploadFileAsync(
-                CreateThumbnailFileName(photoId),
-                photosFolder.Id,
-                thumbnailStream,
-                PhotoThumbnailGenerator.ContentType,
-                cancellationToken);
-
-            photoReferences.Add(new PhotoReference
+        var photoReferences = await AlbumPublishingWorkflow.PublishPhotosAsync(
+            request.Photos,
+            async (photo, token) =>
             {
-                Id = photoId,
-                FileName = photo.FileName,
-                ContentType = contentType,
-                BackendType = "google-drive-file",
-                DriveFileId = driveFile.Id,
-                DownloadUrl = GoogleDriveRestClient.CreatePublicDownloadUrl(driveFile.Id),
-                ThumbnailDriveFileId = thumbnailFile.Id,
-                ThumbnailDownloadUrl = GoogleDriveRestClient.CreatePublicDownloadUrl(thumbnailFile.Id),
-                ThumbnailContentType = PhotoThumbnailGenerator.ContentType
-            });
-        }
+                var driveFile = await client.UploadFileAsync(
+                    photo.FileName,
+                    photosFolder.Id,
+                    photo.ContentStream,
+                    photo.ContentType,
+                    token);
 
-        var manifestWithoutId = new AlbumManifest
-        {
-            AlbumId = albumId,
-            Title = request.Title,
-            CreatedAt = DateTimeOffset.UtcNow,
-            TargetNicePhotoCount = request.TargetNicePhotoCount,
-            PhotoBackendType = "local-photos-to-google-drive",
-            DatabaseBackendType = "google-drive-folder",
-            Author = request.Author,
-            GoogleDrive = new GoogleDriveAlbumDetails
+                var thumbnailFile = await client.UploadFileAsync(
+                    AlbumPublishingWorkflow.CreateThumbnailFileName(photo.PhotoId),
+                    photosFolder.Id,
+                    photo.ThumbnailStream,
+                    PhotoThumbnailGenerator.ContentType,
+                    token);
+
+                return new StoredAlbumPhoto(
+                    "google-drive-file",
+                    GoogleDriveRestClient.CreatePublicDownloadUrl(driveFile.Id),
+                    GoogleDriveRestClient.CreatePublicDownloadUrl(thumbnailFile.Id),
+                    driveFile.Id,
+                    thumbnailFile.Id);
+            },
+            cancellationToken);
+
+        var manifestWithoutId = AlbumPublishingWorkflow.CreateManifest(
+            albumId,
+            request.Title,
+            request.TargetNicePhotoCount,
+            "local-photos-to-google-drive",
+            "google-drive-folder",
+            request.Author,
+            new GoogleDriveAlbumDetails
             {
                 AlbumFolderId = albumFolder.Id,
                 PhotosFolderId = photosFolder.Id,
@@ -94,15 +81,15 @@ public sealed class GoogleDriveAlbumPublisher
                 ManifestFileId = "",
                 AlbumFolderUrl = albumFolder.WebViewLink ?? $"https://drive.google.com/drive/folders/{albumFolder.Id}"
             },
-            Photos = photoReferences
-        };
+            null,
+            photoReferences);
 
         await using var placeholderManifestStream = new MemoryStream(JsonSerializer.SerializeToUtf8Bytes(manifestWithoutId, JsonOptions));
         var manifestFile = await client.UploadFileAsync("album.json", albumFolder.Id, placeholderManifestStream, "application/json", cancellationToken);
 
         var manifest = manifestWithoutId with
         {
-            GoogleDrive = manifestWithoutId.GoogleDrive with
+            GoogleDrive = manifestWithoutId.GoogleDrive! with
             {
                 ManifestFileId = manifestFile.Id
             }
@@ -114,26 +101,8 @@ public sealed class GoogleDriveAlbumPublisher
         return new DriveAlbumPublishResult
         {
             Manifest = manifest,
-            AlbumFolderUrl = manifest.GoogleDrive.AlbumFolderUrl,
+            AlbumFolderUrl = manifest.GoogleDrive!.AlbumFolderUrl,
             PicshareLink = AlbumLinkParser.CreatePicshareLink(manifest.GoogleDrive.ManifestFileId, albumFolder.Id)
         };
-    }
-
-    private static string GetContentType(string path)
-    {
-        return Path.GetExtension(path).ToLowerInvariant() switch
-        {
-            ".jpg" or ".jpeg" => "image/jpeg",
-            ".png" => "image/png",
-            ".webp" => "image/webp",
-            ".gif" => "image/gif",
-            ".bmp" => "image/bmp",
-            _ => "application/octet-stream"
-        };
-    }
-
-    private static string CreateThumbnailFileName(string photoId)
-    {
-        return $"{photoId}-thumbnail.jpg";
     }
 }

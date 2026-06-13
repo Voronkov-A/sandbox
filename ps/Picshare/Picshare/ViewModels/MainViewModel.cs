@@ -12,6 +12,7 @@ namespace Picshare.ViewModels;
 public partial class MainViewModel : ViewModelBase
 {
     private const string LocalToGoogleDriveAlbumTypeId = "local-to-google-drive";
+    private const string LocalAlbumTypeId = "local-file-system";
     private const int PhotosPerRow = 4;
 
     [ObservableProperty]
@@ -49,6 +50,15 @@ public partial class MainViewModel : ViewModelBase
 
     [ObservableProperty]
     private string _selectedDriveFolderName = "Please select a folder";
+
+    [ObservableProperty]
+    private string _selectedLocalAlbumDestinationName = "Please select a folder";
+
+    [ObservableProperty]
+    private string _localAlbumDestinationPath = "";
+
+    [ObservableProperty]
+    private bool _isLocalAlbumDestinationSelected;
 
     [ObservableProperty]
     private bool _isDriveFolderSelected;
@@ -91,6 +101,24 @@ public partial class MainViewModel : ViewModelBase
 
     [ObservableProperty]
     private bool _isSettingsPanelVisible;
+
+    [ObservableProperty]
+    private string _anonymousReviewerName = "";
+
+    [ObservableProperty]
+    private string _pictureDefaultDownloadDirectoryPath = "";
+
+    [ObservableProperty]
+    private string _uncategorizedDefaultDownloadDirectoryPath = "";
+
+    [ObservableProperty]
+    private string _niceDefaultDownloadDirectoryPath = "";
+
+    [ObservableProperty]
+    private string _okDefaultDownloadDirectoryPath = "";
+
+    [ObservableProperty]
+    private string _trashDefaultDownloadDirectoryPath = "";
 
     [ObservableProperty]
     private bool _isPhotoViewerVisible;
@@ -138,13 +166,31 @@ public partial class MainViewModel : ViewModelBase
     private bool _isFeedbackPassed;
 
     [ObservableProperty]
+    private bool _isLeaveConfirmationVisible;
+
+    [ObservableProperty]
+    private string _leaveConfirmationMessage = "";
+
+    [ObservableProperty]
+    private bool _isFeedbackLeft;
+
+    [ObservableProperty]
     private bool _isCollectFeedbackConfirmationVisible;
 
     [ObservableProperty]
     private string _collectFeedbackConfirmationMessage = "";
 
     [ObservableProperty]
+    private bool _isFinalizeConfirmationVisible;
+
+    [ObservableProperty]
+    private string _finalizeConfirmationMessage = "";
+
+    [ObservableProperty]
     private bool _canCollectFeedback;
+
+    [ObservableProperty]
+    private bool _isCollectFeedbackVisible;
 
     [ObservableProperty]
     private bool _canStartNextRound;
@@ -163,6 +209,36 @@ public partial class MainViewModel : ViewModelBase
 
     [ObservableProperty]
     private bool _canPassFeedback;
+
+    [ObservableProperty]
+    private bool _canLeaveFeedback;
+
+    [ObservableProperty]
+    private bool _isStandardFeedbackActionsVisible;
+
+    [ObservableProperty]
+    private bool _isLeaveFeedbackVisible;
+
+    [ObservableProperty]
+    private string _finalizedFeedbackMessage = "";
+
+    [ObservableProperty]
+    private bool _canUseAlbumMoreMenu;
+
+    [ObservableProperty]
+    private bool _isAlbumDownloadDialogVisible;
+
+    [ObservableProperty]
+    private bool _isAlbumDownloadProgressVisible;
+
+    [ObservableProperty]
+    private string _albumDownloadProgressMessage = "";
+
+    [ObservableProperty]
+    private int _albumDownloadProgressValue;
+
+    [ObservableProperty]
+    private int _albumDownloadProgressMaximum = 1;
 
     [ObservableProperty]
     private bool _canMarkCurrentPhotoUncategorized;
@@ -195,7 +271,16 @@ public partial class MainViewModel : ViewModelBase
     private bool _canNavigatePhotoViewerCategory;
 
     [ObservableProperty]
+    private bool _canDownloadCurrentPhoto;
+
+    [ObservableProperty]
     private bool _isAuthorFlowVisible;
+
+    [ObservableProperty]
+    private bool _isRegularFlowVisible;
+
+    [ObservableProperty]
+    private bool _isFinalizedFlowVisible;
 
     [ObservableProperty]
     private string _flowStatus = "";
@@ -208,10 +293,18 @@ public partial class MainViewModel : ViewModelBase
         new AlbumTypeOptionViewModel(
             LocalToGoogleDriveAlbumTypeId,
             "Upload local photos to Google Drive",
-            "Create a trusted shared Drive folder from local photos captured on the selected date.")
+            "Create a trusted shared Drive folder from local photos captured on the selected date."),
+        new AlbumTypeOptionViewModel(
+            LocalAlbumTypeId,
+            "Create local album",
+            "Create an album in a local or shared filesystem folder.")
     };
 
-    public bool IsAlbumSettingsVisible => SelectedAlbumType?.Id == LocalToGoogleDriveAlbumTypeId;
+    public bool IsAlbumSettingsVisible => SelectedAlbumType is not null;
+
+    public bool IsGoogleDriveAlbumSettingsVisible => SelectedAlbumType?.Id == LocalToGoogleDriveAlbumTypeId;
+
+    public bool IsLocalAlbumSettingsVisible => SelectedAlbumType?.Id == LocalAlbumTypeId;
 
     public bool IsCreateResultVisible => !string.IsNullOrWhiteSpace(ShareLink);
 
@@ -247,7 +340,11 @@ public partial class MainViewModel : ViewModelBase
 
     public ObservableCollection<ReviewerFeedbackFlowItemViewModel> PassedReviewers { get; } = new();
 
+    public ObservableCollection<ReviewerFeedbackFlowItemViewModel> LeftReviewers { get; } = new();
+
     public ObservableCollection<ReviewerFeedbackFlowItemViewModel> InProgressReviewers { get; } = new();
+
+    public ObservableCollection<AlbumDownloadCategoryViewModel> AlbumDownloadCategories { get; } = new();
 
     public string UncategorizedTabHeader => $"Uncategorized ({Photos.Count(photo => string.IsNullOrWhiteSpace(photo.Category))})";
 
@@ -263,17 +360,21 @@ public partial class MainViewModel : ViewModelBase
 
     public string PassedReviewersHeader => $"Passed ({PassedReviewers.Count})";
 
+    public string LeftReviewersHeader => $"Left ({LeftReviewers.Count})";
+
     public string InProgressReviewersHeader => $"In progress ({InProgressReviewers.Count})";
 
     private readonly GoogleDriveAlbumPublisher _publisher = new();
+    private readonly LocalFileSystemAlbumPublisher _localPublisher = new();
     private readonly AlbumLoader _albumLoader = new();
     private readonly LocalPhotoScanner _photoScanner = new();
     private readonly GoogleOAuthClient _oauthClient = new();
     private readonly GoogleUserInfoClient _googleUserInfoClient = new();
-    private readonly GoogleOAuthTokenStore _tokenStore = new();
-    private readonly ReviewerFeedbackService _reviewerFeedbackService = new();
     private readonly PicshareSettingsProvider _settingsProvider = new();
-    private readonly ImageCacheService _imageCache = new();
+    private readonly LocalUserSettingsStore _localUserSettingsStore;
+    private readonly GoogleOAuthTokenStore _tokenStore;
+    private readonly ReviewerFeedbackService _reviewerFeedbackService;
+    private readonly ImageCacheService _imageCache;
     private readonly HttpClient _imageHttpClient = new();
     private readonly List<IStorageFolder> _folderDateImportFolders = new();
     private readonly List<DriveFolderLocation> _driveFolderPath = new();
@@ -282,6 +383,7 @@ public partial class MainViewModel : ViewModelBase
     private CancellationTokenSource? _photoViewerCancellation;
     private CancellationTokenSource? _feedbackSyncCancellation;
     private CancellationTokenSource? _flowMonitorCancellation;
+    private CancellationTokenSource? _albumDownloadCancellation;
     private AlbumManifest? _currentManifest;
     private AlbumManifest? _pendingGoogleAuthorizationManifest;
     private AlbumPhotoViewModel? _selectedViewedPhoto;
@@ -289,8 +391,11 @@ public partial class MainViewModel : ViewModelBase
     private ReviewerFeedbackSession? _feedbackSession;
     private ReviewerFeedbackDatabase? _feedbackDatabase;
     private ReviewerFeedbackStatus? _feedbackStatus;
+    private FeedbackReviewerIdentity? _currentReviewerIdentity;
     private bool _isFlowTabActive;
     private int _unfrozenCollectedPhotoCount;
+    private bool _hasCollectedFeedback;
+    private bool _isFeedbackFinalized;
     private readonly SemaphoreSlim _feedbackSyncGate = new(1);
     private string? _driveNextPageToken;
 
@@ -298,6 +403,17 @@ public partial class MainViewModel : ViewModelBase
 
     public MainViewModel()
     {
+        _localUserSettingsStore = new LocalUserSettingsStore(_settingsProvider.LocalStorageRootPath);
+        _tokenStore = new GoogleOAuthTokenStore(_settingsProvider.LocalStorageRootPath);
+        _reviewerFeedbackService = new ReviewerFeedbackService(_settingsProvider.LocalStorageRootPath);
+        _imageCache = new ImageCacheService(_settingsProvider.LocalStorageRootPath);
+        var localSettings = _localUserSettingsStore.Load();
+        AnonymousReviewerName = localSettings.AnonymousReviewerName;
+        PictureDefaultDownloadDirectoryPath = GetConfiguredOrDefaultDownloadDirectoryPath(localSettings.PictureDefaultDownloadDirectoryPath);
+        UncategorizedDefaultDownloadDirectoryPath = GetConfiguredOrDefaultDownloadDirectoryPath(localSettings.UncategorizedDefaultDownloadDirectoryPath);
+        NiceDefaultDownloadDirectoryPath = GetConfiguredOrDefaultDownloadDirectoryPath(localSettings.NiceDefaultDownloadDirectoryPath);
+        OkDefaultDownloadDirectoryPath = GetConfiguredOrDefaultDownloadDirectoryPath(localSettings.OkDefaultDownloadDirectoryPath);
+        TrashDefaultDownloadDirectoryPath = GetConfiguredOrDefaultDownloadDirectoryPath(localSettings.TrashDefaultDownloadDirectoryPath);
         _googleTokenSet = _tokenStore.Load();
         IsGoogleSignedIn = _googleTokenSet is not null;
         ResetCreateInputs();
@@ -356,7 +472,7 @@ public partial class MainViewModel : ViewModelBase
     [RelayCommand]
     private async Task ConfirmCommitFeedbackAsync()
     {
-        if (_feedbackSession is null || _googleTokenSet is null || !CanCommitFeedback)
+        if (_feedbackSession is null || _currentReviewerIdentity is null || !CanCommitFeedback)
         {
             IsCommitConfirmationVisible = false;
             return;
@@ -367,11 +483,11 @@ public partial class MainViewModel : ViewModelBase
 
         try
         {
-            var accessToken = await GetGoogleAccessTokenAsync(CancellationToken.None);
+            var backend = await CreateFeedbackBackendAsync(CancellationToken.None);
             var result = await _reviewerFeedbackService.CommitAsync(
                 _feedbackSession,
-                CreateGoogleReviewerIdentity(_googleTokenSet),
-                accessToken,
+                _currentReviewerIdentity,
+                backend,
                 CancellationToken.None);
 
             _feedbackStatus = result.Status;
@@ -411,7 +527,7 @@ public partial class MainViewModel : ViewModelBase
     [RelayCommand]
     private async Task ConfirmPassFeedbackAsync()
     {
-        if (_feedbackSession is null || _googleTokenSet is null || !CanPassFeedback)
+        if (_feedbackSession is null || _currentReviewerIdentity is null || !CanPassFeedback)
         {
             IsPassConfirmationVisible = false;
             return;
@@ -422,11 +538,11 @@ public partial class MainViewModel : ViewModelBase
 
         try
         {
-            var accessToken = await GetGoogleAccessTokenAsync(CancellationToken.None);
+            var backend = await CreateFeedbackBackendAsync(CancellationToken.None);
             var result = await _reviewerFeedbackService.PassAsync(
                 _feedbackSession,
-                CreateGoogleReviewerIdentity(_googleTokenSet),
-                accessToken,
+                _currentReviewerIdentity,
+                backend,
                 CancellationToken.None);
 
             _feedbackStatus = result.Status;
@@ -437,6 +553,167 @@ public partial class MainViewModel : ViewModelBase
             Status = result.RemoteWon
                 ? "Feedback was already passed remotely. The remote pass was loaded."
                 : "Feedback passed.";
+        }
+        catch (Exception ex)
+        {
+            Status = ex.Message;
+        }
+    }
+
+    [RelayCommand]
+    private void OpenAlbumDownloadDialog()
+    {
+        if (Photos.Count == 0)
+        {
+            Status = "Open an album before downloading it.";
+            return;
+        }
+
+        AlbumDownloadCategories.Clear();
+        AddAlbumDownloadCategory("", "Uncategorized", UncategorizedDefaultDownloadDirectoryPath, "exclude");
+        AddAlbumDownloadCategory("nice", "Nice", NiceDefaultDownloadDirectoryPath, "include");
+        AddAlbumDownloadCategory("ok", "Ok", OkDefaultDownloadDirectoryPath, IsAuthorFlowVisible ? "archive" : "exclude");
+        AddAlbumDownloadCategory("trash", "Trash", TrashDefaultDownloadDirectoryPath, "exclude");
+        IsAlbumDownloadDialogVisible = true;
+    }
+
+    [RelayCommand]
+    private void CancelAlbumDownloadDialog()
+    {
+        IsAlbumDownloadDialogVisible = false;
+    }
+
+    [RelayCommand]
+    private async Task DownloadAlbumAsync()
+    {
+        var categories = AlbumDownloadCategories
+            .Where(category => category.SelectedMode.Id != "exclude")
+            .ToList();
+        if (categories.Count == 0)
+        {
+            Status = "Select at least one category to download.";
+            return;
+        }
+
+        foreach (var category in categories)
+        {
+            if (string.IsNullOrWhiteSpace(category.DestinationDirectoryPath))
+            {
+                Status = $"Choose a destination directory for {category.CategoryName}.";
+                return;
+            }
+        }
+
+        _albumDownloadCancellation?.Cancel();
+        _albumDownloadCancellation?.Dispose();
+        _albumDownloadCancellation = new CancellationTokenSource();
+        var cancellation = _albumDownloadCancellation;
+
+        IsAlbumDownloadDialogVisible = false;
+        IsAlbumDownloadProgressVisible = true;
+        AlbumDownloadProgressValue = 0;
+        AlbumDownloadProgressMaximum = Math.Max(1, categories.Sum(category => GetPhotosForCategory(category.CategoryKey).Count()));
+        AlbumDownloadProgressMessage = "Preparing album download...";
+
+        try
+        {
+            foreach (var category in categories)
+            {
+                cancellation.Token.ThrowIfCancellationRequested();
+                var photos = GetPhotosForCategory(category.CategoryKey).ToList();
+                if (photos.Count == 0)
+                {
+                    continue;
+                }
+
+                if (category.SelectedMode.Id == "archive")
+                {
+                    await DownloadAlbumCategoryArchiveAsync(category, photos, cancellation.Token);
+                }
+                else
+                {
+                    await DownloadAlbumCategoryFilesAsync(category, photos, cancellation.Token);
+                }
+            }
+
+            AlbumDownloadProgressMessage = "Album download complete.";
+            Status = "Album download complete.";
+        }
+        catch (OperationCanceledException)
+        {
+            AlbumDownloadProgressMessage = "Album download cancelled.";
+            Status = "Album download cancelled.";
+        }
+        catch (Exception ex)
+        {
+            AlbumDownloadProgressMessage = ex.Message;
+            Status = ex.Message;
+        }
+        finally
+        {
+            IsAlbumDownloadProgressVisible = false;
+            if (ReferenceEquals(_albumDownloadCancellation, cancellation))
+            {
+                _albumDownloadCancellation.Dispose();
+                _albumDownloadCancellation = null;
+            }
+        }
+    }
+
+    [RelayCommand]
+    private void CancelAlbumDownloadProgress()
+    {
+        _albumDownloadCancellation?.Cancel();
+    }
+
+    [RelayCommand]
+    private void LeaveFeedback()
+    {
+        if (!CanLeaveFeedback)
+        {
+            return;
+        }
+
+        LeaveConfirmationMessage = "Leave this finalized album? The author will see that you are done.";
+        IsLeaveConfirmationVisible = true;
+    }
+
+    [RelayCommand]
+    private void CancelLeaveFeedback()
+    {
+        IsLeaveConfirmationVisible = false;
+        LeaveConfirmationMessage = "";
+    }
+
+    [RelayCommand]
+    private async Task ConfirmLeaveFeedbackAsync()
+    {
+        if (_feedbackSession is null || _currentReviewerIdentity is null || !CanLeaveFeedback)
+        {
+            IsLeaveConfirmationVisible = false;
+            return;
+        }
+
+        IsLeaveConfirmationVisible = false;
+        LeaveConfirmationMessage = "";
+
+        try
+        {
+            var backend = await CreateFeedbackBackendAsync(CancellationToken.None);
+            var result = await _reviewerFeedbackService.LeaveAsync(
+                _feedbackSession,
+                _currentReviewerIdentity,
+                backend,
+                CancellationToken.None);
+
+            _feedbackStatus = result.Status;
+            IsFeedbackLeft = true;
+            UpdateFeedbackControlState();
+            UpdateCurrentPhotoActionVisibility();
+            await SyncFeedbackAsync();
+            Status = result.RemoteWon
+                ? "You had already left this album remotely. The remote state was loaded."
+                : "You left the finalized album.";
         }
         catch (Exception ex)
         {
@@ -466,7 +743,7 @@ public partial class MainViewModel : ViewModelBase
     [RelayCommand]
     private async Task ConfirmCollectFeedbackAsync()
     {
-        if (_currentManifest is null || _googleTokenSet is null || !CanCollectFeedback)
+        if (_currentManifest is null || !CanCollectFeedback)
         {
             IsCollectFeedbackConfirmationVisible = false;
             return;
@@ -478,15 +755,16 @@ public partial class MainViewModel : ViewModelBase
         try
         {
             IsBusy = true;
-            var accessToken = await GetGoogleAccessTokenAsync(CancellationToken.None);
+            var backend = await CreateFeedbackBackendAsync(CancellationToken.None);
             var result = await _reviewerFeedbackService.CollectFeedbackAsync(
                 _currentManifest,
-                accessToken,
+                backend,
                 CancellationToken.None);
 
             await SyncFeedbackAsync();
             await RefreshFlowAsync(CancellationToken.None);
             _unfrozenCollectedPhotoCount = result.UnfrozenPhotoCount;
+            _hasCollectedFeedback = true;
             UpdateFeedbackControlState();
             Status = $"Collected {result.ReviewerCount} feedback(s) for {result.PhotoCount} photo(s).";
         }
@@ -503,7 +781,7 @@ public partial class MainViewModel : ViewModelBase
     [RelayCommand]
     private async Task StartNextRoundAsync()
     {
-        if (_currentManifest is null || _googleTokenSet is null || !CanStartNextRound)
+        if (_currentManifest is null || !CanStartNextRound)
         {
             return;
         }
@@ -511,15 +789,17 @@ public partial class MainViewModel : ViewModelBase
         try
         {
             IsBusy = true;
-            var accessToken = await GetGoogleAccessTokenAsync(CancellationToken.None);
+            var backend = await CreateFeedbackBackendAsync(CancellationToken.None);
             var reviewerCount = await _reviewerFeedbackService.StartNextRoundAsync(
                 _currentManifest,
-                accessToken,
+                backend,
                 CancellationToken.None);
 
             await SyncFeedbackAsync();
             await RefreshFlowAsync(CancellationToken.None);
             _unfrozenCollectedPhotoCount = 0;
+            _hasCollectedFeedback = false;
+            _isFeedbackFinalized = false;
             UpdateFeedbackControlState();
             Status = $"Started next round for {reviewerCount} reviewer(s).";
         }
@@ -536,7 +816,60 @@ public partial class MainViewModel : ViewModelBase
     [RelayCommand]
     private void FinalizeFeedback()
     {
-        Status = "Finalization is not implemented yet.";
+        if (_currentManifest is null || !CanFinalizeFeedback)
+        {
+            return;
+        }
+
+        FinalizeConfirmationMessage = "Finalize this album? Reviewers will no longer be able to modify feedback.";
+        IsFinalizeConfirmationVisible = true;
+    }
+
+    [RelayCommand]
+    private void CancelFinalizeFeedback()
+    {
+        IsFinalizeConfirmationVisible = false;
+        FinalizeConfirmationMessage = "";
+    }
+
+    [RelayCommand]
+    private async Task ConfirmFinalizeFeedbackAsync()
+    {
+        if (_currentManifest is null || !CanFinalizeFeedback)
+        {
+            IsFinalizeConfirmationVisible = false;
+            return;
+        }
+
+        IsFinalizeConfirmationVisible = false;
+        FinalizeConfirmationMessage = "";
+
+        try
+        {
+            IsBusy = true;
+            var backend = await CreateFeedbackBackendAsync(CancellationToken.None);
+            var result = await _reviewerFeedbackService.FinalizeAsync(
+                _currentManifest,
+                backend,
+                CancellationToken.None);
+
+            _hasCollectedFeedback = true;
+            _isFeedbackFinalized = true;
+            _unfrozenCollectedPhotoCount = 0;
+            await SyncFeedbackAsync();
+            await RefreshFlowAsync(CancellationToken.None);
+            UpdateFeedbackControlState();
+            UpdateCurrentPhotoActionVisibility();
+            Status = $"Finalized album with {result.PhotoCount} photo(s).";
+        }
+        catch (Exception ex)
+        {
+            Status = ex.Message;
+        }
+        finally
+        {
+            IsBusy = false;
+        }
     }
 
     [RelayCommand]
@@ -587,7 +920,7 @@ public partial class MainViewModel : ViewModelBase
 
             var viewerImage = await _imageCache.LoadOriginalBitmapAsync(
                 photo.AlbumId,
-                $"{photo.PhotoId}-full{photo.FileExtension}",
+                GetFullPhotoCacheFileName(photo),
                 photo.DownloadUrl,
                 _imageHttpClient,
                 cancellation.Token);
@@ -612,6 +945,17 @@ public partial class MainViewModel : ViewModelBase
                 PhotoViewerStatus = ex.Message;
             }
         }
+    }
+
+    public async Task DownloadCurrentPhotoAsync(string destinationDirectoryPath)
+    {
+        if (string.IsNullOrWhiteSpace(destinationDirectoryPath))
+        {
+            Status = "Choose a destination folder.";
+            return;
+        }
+
+        await CopyCurrentOriginalPhotoAsync(destinationDirectoryPath, "Downloaded");
     }
 
     [RelayCommand]
@@ -642,6 +986,7 @@ public partial class MainViewModel : ViewModelBase
     [RelayCommand]
     private void CloseSettingsPanel()
     {
+        SaveLocalUserSettings();
         IsSettingsPanelVisible = false;
     }
 
@@ -679,51 +1024,87 @@ public partial class MainViewModel : ViewModelBase
             return;
         }
 
-        if (SelectedAlbumType?.Id != LocalToGoogleDriveAlbumTypeId)
+        if (SelectedAlbumType is null)
         {
             Status = "Choose the album type before creating the album.";
             return;
         }
 
-        if (!IsGoogleSignedIn)
+        if (SelectedAlbumType.Id == LocalToGoogleDriveAlbumTypeId && !IsGoogleSignedIn)
         {
             Status = "Sign in with Google before creating the album.";
             return;
         }
 
-        if (!IsDriveFolderSelected)
+        if (SelectedAlbumType.Id == LocalToGoogleDriveAlbumTypeId && !IsDriveFolderSelected)
         {
             Status = "Select a Google Drive destination folder before creating the album.";
+            return;
+        }
+
+        if (SelectedAlbumType.Id == LocalAlbumTypeId && !IsLocalAlbumDestinationSelected)
+        {
+            Status = "Select a local destination folder before creating the album.";
+            return;
+        }
+
+        if (SelectedAlbumType.Id == LocalAlbumTypeId && CreateLocalReviewerIdentity() is null)
+        {
+            Status = "Set an anonymous reviewer name in settings before creating a local album.";
+            IsSettingsPanelVisible = true;
             return;
         }
 
         try
         {
             IsBusy = true;
-            Status = "Uploading selected local photos to Google Drive...";
+            Status = SelectedAlbumType.Id == LocalAlbumTypeId
+                ? "Creating local album..."
+                : "Uploading selected local photos to Google Drive...";
             Photos.Clear();
             ShareLink = "";
             DriveFolderLink = "";
 
-            var accessToken = await GetGoogleAccessTokenAsync(CancellationToken.None);
-            var result = await _publisher.PublishAsync(
-                new DriveAlbumPublishRequest
-                {
-                    Title = string.IsNullOrWhiteSpace(AlbumTitle) ? "Picshare album" : AlbumTitle.Trim(),
-                    Photos = AlbumPhotos.Select(photo => photo.Source).ToList(),
-                    TargetNicePhotoCount = Math.Max(0, TargetNicePhotoCount),
-                    ParentDriveFolderId = string.IsNullOrWhiteSpace(ParentDriveFolderId) ? null : ParentDriveFolderId.Trim(),
-                    AccessToken = accessToken,
-                    Author = CreateGoogleReviewerIdentity(_googleTokenSet!)
-                },
-                CancellationToken.None);
+            if (SelectedAlbumType.Id == LocalAlbumTypeId)
+            {
+                var result = await _localPublisher.PublishAsync(
+                    new LocalAlbumPublishRequest
+                    {
+                        Title = string.IsNullOrWhiteSpace(AlbumTitle) ? "Picshare album" : AlbumTitle.Trim(),
+                        Photos = AlbumPhotos.Select(photo => photo.Source).ToList(),
+                        TargetNicePhotoCount = Math.Max(0, TargetNicePhotoCount),
+                        ParentFolderPath = LocalAlbumDestinationPath,
+                        Author = CreateLocalReviewerIdentity()!
+                    },
+                    CancellationToken.None);
 
-            ShareLink = result.PicshareLink;
-            DriveFolderLink = result.AlbumFolderUrl;
-            OpenAlbumLink = result.PicshareLink;
-            Status = $"Album created with {result.Manifest.Photos.Count} photo(s).";
+                ShareLink = result.PicshareLink;
+                DriveFolderLink = result.AlbumFolderPath;
+                OpenAlbumLink = result.PicshareLink;
+                Status = $"Local album created with {result.Manifest.Photos.Count} photo(s).";
+                await LoadAlbumAsync(result.Manifest);
+            }
+            else
+            {
+                var accessToken = await GetGoogleAccessTokenAsync(CancellationToken.None);
+                var result = await _publisher.PublishAsync(
+                    new DriveAlbumPublishRequest
+                    {
+                        Title = string.IsNullOrWhiteSpace(AlbumTitle) ? "Picshare album" : AlbumTitle.Trim(),
+                        Photos = AlbumPhotos.Select(photo => photo.Source).ToList(),
+                        TargetNicePhotoCount = Math.Max(0, TargetNicePhotoCount),
+                        ParentDriveFolderId = string.IsNullOrWhiteSpace(ParentDriveFolderId) ? null : ParentDriveFolderId.Trim(),
+                        AccessToken = accessToken,
+                        Author = CreateGoogleReviewerIdentity(_googleTokenSet!)
+                    },
+                    CancellationToken.None);
 
-            await LoadAlbumAsync(result.Manifest);
+                ShareLink = result.PicshareLink;
+                DriveFolderLink = result.AlbumFolderUrl;
+                OpenAlbumLink = result.PicshareLink;
+                Status = $"Album created with {result.Manifest.Photos.Count} photo(s).";
+                await LoadAlbumAsync(result.Manifest);
+            }
         }
         catch (Exception ex)
         {
@@ -977,6 +1358,76 @@ public partial class MainViewModel : ViewModelBase
         Status = "Drive folder selection cancelled.";
     }
 
+    public void SetLocalAlbumDestination(IStorageFolder folder)
+    {
+        var localPath = folder.TryGetLocalPath();
+        if (string.IsNullOrWhiteSpace(localPath))
+        {
+            Status = "The selected destination must be a local filesystem folder.";
+            return;
+        }
+
+        LocalAlbumDestinationPath = Path.GetFullPath(localPath);
+        SelectedLocalAlbumDestinationName = LocalAlbumDestinationPath;
+        IsLocalAlbumDestinationSelected = true;
+        Status = $"Local album destination set to {SelectedLocalAlbumDestinationName}.";
+    }
+
+    public void SetPictureDefaultDownloadDirectory(IStorageFolder folder)
+    {
+        SetDefaultDownloadDirectory(folder, value => PictureDefaultDownloadDirectoryPath = value, "Picture default download directory");
+    }
+
+    public void SetUncategorizedDefaultDownloadDirectory(IStorageFolder folder)
+    {
+        SetDefaultDownloadDirectory(folder, value => UncategorizedDefaultDownloadDirectoryPath = value, "Uncategorized default download directory");
+    }
+
+    public void SetNiceDefaultDownloadDirectory(IStorageFolder folder)
+    {
+        SetDefaultDownloadDirectory(folder, value => NiceDefaultDownloadDirectoryPath = value, "Nice default download directory");
+    }
+
+    public void SetOkDefaultDownloadDirectory(IStorageFolder folder)
+    {
+        SetDefaultDownloadDirectory(folder, value => OkDefaultDownloadDirectoryPath = value, "Ok default download directory");
+    }
+
+    public void SetTrashDefaultDownloadDirectory(IStorageFolder folder)
+    {
+        SetDefaultDownloadDirectory(folder, value => TrashDefaultDownloadDirectoryPath = value, "Trash default download directory");
+    }
+
+    [RelayCommand]
+    private void SetPictureDefaultDownloadDirectoryToDefault()
+    {
+        SetDefaultDownloadDirectory(value => PictureDefaultDownloadDirectoryPath = value, "Picture default download directory");
+    }
+
+    [RelayCommand]
+    private void SetUncategorizedDefaultDownloadDirectoryToDefault()
+    {
+        SetDefaultDownloadDirectory(value => UncategorizedDefaultDownloadDirectoryPath = value, "Uncategorized default download directory");
+    }
+
+    [RelayCommand]
+    private void SetNiceDefaultDownloadDirectoryToDefault()
+    {
+        SetDefaultDownloadDirectory(value => NiceDefaultDownloadDirectoryPath = value, "Nice default download directory");
+    }
+
+    [RelayCommand]
+    private void SetOkDefaultDownloadDirectoryToDefault()
+    {
+        SetDefaultDownloadDirectory(value => OkDefaultDownloadDirectoryPath = value, "Ok default download directory");
+    }
+
+    [RelayCommand]
+    private void SetTrashDefaultDownloadDirectoryToDefault()
+    {
+        SetDefaultDownloadDirectory(value => TrashDefaultDownloadDirectoryPath = value, "Trash default download directory");
+    }
+
     private async Task OpenDriveFolderAsync(DriveFolderLocation folder, bool addToPath = true)
     {
         if (addToPath && (_driveFolderPath.Count == 0 || _driveFolderPath[^1].Id != folder.Id))
@@ -1197,10 +1648,13 @@ public partial class MainViewModel : ViewModelBase
             return;
         }
 
-        var manifestFileId = AlbumLinkParser.TryGetManifestFileId(OpenAlbumLink);
-        if (string.IsNullOrWhiteSpace(manifestFileId))
+        var localManifestPath = AlbumLinkParser.TryGetLocalManifestPath(OpenAlbumLink);
+        var manifestFileId = localManifestPath is null
+            ? AlbumLinkParser.TryGetManifestFileId(OpenAlbumLink)
+            : null;
+        if (string.IsNullOrWhiteSpace(manifestFileId) && string.IsNullOrWhiteSpace(localManifestPath))
         {
-            Status = "Paste a Picshare link, Google Drive file link, or manifest file id.";
+            Status = "Paste a Picshare link, Google Drive file link, manifest file id, or local album.json path.";
             return;
         }
 
@@ -1208,9 +1662,13 @@ public partial class MainViewModel : ViewModelBase
         {
             IsBusy = true;
             Status = "Opening album...";
-            var manifest = await _albumLoader.LoadFromPublicDriveFileAsync(manifestFileId, CancellationToken.None);
-            DriveFolderLink = manifest.GoogleDrive.AlbumFolderUrl;
-            ShareLink = AlbumLinkParser.CreatePicshareLink(manifest.GoogleDrive.ManifestFileId, manifest.GoogleDrive.AlbumFolderId);
+            var manifest = localManifestPath is not null
+                ? await _albumLoader.LoadFromLocalFileAsync(localManifestPath, CancellationToken.None)
+                : await _albumLoader.LoadFromPublicDriveFileAsync(manifestFileId!, CancellationToken.None);
+            DriveFolderLink = manifest.GoogleDrive?.AlbumFolderUrl ?? manifest.LocalFileSystem?.RootPath ?? "";
+            ShareLink = manifest.GoogleDrive is not null
+                ? AlbumLinkParser.CreatePicshareLink(manifest.GoogleDrive.ManifestFileId, manifest.GoogleDrive.AlbumFolderId)
+                : AlbumLinkParser.CreateLocalPicshareLink(manifest.LocalFileSystem!.ManifestFilePath);
 
             if (await RequiresGoogleAuthorizationPromptAsync(manifest))
             {
@@ -1220,18 +1678,25 @@ public partial class MainViewModel : ViewModelBase
                 _feedbackSession = null;
                 _feedbackDatabase = null;
                 _feedbackStatus = null;
+                _currentReviewerIdentity = null;
                 IsFeedbackCommitted = false;
                 IsFeedbackPassed = false;
                 IsCommitConfirmationVisible = false;
                 CommitConfirmationMessage = "";
                 IsPassConfirmationVisible = false;
                 PassConfirmationMessage = "";
+                IsLeaveConfirmationVisible = false;
+                LeaveConfirmationMessage = "";
+                IsFeedbackLeft = false;
                 IsCollectFeedbackConfirmationVisible = false;
                 CollectFeedbackConfirmationMessage = "";
                 CanCollectFeedback = false;
+                IsCollectFeedbackVisible = false;
                 CanStartNextRound = false;
                 CanFinalizeFeedback = false;
                 _unfrozenCollectedPhotoCount = 0;
+                _hasCollectedFeedback = false;
+                _isFeedbackFinalized = false;
                 IsAuthorFlowVisible = false;
                 ClearFlowReviewers();
                 _pendingGoogleAuthorizationManifest = manifest;
@@ -1244,6 +1709,25 @@ public partial class MainViewModel : ViewModelBase
                 GoogleAuthorizationMessage = "Sign in with Google to open this Google Drive album.";
                 IsGoogleAuthorizationRequired = true;
                 Status = "Google authorization is required before this album can be opened.";
+                return;
+            }
+
+            if (UsesLocalFileSystemBackend(manifest) && CreateLocalReviewerIdentity() is null)
+            {
+                StopFeedbackSync();
+                StopFlowMonitor();
+                _currentManifest = null;
+                _feedbackSession = null;
+                _feedbackDatabase = null;
+                _feedbackStatus = null;
+                _currentReviewerIdentity = null;
+                CurrentAlbumTitle = manifest.Title;
+                Photos.Clear();
+                ClearCategoryRows();
+                SelectViewedPhoto(null);
+                ClosePhotoViewer();
+                IsSettingsPanelVisible = true;
+                Status = "Set an anonymous reviewer name in settings before opening this local album.";
                 return;
             }
 
@@ -1268,18 +1752,27 @@ public partial class MainViewModel : ViewModelBase
         _feedbackSession = null;
         _feedbackDatabase = null;
         _feedbackStatus = null;
+        _currentReviewerIdentity = null;
         IsFeedbackCommitted = false;
         IsFeedbackPassed = false;
         IsCommitConfirmationVisible = false;
         CommitConfirmationMessage = "";
         IsPassConfirmationVisible = false;
         PassConfirmationMessage = "";
+        IsLeaveConfirmationVisible = false;
+        LeaveConfirmationMessage = "";
+        IsFeedbackLeft = false;
         IsCollectFeedbackConfirmationVisible = false;
         CollectFeedbackConfirmationMessage = "";
+        IsFinalizeConfirmationVisible = false;
+        FinalizeConfirmationMessage = "";
         CanCollectFeedback = false;
+        IsCollectFeedbackVisible = false;
         CanStartNextRound = false;
         CanFinalizeFeedback = false;
         _unfrozenCollectedPhotoCount = 0;
+        _hasCollectedFeedback = false;
+        _isFeedbackFinalized = false;
         IsAuthorFlowVisible = false;
         FlowStatus = "";
         ClearFlowReviewers();
@@ -1301,7 +1794,7 @@ public partial class MainViewModel : ViewModelBase
                 photo.ThumbnailDownloadUrl));
         }
 
-        if (UsesGoogleDriveBackend(manifest))
+        if (UsesReviewerFeedbackBackend(manifest))
         {
             await LoadReviewerFeedbackAsync(manifest);
         }
@@ -1328,7 +1821,8 @@ public partial class MainViewModel : ViewModelBase
 
         var changedPhoto = _selectedViewedPhoto;
         var sourceCategory = _selectedViewedPhotoSourceCategory;
-        var previousCategory = _selectedViewedPhoto.Category;
+        var sourcePhotosBeforeChange = GetPhotosForCategory(sourceCategory).ToList();
+        var changedPhotoIndex = sourcePhotosBeforeChange.FindIndex(photo => ReferenceEquals(photo, changedPhoto));
         _selectedViewedPhoto.Category = category;
 
         if (_feedbackSession is not null && _feedbackDatabase is not null)
@@ -1359,7 +1853,7 @@ public partial class MainViewModel : ViewModelBase
             ? $"{changedPhoto.FileName} moved to uncategorized."
             : $"{changedPhoto.FileName} marked as {category}.";
 
-        await AdvanceFullImageViewerAfterCategoryChangeAsync(sourceCategory, changedPhoto);
+        await AdvanceFullImageViewerAfterCategoryChangeAsync(sourceCategory, changedPhotoIndex);
     }
 
     partial void OnPhotoViewerImageChanging(Bitmap? value)
@@ -1368,6 +1862,254 @@ public partial class MainViewModel : ViewModelBase
         {
             PhotoViewerImage.Dispose();
         }
+    }
+
+    private async Task CopyCurrentOriginalPhotoAsync(string destinationDirectoryPath, string successVerb)
+    {
+        if (_selectedViewedPhoto is not { } photo)
+        {
+            Status = "No photo is selected.";
+            return;
+        }
+
+        try
+        {
+            IsBusy = true;
+            Directory.CreateDirectory(destinationDirectoryPath);
+
+            var cachePath = await _imageCache.GetOrDownloadAsync(
+                photo.AlbumId,
+                GetFullPhotoCacheFileName(photo),
+                photo.DownloadUrl,
+                _imageHttpClient,
+                CancellationToken.None);
+            var destinationPath = GetAvailableDestinationPath(
+                destinationDirectoryPath,
+                GetSafeDownloadFileName(photo));
+
+            await using var source = File.OpenRead(cachePath);
+            await using var destination = new FileStream(
+                destinationPath,
+                FileMode.CreateNew,
+                FileAccess.Write,
+                FileShare.None);
+            await source.CopyToAsync(destination, CancellationToken.None);
+
+            Status = $"{successVerb} {photo.FileName} to {destinationPath}.";
+        }
+        catch (Exception ex)
+        {
+            Status = ex.Message;
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private void AddAlbumDownloadCategory(string categoryKey, string categoryName, string defaultDestination, string defaultModeId)
+    {
+        AlbumDownloadCategories.Add(new AlbumDownloadCategoryViewModel(
+            categoryKey,
+            categoryName,
+            GetPhotosForCategory(categoryKey).Count(),
+            defaultDestination,
+            defaultModeId));
+    }
+
+    private async Task DownloadAlbumCategoryFilesAsync(
+        AlbumDownloadCategoryViewModel category,
+        IReadOnlyList<AlbumPhotoViewModel> photos,
+        CancellationToken cancellationToken)
+    {
+        var destinationDirectory = Path.GetFullPath(category.DestinationDirectoryPath.Trim());
+        Directory.CreateDirectory(destinationDirectory);
+
+        foreach (var photo in photos)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            AlbumDownloadProgressMessage = $"Downloading {category.CategoryName}: {photo.FileName}";
+
+            var destinationPath = GetAvailableDestinationPath(destinationDirectory, GetSafeDownloadFileName(photo));
+            var tempPath = Path.Combine(destinationDirectory, $".{Guid.NewGuid():N}.tmp");
+            try
+            {
+                await using (var destination = new FileStream(
+                    tempPath,
+                    FileMode.CreateNew,
+                    FileAccess.Write,
+                    FileShare.None))
+                {
+                    await _imageCache.CopyOriginalToAsync(
+                        photo.AlbumId,
+                        GetFullPhotoCacheFileName(photo),
+                        photo.DownloadUrl,
+                        _imageHttpClient,
+                        destination,
+                        cancellationToken);
+                }
+
+                File.Move(tempPath, destinationPath);
+            }
+            finally
+            {
+                if (File.Exists(tempPath))
+                {
+                    File.Delete(tempPath);
+                }
+            }
+
+            AlbumDownloadProgressValue++;
+        }
+    }
+
+    private async Task DownloadAlbumCategoryArchiveAsync(
+        AlbumDownloadCategoryViewModel category,
+        IReadOnlyList<AlbumPhotoViewModel> photos,
+        CancellationToken cancellationToken)
+    {
+        var destinationDirectory = Path.GetFullPath(category.DestinationDirectoryPath.Trim());
+        Directory.CreateDirectory(destinationDirectory);
+        var archiveName = GetSafeArchiveFileName($"{CurrentAlbumTitle}-{category.CategoryName}.zip");
+        var archivePath = GetAvailableDestinationPath(destinationDirectory, archiveName);
+        var tempArchivePath = Path.Combine(destinationDirectory, $".{Guid.NewGuid():N}.zip.tmp");
+        var entryNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        try
+        {
+            using (var archive = System.IO.Compression.ZipFile.Open(tempArchivePath, System.IO.Compression.ZipArchiveMode.Create))
+            {
+                foreach (var photo in photos)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    AlbumDownloadProgressMessage = $"Archiving {category.CategoryName}: {photo.FileName}";
+
+                    var entry = archive.CreateEntry(GetAvailableArchiveEntryName(entryNames, GetSafeDownloadFileName(photo)));
+                    await using var destination = entry.Open();
+                    await _imageCache.CopyOriginalToAsync(
+                        photo.AlbumId,
+                        GetFullPhotoCacheFileName(photo),
+                        photo.DownloadUrl,
+                        _imageHttpClient,
+                        destination,
+                        cancellationToken);
+
+                    AlbumDownloadProgressValue++;
+                }
+            }
+
+            File.Move(tempArchivePath, archivePath);
+        }
+        finally
+        {
+            if (File.Exists(tempArchivePath))
+            {
+                File.Delete(tempArchivePath);
+            }
+        }
+    }
+
+    private static string GetFullPhotoCacheFileName(AlbumPhotoViewModel photo)
+    {
+        return $"{photo.PhotoId}-full{photo.FileExtension}";
+    }
+
+    private static string GetSafeDownloadFileName(AlbumPhotoViewModel photo)
+    {
+        var fileName = Path.GetFileName(photo.FileName);
+        if (string.IsNullOrWhiteSpace(fileName))
+        {
+            fileName = $"{photo.PhotoId}{photo.FileExtension}";
+        }
+
+        var invalid = Path.GetInvalidFileNameChars();
+        var sanitized = new string(fileName.Select(character => invalid.Contains(character) ? '_' : character).ToArray());
+        return string.IsNullOrWhiteSpace(sanitized) ? $"{photo.PhotoId}{photo.FileExtension}" : sanitized;
+    }
+
+    private static string GetSafeArchiveFileName(string fileName)
+    {
+        var invalid = Path.GetInvalidFileNameChars();
+        var sanitized = new string(fileName.Select(character => invalid.Contains(character) ? '_' : character).ToArray());
+        return string.IsNullOrWhiteSpace(sanitized) ? "album.zip" : sanitized;
+    }
+
+    private static string GetAvailableDestinationPath(string destinationDirectoryPath, string fileName)
+    {
+        var targetPath = Path.Combine(destinationDirectoryPath, fileName);
+        if (!File.Exists(targetPath))
+        {
+            return targetPath;
+        }
+
+        var extension = Path.GetExtension(fileName);
+        var baseName = Path.GetFileNameWithoutExtension(fileName);
+        for (var index = 1; ; index++)
+        {
+            targetPath = Path.Combine(destinationDirectoryPath, $"{baseName} ({index}){extension}");
+            if (!File.Exists(targetPath))
+            {
+                return targetPath;
+            }
+        }
+    }
+
+    private static string GetAvailableArchiveEntryName(HashSet<string> existingNames, string fileName)
+    {
+        if (existingNames.Add(fileName))
+        {
+            return fileName;
+        }
+
+        var extension = Path.GetExtension(fileName);
+        var baseName = Path.GetFileNameWithoutExtension(fileName);
+        for (var index = 1; ; index++)
+        {
+            var candidate = $"{baseName} ({index}){extension}";
+            if (existingNames.Add(candidate))
+            {
+                return candidate;
+            }
+        }
+    }
+
+    private void SetDefaultDownloadDirectory(
+        IStorageFolder folder,
+        Action<string> setDirectoryPath,
+        string label)
+    {
+        var localPath = folder.TryGetLocalPath();
+        if (string.IsNullOrWhiteSpace(localPath))
+        {
+            Status = $"The selected {label.ToLowerInvariant()} must be a local filesystem folder.";
+            return;
+        }
+
+        var fullPath = Path.GetFullPath(localPath);
+        setDirectoryPath(fullPath);
+        SaveLocalUserSettings();
+        Status = $"{label} set to {fullPath}.";
+    }
+
+    private void SetDefaultDownloadDirectory(Action<string> setDirectoryPath, string label)
+    {
+        var defaultPath = GetDefaultDownloadDirectoryPath();
+        setDirectoryPath(defaultPath);
+        SaveLocalUserSettings();
+        Status = string.IsNullOrWhiteSpace(defaultPath)
+            ? $"{label} default is not available on this platform."
+            : $"{label} set to default: {defaultPath}.";
+    }
+
+    private static string GetConfiguredOrDefaultDownloadDirectoryPath(string configuredPath)
+    {
+        return string.IsNullOrWhiteSpace(configuredPath) ? GetDefaultDownloadDirectoryPath() : configuredPath;
+    }
+
+    private static string GetDefaultDownloadDirectoryPath()
+    {
+        var picturesPath = Environment.GetFolderPath(Environment.SpecialFolder.MyPictures);
+        return string.IsNullOrWhiteSpace(picturesPath) ? "" : picturesPath;
     }
 
     private async Task<bool> RequiresGoogleAuthorizationPromptAsync(AlbumManifest manifest)
@@ -1414,23 +2156,32 @@ public partial class MainViewModel : ViewModelBase
 
     private async Task LoadReviewerFeedbackAsync(AlbumManifest manifest)
     {
-        if (_googleTokenSet is null)
+        var reviewerIdentity = CreateReviewerIdentity(manifest);
+        if (reviewerIdentity is null)
         {
+            if (UsesLocalFileSystemBackend(manifest))
+            {
+                Status = "Set an anonymous reviewer name in settings before opening this local album.";
+                IsSettingsPanelVisible = true;
+            }
+
             return;
         }
 
-        var accessToken = await GetGoogleAccessTokenAsync(CancellationToken.None);
+        var backend = await CreateFeedbackBackendAsync(manifest, CancellationToken.None);
         var result = await _reviewerFeedbackService.LoadAsync(
             manifest,
-            _googleTokenSet,
-            accessToken,
+            reviewerIdentity,
+            backend,
             CancellationToken.None);
 
+        _currentReviewerIdentity = reviewerIdentity;
         _feedbackSession = result.Session;
         _feedbackDatabase = result.Database;
         _feedbackStatus = result.Status;
         IsFeedbackCommitted = _feedbackStatus.Status == ReviewerFeedbackStatusKind.Committed;
         IsFeedbackPassed = _feedbackStatus.Status == ReviewerFeedbackStatusKind.Passed;
+        IsFeedbackLeft = _feedbackStatus.Status == ReviewerFeedbackStatusKind.Left;
         IsAuthorFlowVisible = IsCurrentReviewerAuthor(manifest);
         CanCollectFeedback = IsAuthorFlowVisible;
         CanFinalizeFeedback = IsAuthorFlowVisible;
@@ -1455,7 +2206,9 @@ public partial class MainViewModel : ViewModelBase
             photo.IsFrozen = _feedbackDatabase?.FrozenPhotoIds.Contains(photo.PhotoId) == true;
         }
 
-        _unfrozenCollectedPhotoCount = _feedbackDatabase?.HasCollectedFeedback == true
+        _hasCollectedFeedback = _feedbackDatabase?.HasCollectedFeedback == true;
+        _isFeedbackFinalized = _feedbackDatabase?.IsFinalized == true;
+        _unfrozenCollectedPhotoCount = _hasCollectedFeedback
             ? Photos.Count(photo => !photo.IsFrozen)
             : 0;
 
@@ -1466,6 +2219,7 @@ public partial class MainViewModel : ViewModelBase
     {
         IsFeedbackCommitted = _feedbackStatus?.Status == ReviewerFeedbackStatusKind.Committed;
         IsFeedbackPassed = _feedbackStatus?.Status == ReviewerFeedbackStatusKind.Passed;
+        IsFeedbackLeft = _feedbackStatus?.Status == ReviewerFeedbackStatusKind.Left;
     }
 
     private void RebuildCategoryRows()
@@ -1515,9 +2269,11 @@ public partial class MainViewModel : ViewModelBase
     {
         CommittedReviewers.Clear();
         PassedReviewers.Clear();
+        LeftReviewers.Clear();
         InProgressReviewers.Clear();
         OnPropertyChanged(nameof(CommittedReviewersHeader));
         OnPropertyChanged(nameof(PassedReviewersHeader));
+        OnPropertyChanged(nameof(LeftReviewersHeader));
         OnPropertyChanged(nameof(InProgressReviewersHeader));
     }
 
@@ -1552,7 +2308,7 @@ public partial class MainViewModel : ViewModelBase
 
     private async Task SyncFeedbackAsync(CancellationToken cancellationToken = default)
     {
-        if (_feedbackSession is null || _feedbackDatabase is null || _googleTokenSet is null)
+        if (_feedbackSession is null || _feedbackDatabase is null)
         {
             return;
         }
@@ -1564,11 +2320,11 @@ public partial class MainViewModel : ViewModelBase
 
         try
         {
-            var accessToken = await GetGoogleAccessTokenAsync(cancellationToken);
+            var backend = await CreateFeedbackBackendAsync(cancellationToken);
             var result = await _reviewerFeedbackService.SyncAsync(
                 _feedbackSession,
                 _feedbackDatabase,
-                accessToken,
+                backend,
                 cancellationToken);
 
             if (result.RemoteWon)
@@ -1660,7 +2416,7 @@ public partial class MainViewModel : ViewModelBase
 
     private async Task RefreshFlowAsync(CancellationToken cancellationToken)
     {
-        if (_currentManifest is null || _googleTokenSet is null || !IsAuthorFlowVisible)
+        if (_currentManifest is null || !IsAuthorFlowVisible)
         {
             return;
         }
@@ -1668,11 +2424,8 @@ public partial class MainViewModel : ViewModelBase
         try
         {
             await Dispatcher.UIThread.InvokeAsync(() => FlowStatus = "Refreshing");
-            var accessToken = await GetGoogleAccessTokenAsync(cancellationToken);
-            var flow = await _reviewerFeedbackService.LoadFeedbackFlowAsync(
-                _currentManifest.GoogleDrive.FeedbackFolderId,
-                accessToken,
-                cancellationToken);
+            var backend = await CreateFeedbackBackendAsync(_currentManifest, cancellationToken);
+            var flow = await _reviewerFeedbackService.LoadFeedbackFlowAsync(backend, cancellationToken);
 
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
@@ -1687,15 +2440,26 @@ public partial class MainViewModel : ViewModelBase
                     PassedReviewers.Add(new ReviewerFeedbackFlowItemViewModel(reviewer));
                 }
 
-                foreach (var reviewer in flow.InProgress)
+                foreach (var reviewer in flow.Left)
+                {
+                    LeftReviewers.Add(new ReviewerFeedbackFlowItemViewModel(reviewer));
+                }
+
+                var finalizedInProgress = _isFeedbackFinalized
+                    ? flow.InProgress.Concat(flow.Committed).Concat(flow.Passed)
+                    : flow.InProgress;
+
+                foreach (var reviewer in finalizedInProgress)
                 {
                     InProgressReviewers.Add(new ReviewerFeedbackFlowItemViewModel(reviewer));
                 }
 
                 OnPropertyChanged(nameof(CommittedReviewersHeader));
                 OnPropertyChanged(nameof(PassedReviewersHeader));
+                OnPropertyChanged(nameof(LeftReviewersHeader));
                 OnPropertyChanged(nameof(InProgressReviewersHeader));
-                FlowStatus = flow.Committed.Count == 0 && flow.Passed.Count == 0 && flow.InProgress.Count == 0
+                UpdateFeedbackControlState();
+                FlowStatus = flow.Committed.Count == 0 && flow.Passed.Count == 0 && flow.Left.Count == 0 && flow.InProgress.Count == 0
                     ? "No reviewer activity yet."
                     : "";
             });
@@ -1747,21 +2511,40 @@ public partial class MainViewModel : ViewModelBase
         CanMarkCurrentPhotoTrash = canChangeCurrentPhoto && ShouldShowCurrentPhotoTrashAction;
         CanShowCurrentPhotoTrashAction = ShouldShowCurrentPhotoTrashAction;
         CanNavigatePhotoViewerCategory = _selectedViewedPhoto is not null && GetPhotosForCategory(category).Any();
+        CanDownloadCurrentPhoto = _selectedViewedPhoto is not null;
     }
 
     private void UpdateFeedbackControlState()
     {
-        var hasTerminalFeedbackState = IsFeedbackCommitted || IsFeedbackPassed;
-        CanModifyFeedback = _feedbackSession is not null && !hasTerminalFeedbackState;
-        CanPassFeedback = _feedbackSession is not null && !hasTerminalFeedbackState;
-        CanCollectFeedback = IsAuthorFlowVisible;
-        CanFinalizeFeedback = IsAuthorFlowVisible;
-        CanStartNextRound = IsAuthorFlowVisible && _unfrozenCollectedPhotoCount > 0;
+        var hasTerminalFeedbackState = IsFeedbackCommitted || IsFeedbackPassed || IsFeedbackLeft;
+        CanUseAlbumMoreMenu = Photos.Count > 0;
+        IsStandardFeedbackActionsVisible = !_isFeedbackFinalized;
+        IsLeaveFeedbackVisible = _isFeedbackFinalized && _feedbackSession is not null && !IsFeedbackLeft;
+        CanModifyFeedback = _feedbackSession is not null && !hasTerminalFeedbackState && !_hasCollectedFeedback && !_isFeedbackFinalized;
+        CanPassFeedback = _feedbackSession is not null && !hasTerminalFeedbackState && !_hasCollectedFeedback && !_isFeedbackFinalized;
+        CanLeaveFeedback = IsLeaveFeedbackVisible;
+        IsCollectFeedbackVisible = IsAuthorFlowVisible && !_hasCollectedFeedback && CommittedReviewers.Count > 0;
+        CanCollectFeedback = IsCollectFeedbackVisible;
+        CanFinalizeFeedback = IsAuthorFlowVisible && !_isFeedbackFinalized;
+        CanStartNextRound = IsAuthorFlowVisible && !_isFeedbackFinalized && _unfrozenCollectedPhotoCount > 0;
+        IsRegularFlowVisible = IsAuthorFlowVisible && !_isFeedbackFinalized;
+        IsFinalizedFlowVisible = IsAuthorFlowVisible && _isFeedbackFinalized;
+        FinalizedFeedbackMessage = _isFeedbackFinalized
+            ? "The album has been finalized. Please leave when you are ready, so the author can safely delete the album."
+            : "";
         if (_feedbackSession is null)
         {
             CanCommitFeedback = false;
             CanPassFeedback = false;
+            CanLeaveFeedback = false;
             CommitFeedbackStatus = "";
+            return;
+        }
+
+        if (_isFeedbackFinalized)
+        {
+            CanCommitFeedback = false;
+            CommitFeedbackStatus = IsFeedbackLeft ? "you left the album" : "album finalized";
             return;
         }
 
@@ -1779,16 +2562,16 @@ public partial class MainViewModel : ViewModelBase
             return;
         }
 
+        if (_hasCollectedFeedback)
+        {
+            CanCommitFeedback = false;
+            CommitFeedbackStatus = "feedback collected";
+            return;
+        }
+
         var uncategorizedCount = Photos.Count(photo => !photo.IsFrozen && string.IsNullOrWhiteSpace(photo.Category));
         var niceCount = Photos.Count(photo => string.Equals(photo.Category, "nice", StringComparison.Ordinal));
         var targetNiceCount = _currentManifest?.TargetNicePhotoCount ?? Math.Max(0, TargetNicePhotoCount);
-
-        if (uncategorizedCount > 0)
-        {
-            CanCommitFeedback = false;
-            CommitFeedbackStatus = $"{uncategorizedCount} uncategorized pictures left";
-            return;
-        }
 
         if (niceCount != targetNiceCount)
         {
@@ -1796,6 +2579,13 @@ public partial class MainViewModel : ViewModelBase
             CommitFeedbackStatus = $"expecting {targetNiceCount} nice pictures";
             return;
         }
+
+        if (uncategorizedCount > 0)
+        {
+            CanCommitFeedback = false;
+            CommitFeedbackStatus = $"{uncategorizedCount} uncategorized pictures left";
+            return;
+        }        
 
         CanCommitFeedback = true;
         CommitFeedbackStatus = "ready to send";
@@ -1830,7 +2620,7 @@ public partial class MainViewModel : ViewModelBase
         await OpenPhotoViewerAsync(categoryPhotos[nextIndex]);
     }
 
-    private async Task AdvanceFullImageViewerAfterCategoryChangeAsync(string sourceCategory, AlbumPhotoViewModel changedPhoto)
+    private async Task AdvanceFullImageViewerAfterCategoryChangeAsync(string sourceCategory, int changedPhotoIndex)
     {
         var sourcePhotos = GetPhotosForCategory(sourceCategory).ToList();
         if (sourcePhotos.Count == 0)
@@ -1839,9 +2629,8 @@ public partial class MainViewModel : ViewModelBase
             return;
         }
 
-        var changedIndex = sourcePhotos.FindIndex(photo => ReferenceEquals(photo, changedPhoto));
-        var nextIndex = changedIndex >= 0 && changedIndex < sourcePhotos.Count
-            ? changedIndex % sourcePhotos.Count
+        var nextIndex = changedPhotoIndex >= 0 && changedPhotoIndex < sourcePhotos.Count
+            ? changedPhotoIndex
             : 0;
 
         await OpenPhotoViewerAsync(sourcePhotos[nextIndex]);
@@ -1856,19 +2645,85 @@ public partial class MainViewModel : ViewModelBase
 
     private static bool UsesGoogleDriveBackend(AlbumManifest manifest)
     {
-        return string.Equals(manifest.DatabaseBackendType, "google-drive-folder", StringComparison.OrdinalIgnoreCase) ||
-               manifest.Photos.Any(photo => string.Equals(photo.BackendType, "google-drive-file", StringComparison.OrdinalIgnoreCase));
+        return manifest.GoogleDrive is not null &&
+            (string.Equals(manifest.DatabaseBackendType, "google-drive-folder", StringComparison.OrdinalIgnoreCase) ||
+               manifest.Photos.Any(photo => string.Equals(photo.BackendType, "google-drive-file", StringComparison.OrdinalIgnoreCase)));
+    }
+
+    private static bool UsesLocalFileSystemBackend(AlbumManifest manifest)
+    {
+        return manifest.LocalFileSystem is not null &&
+            string.Equals(manifest.DatabaseBackendType, "local-file-system", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool UsesReviewerFeedbackBackend(AlbumManifest manifest)
+    {
+        return UsesGoogleDriveBackend(manifest) || UsesLocalFileSystemBackend(manifest);
     }
 
     private bool IsCurrentReviewerAuthor(AlbumManifest manifest)
     {
-        if (_googleTokenSet?.UserId is not { Length: > 0 } reviewerUserId)
+        var reviewer = _currentReviewerIdentity ?? CreateReviewerIdentity(manifest);
+        if (reviewer?.UserId is not { Length: > 0 } reviewerUserId)
         {
             return false;
         }
 
-        return string.Equals(manifest.Author.BackendType, "google", StringComparison.OrdinalIgnoreCase) &&
+        return string.Equals(manifest.Author.BackendType, reviewer.BackendType, StringComparison.OrdinalIgnoreCase) &&
             string.Equals(manifest.Author.UserId, reviewerUserId, StringComparison.Ordinal);
+    }
+
+    private async Task<IReviewerFeedbackBackend> CreateFeedbackBackendAsync(CancellationToken cancellationToken)
+    {
+        if (_currentManifest is null)
+        {
+            throw new InvalidOperationException("No album is open.");
+        }
+
+        return await CreateFeedbackBackendAsync(_currentManifest, cancellationToken);
+    }
+
+    private async Task<IReviewerFeedbackBackend> CreateFeedbackBackendAsync(
+        AlbumManifest manifest,
+        CancellationToken cancellationToken)
+    {
+        if (UsesGoogleDriveBackend(manifest))
+        {
+            if (manifest.GoogleDrive is null)
+            {
+                throw new InvalidOperationException("The Google Drive album details are missing.");
+            }
+
+            var accessToken = await GetGoogleAccessTokenAsync(cancellationToken);
+            return new GoogleDriveReviewerFeedbackBackend(manifest.GoogleDrive.FeedbackFolderId, accessToken);
+        }
+
+        if (UsesLocalFileSystemBackend(manifest))
+        {
+            if (manifest.LocalFileSystem is null)
+            {
+                throw new InvalidOperationException("The local album details are missing.");
+            }
+
+            return new LocalFileSystemReviewerFeedbackBackend(manifest.LocalFileSystem.FeedbackFolderPath);
+        }
+
+        throw new InvalidOperationException("The album feedback backend is not supported.");
+    }
+
+    private FeedbackReviewerIdentity? CreateReviewerIdentity(AlbumManifest manifest)
+    {
+        if (UsesGoogleDriveBackend(manifest))
+        {
+            return _googleTokenSet is null ? null : CreateGoogleReviewerIdentity(_googleTokenSet);
+        }
+
+        if (UsesLocalFileSystemBackend(manifest))
+        {
+            return CreateLocalReviewerIdentity();
+        }
+
+        return null;
     }
 
     private static FeedbackReviewerIdentity CreateGoogleReviewerIdentity(GoogleOAuthTokenSet token)
@@ -1882,9 +2737,49 @@ public partial class MainViewModel : ViewModelBase
         };
     }
 
+    private FeedbackReviewerIdentity? CreateLocalReviewerIdentity()
+    {
+        var name = AnonymousReviewerName.Trim();
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return null;
+        }
+
+        SaveLocalUserSettings();
+        return new FeedbackReviewerIdentity
+        {
+            BackendType = "local",
+            UserId = SanitizeLocalReviewerId(name),
+            DisplayName = name,
+            Email = null
+        };
+    }
+
+    private void SaveLocalUserSettings()
+    {
+        _localUserSettingsStore.Save(new LocalUserSettings
+        {
+            AnonymousReviewerName = AnonymousReviewerName.Trim(),
+            PictureDefaultDownloadDirectoryPath = PictureDefaultDownloadDirectoryPath.Trim(),
+            UncategorizedDefaultDownloadDirectoryPath = UncategorizedDefaultDownloadDirectoryPath.Trim(),
+            NiceDefaultDownloadDirectoryPath = NiceDefaultDownloadDirectoryPath.Trim(),
+            OkDefaultDownloadDirectoryPath = OkDefaultDownloadDirectoryPath.Trim(),
+            TrashDefaultDownloadDirectoryPath = TrashDefaultDownloadDirectoryPath.Trim()
+        });
+    }
+
+    private static string SanitizeLocalReviewerId(string value)
+    {
+        var invalid = Path.GetInvalidFileNameChars();
+        var sanitized = new string(value.Select(character => invalid.Contains(character) ? '_' : character).ToArray());
+        return string.IsNullOrWhiteSpace(sanitized) ? "anonymous" : sanitized;
+    }
+
     partial void OnSelectedAlbumTypeChanged(AlbumTypeOptionViewModel? value)
     {
         OnPropertyChanged(nameof(IsAlbumSettingsVisible));
+        OnPropertyChanged(nameof(IsGoogleDriveAlbumSettingsVisible));
+        OnPropertyChanged(nameof(IsLocalAlbumSettingsVisible));
     }
 
     partial void OnIsAuthorFlowVisibleChanged(bool value)
@@ -1940,6 +2835,9 @@ public partial class MainViewModel : ViewModelBase
         ParentDriveFolderId = "";
         SelectedDriveFolderName = "Please select a folder";
         IsDriveFolderSelected = false;
+        SelectedLocalAlbumDestinationName = "Please select a folder";
+        LocalAlbumDestinationPath = "";
+        IsLocalAlbumDestinationSelected = false;
         CurrentDriveFolderId = "root";
         CurrentDriveFolderName = "My Drive";
         CurrentDriveFolderCanBeUsed = true;

@@ -20,4 +20,11 @@ public sealed class AlbumLoader
         var manifest = await JsonSerializer.DeserializeAsync<AlbumManifest>(stream, JsonOptions, cancellationToken);
         return manifest ?? throw new InvalidOperationException("The album manifest is empty or invalid.");
     }
+
+    public async Task<AlbumManifest> LoadFromLocalFileAsync(string manifestFilePath, CancellationToken cancellationToken)
+    {
+        await using var stream = File.OpenRead(manifestFilePath);
+        var manifest = await JsonSerializer.DeserializeAsync<AlbumManifest>(stream, JsonOptions, cancellationToken);
+        return manifest ?? throw new InvalidOperationException("The album manifest is empty or invalid.");
+    }
 }

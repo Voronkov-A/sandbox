@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Picshare.Services;
 
@@ -19,6 +20,8 @@ public sealed class PicshareSettingsProvider
     public string? GoogleOAuthClientId => FirstNonWhiteSpace(Settings.Google?.OAuthClientId, Settings.GoogleOAuthClientId);
 
     public string? GoogleOAuthClientSecret => FirstNonWhiteSpace(Settings.Google?.OAuthClientSecret, Settings.GoogleOAuthClientSecret);
+
+    public string? LocalStorageRootPath => FirstNonWhiteSpace(Settings.LocalStorage?.RootPath, Settings.LocalStorageRootPath);
 
     public string MissingGoogleOAuthClientIdMessage =>
         $"Google OAuth client id is not configured. Add it to {string.Join(" or ", SettingsFilePaths)}, or package picshare.settings.json with the application.";
@@ -105,6 +108,11 @@ public sealed class PicshareSettingsProvider
             next?.GoogleOAuthClientSecret,
             current.Google?.OAuthClientSecret,
             current.GoogleOAuthClientSecret);
+        var localStorageRootPath = FirstNonWhiteSpace(
+            next?.LocalStorage?.RootPath,
+            next?.LocalStorageRootPath,
+            current.LocalStorage?.RootPath,
+            current.LocalStorageRootPath);
 
         return new PicshareSettings
         {
@@ -114,6 +122,12 @@ public sealed class PicshareSettingsProvider
                 {
                     OAuthClientId = oauthClientId,
                     OAuthClientSecret = oauthClientSecret
+                },
+            LocalStorage = localStorageRootPath is null
+                ? null
+                : new LocalStorageSettings
+                {
+                    RootPath = localStorageRootPath
                 }
         };
     }
@@ -128,9 +142,14 @@ public sealed record PicshareSettings
 {
     public GoogleSettings? Google { get; init; }
 
+    public LocalStorageSettings? LocalStorage { get; init; }
+
     public string? GoogleOAuthClientId { get; init; }
 
     public string? GoogleOAuthClientSecret { get; init; }
+
+    [JsonPropertyName("localStorage.rootPath")]
+    public string? LocalStorageRootPath { get; init; }
 }
 
 public sealed record GoogleSettings
@@ -138,4 +157,9 @@ public sealed record GoogleSettings
     public string? OAuthClientId { get; init; }
 
     public string? OAuthClientSecret { get; init; }
+}
+
+public sealed record LocalStorageSettings
+{
+    public string? RootPath { get; init; }
 }
