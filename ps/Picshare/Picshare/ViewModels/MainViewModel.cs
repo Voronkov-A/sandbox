@@ -332,6 +332,18 @@ public partial class MainViewModel : ViewModelBase
     private bool _canRotateSelectedPhotos;
 
     [ObservableProperty]
+    private bool _canMarkSelectedPhotosAsDuplicates;
+
+    [ObservableProperty]
+    private bool _canRemoveCurrentPhotoFromDuplicates;
+
+    [ObservableProperty]
+    private bool _isPhotoViewerDuplicateStripVisible;
+
+    [ObservableProperty]
+    private bool _isCurrentPhotoBestInDuplicateGroup;
+
+    [ObservableProperty]
     private bool _isAuthorFlowVisible;
 
     [ObservableProperty]
@@ -386,6 +398,8 @@ public partial class MainViewModel : ViewModelBase
 
     public ObservableCollection<AlbumPhotoViewModel> Photos { get; } = new();
 
+    public ObservableCollection<AlbumPhotoViewModel> PhotoViewerDuplicatePhotos { get; } = new();
+
     public ObservableCollection<RecentAlbumViewModel> RecentAlbums { get; } = new();
 
     public ObservableCollection<AlbumPhotoGroupViewModel> UncategorizedPhotoGroups { get; } = new();
@@ -406,13 +420,13 @@ public partial class MainViewModel : ViewModelBase
 
     public ObservableCollection<AlbumDownloadCategoryViewModel> AlbumDownloadCategories { get; } = new();
 
-    public string UncategorizedTabHeader => $"Uncategorized ({Photos.Count(photo => string.IsNullOrWhiteSpace(photo.Category))})";
+    public string UncategorizedTabHeader => $"Uncategorized ({GetVisiblePhotos().Count(photo => string.IsNullOrWhiteSpace(photo.Category))})";
 
-    public string NiceTabHeader => $"Nice ({Photos.Count(photo => string.Equals(photo.Category, "nice", StringComparison.Ordinal))})";
+    public string NiceTabHeader => $"Nice ({GetVisiblePhotos().Count(photo => string.Equals(photo.Category, "nice", StringComparison.Ordinal))})";
 
-    public string OkTabHeader => $"Ok ({Photos.Count(photo => string.Equals(photo.Category, "ok", StringComparison.Ordinal))})";
+    public string OkTabHeader => $"Ok ({GetVisiblePhotos().Count(photo => string.Equals(photo.Category, "ok", StringComparison.Ordinal))})";
 
-    public string TrashTabHeader => $"Trash ({Photos.Count(photo => string.Equals(photo.Category, "trash", StringComparison.Ordinal))})";
+    public string TrashTabHeader => $"Trash ({GetVisiblePhotos().Count(photo => string.Equals(photo.Category, "trash", StringComparison.Ordinal))})";
 
     public string FlowTabHeader => "Flow";
 
@@ -454,6 +468,7 @@ public partial class MainViewModel : ViewModelBase
     private ReviewerFeedbackDatabase? _feedbackDatabase;
     private ReviewerFeedbackStatus? _feedbackStatus;
     private FeedbackReviewerIdentity? _currentReviewerIdentity;
+    private readonly Dictionary<string, IReadOnlyList<AlbumPhotoViewModel>> _duplicateGroupsById = new(StringComparer.Ordinal);
     private bool _isFlowTabActive;
     private int _unfrozenCollectedPhotoCount;
     private bool _hasCollectedFeedback;
@@ -575,6 +590,24 @@ public partial class MainViewModel : ViewModelBase
     private async Task RotateSelectedPhotosRightAsync()
     {
         await RotateSelectedPhotosAsync(90);
+    }
+
+    [RelayCommand]
+    private async Task MarkSelectedPhotosAsDuplicatesAsync()
+    {
+        await MarkSelectedPhotosAsDuplicatesCoreAsync();
+    }
+
+    [RelayCommand]
+    private async Task RemoveCurrentPhotoFromDuplicatesAsync()
+    {
+        await RemoveCurrentPhotoFromDuplicatesCoreAsync();
+    }
+
+    [RelayCommand]
+    private async Task ToggleCurrentPhotoBestInDuplicateGroupAsync()
+    {
+        await ToggleCurrentPhotoBestInDuplicateGroupCoreAsync();
     }
 
     [RelayCommand]
@@ -1079,12 +1112,14 @@ public partial class MainViewModel : ViewModelBase
         PhotoViewerTitle = "";
         PhotoViewerStatus = "";
         IsPhotoViewerVisible = false;
+        UpdatePhotoViewerDuplicateStripVisibility();
     }
 
     [RelayCommand]
     private void TogglePhotoViewerActions()
     {
         IsPhotoViewerActionsVisible = !IsPhotoViewerActionsVisible;
+        UpdatePhotoViewerDuplicateStripVisibility();
     }
 
     public async Task OpenPhotoViewerAsync(AlbumPhotoViewModel photo)
@@ -1099,6 +1134,7 @@ public partial class MainViewModel : ViewModelBase
             SelectViewedPhoto(photo);
             IsPhotoViewerVisible = true;
             IsPhotoViewerActionsVisible = true;
+            UpdatePhotoViewerDuplicateStripVisibility();
             PhotoViewerTitle = photo.FileName;
             PhotoViewerRotationDegrees = photo.RotationDegrees;
             PhotoViewerStatus = "Loading";
@@ -1115,6 +1151,7 @@ public partial class MainViewModel : ViewModelBase
             {
                 PhotoViewerImage = viewerImage;
                 PhotoViewerStatus = "";
+                _ = PreloadPhotoViewerDuplicatePhotosAsync();
             }
             else
             {
@@ -2042,6 +2079,10 @@ public partial class MainViewModel : ViewModelBase
     public async Task StartPhotoViewportLoadAsync(AlbumPhotoViewModel photo)
     {
         await photo.StartViewportLoadAsync(_imageCache, _imageHttpClient);
+        if (photo.DuplicateStackPhoto is not null && !ReferenceEquals(photo.DuplicateStackPhoto, photo))
+        {
+            await photo.DuplicateStackPhoto.StartViewportLoadAsync(_imageCache, _imageHttpClient);
+        }
     }
 
     public void StopPhotoViewportLoad(AlbumPhotoViewModel photo)
@@ -2053,6 +2094,53 @@ public partial class MainViewModel : ViewModelBase
     {
         photo.IsSelectedForBulk = !photo.IsSelectedForBulk;
         UpdateBulkPhotoSelectionState();
+    }
+
+    public async Task ShowDuplicatePhotoInViewerAsync(AlbumPhotoViewModel photo)
+    {
+        if (string.IsNullOrWhiteSpace(photo.DuplicateGroupId) || !_duplicateGroupsById.ContainsKey(photo.DuplicateGroupId))
+        {
+            return;
+        }
+
+        SelectViewedPhoto(photo);
+        IsPhotoViewerVisible = true;
+        IsPhotoViewerActionsVisible = true;
+        UpdatePhotoViewerDuplicateStripVisibility();
+        PhotoViewerTitle = photo.FileName;
+        PhotoViewerRotationDegrees = photo.RotationDegrees;
+        PhotoViewerStatus = "Loading";
+
+        try
+        {
+            _photoViewerCancellation?.Cancel();
+            _photoViewerCancellation?.Dispose();
+            _photoViewerCancellation = new CancellationTokenSource();
+            var cancellation = _photoViewerCancellation.Token;
+            PhotoViewerImage = await _imageCache.LoadOriginalBitmapAsync(
+                photo.AlbumId,
+                GetFullPhotoCacheFileName(photo),
+                photo.DownloadUrl,
+                _imageHttpClient,
+                cancellation);
+            PhotoViewerStatus = "Original loaded";
+            _ = PreloadPhotoViewerDuplicatePhotosAsync();
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            PhotoViewerStatus = ex.Message;
+        }
+    }
+
+    private async Task PreloadPhotoViewerDuplicatePhotosAsync()
+    {
+        foreach (var photo in PhotoViewerDuplicatePhotos.ToList())
+        {
+            await photo.StartViewportLoadAsync(_imageCache, _imageHttpClient);
+        }
     }
 
     public async Task DownloadSelectedPhotosAsync(string destinationDirectoryPath, bool asArchive)
@@ -2139,26 +2227,33 @@ public partial class MainViewModel : ViewModelBase
         var sourceCategory = _selectedViewedPhotoSourceCategory;
         var sourcePhotosBeforeChange = GetPhotosForCategory(sourceCategory).ToList();
         var changedPhotoIndex = sourcePhotosBeforeChange.FindIndex(photo => ReferenceEquals(photo, changedPhoto));
-        _selectedViewedPhoto.Category = category;
+        var photosToUpdate = GetDuplicateGroupMembers(changedPhoto).ToList();
+        foreach (var photo in photosToUpdate)
+        {
+            photo.Category = category;
+        }
 
         if (_feedbackSession is not null && _feedbackDatabase is not null)
         {
-            if (string.IsNullOrWhiteSpace(category))
+            foreach (var photo in photosToUpdate)
             {
-                await _reviewerFeedbackService.RemoveLocalDecisionAsync(
-                    _feedbackSession,
-                    _feedbackDatabase,
-                    _selectedViewedPhoto.PhotoId,
-                    CancellationToken.None);
-            }
-            else
-            {
-                await _reviewerFeedbackService.SaveLocalDecisionAsync(
-                    _feedbackSession,
-                    _feedbackDatabase,
-                    _selectedViewedPhoto.PhotoId,
-                    category,
-                    CancellationToken.None);
+                if (string.IsNullOrWhiteSpace(category))
+                {
+                    await _reviewerFeedbackService.RemoveLocalDecisionAsync(
+                        _feedbackSession,
+                        _feedbackDatabase,
+                        photo.PhotoId,
+                        CancellationToken.None);
+                }
+                else
+                {
+                    await _reviewerFeedbackService.SaveLocalDecisionAsync(
+                        _feedbackSession,
+                        _feedbackDatabase,
+                        photo.PhotoId,
+                        category,
+                        CancellationToken.None);
+                }
             }
             _ = SyncFeedbackAsync();
         }
@@ -2208,7 +2303,12 @@ public partial class MainViewModel : ViewModelBase
             return;
         }
 
-        foreach (var photo in photos)
+        var photosToUpdate = photos
+            .SelectMany(GetDuplicateGroupMembers)
+            .Distinct()
+            .ToList();
+
+        foreach (var photo in photosToUpdate)
         {
             photo.Category = category;
             if (_feedbackSession is null || _feedbackDatabase is null)
@@ -2287,6 +2387,102 @@ public partial class MainViewModel : ViewModelBase
         Status = degrees < 0
             ? $"Rotated {photos.Count} selected photo(s) left."
             : $"Rotated {photos.Count} selected photo(s) right.";
+    }
+
+    private async Task MarkSelectedPhotosAsDuplicatesCoreAsync()
+    {
+        var photos = GetSelectedPhotos()
+            .SelectMany(GetDuplicateGroupMembers)
+            .Distinct()
+            .ToList();
+        if (photos.Count < 2 || photos.Any(photo => photo.IsFrozen) || _feedbackSession is null || _feedbackDatabase is null)
+        {
+            return;
+        }
+
+        var category = GetHighestPriorityCategory(photos.Select(photo => photo.Category));
+        foreach (var photo in photos)
+        {
+            photo.Category = category;
+            if (string.IsNullOrWhiteSpace(category))
+            {
+                await _reviewerFeedbackService.RemoveLocalDecisionAsync(
+                    _feedbackSession,
+                    _feedbackDatabase,
+                    photo.PhotoId,
+                    CancellationToken.None);
+            }
+            else
+            {
+                await _reviewerFeedbackService.SaveLocalDecisionAsync(
+                    _feedbackSession,
+                    _feedbackDatabase,
+                    photo.PhotoId,
+                    category,
+                    CancellationToken.None);
+            }
+        }
+
+        await _reviewerFeedbackService.SaveLocalDuplicateGroupAsync(
+            _feedbackSession,
+            _feedbackDatabase,
+            photos.Select(photo => photo.PhotoId).ToList(),
+            CancellationToken.None);
+
+        _ = SyncFeedbackAsync();
+        ClearBulkPhotoSelection();
+        ApplyDuplicateGroupsToPhotos();
+        RebuildCategoryRows();
+        UpdateCurrentPhotoActionVisibility();
+        Status = $"Marked {photos.Count} photo(s) as duplicates.";
+    }
+
+    private async Task RemoveCurrentPhotoFromDuplicatesCoreAsync()
+    {
+        if (_selectedViewedPhoto is null || _feedbackSession is null || _feedbackDatabase is null || string.IsNullOrWhiteSpace(_selectedViewedPhoto.DuplicateGroupId))
+        {
+            return;
+        }
+
+        var photo = _selectedViewedPhoto;
+        await _reviewerFeedbackService.RemoveLocalPhotoFromDuplicateGroupAsync(
+            _feedbackSession,
+            _feedbackDatabase,
+            photo.PhotoId,
+            CancellationToken.None);
+
+        _ = SyncFeedbackAsync();
+        ApplyDuplicateGroupsToPhotos();
+        RebuildCategoryRows();
+        SelectViewedPhoto(photo);
+        Status = $"{photo.FileName} removed from duplicates.";
+    }
+
+    private async Task ToggleCurrentPhotoBestInDuplicateGroupCoreAsync()
+    {
+        if (_selectedViewedPhoto is null || _feedbackSession is null || _feedbackDatabase is null || string.IsNullOrWhiteSpace(_selectedViewedPhoto.DuplicateGroupId))
+        {
+            return;
+        }
+
+        var photo = _selectedViewedPhoto;
+        var groupId = photo.DuplicateGroupId;
+        var isBest = !photo.IsBestInDuplicateGroup;
+        await _reviewerFeedbackService.SetLocalDuplicateGroupBestPhotoAsync(
+            _feedbackSession,
+            _feedbackDatabase,
+            groupId,
+            photo.PhotoId,
+            isBest,
+            CancellationToken.None);
+
+        _ = SyncFeedbackAsync();
+        ApplyDuplicateGroupsToPhotos();
+        RebuildCategoryRows();
+        SelectViewedPhoto(photo);
+        Status = isBest
+            ? $"{photo.FileName} marked as best in the group."
+            : $"{photo.FileName} unmarked as best in the group.";
     }
 
     partial void OnPhotoViewerImageChanging(Bitmap? value)
@@ -2908,10 +3104,62 @@ public partial class MainViewModel : ViewModelBase
             ? Photos.Count(photo => !photo.IsFrozen)
             : 0;
 
+        ApplyDuplicateGroupsToPhotos();
         RebuildCategoryRows();
         if (_selectedViewedPhoto is not null)
         {
             PhotoViewerRotationDegrees = _selectedViewedPhoto.RotationDegrees;
+        }
+    }
+
+    private void ApplyDuplicateGroupsToPhotos()
+    {
+        _duplicateGroupsById.Clear();
+        foreach (var photo in Photos)
+        {
+            photo.IsDuplicateGroupMain = false;
+            photo.DuplicateGroupId = "";
+            photo.DuplicateGroupCount = 0;
+            photo.DuplicateStackPhoto = null;
+            photo.IsBestInDuplicateGroup = false;
+        }
+
+        if (_feedbackDatabase is null)
+        {
+            return;
+        }
+
+        var photosById = Photos.ToDictionary(photo => photo.PhotoId, StringComparer.Ordinal);
+        foreach (var group in _feedbackDatabase.DuplicateGroups)
+        {
+            var members = group.PhotoIds
+                .Distinct(StringComparer.Ordinal)
+                .Select(photoId => photosById.TryGetValue(photoId, out var photo) ? photo : null)
+                .OfType<AlbumPhotoViewModel>()
+                .ToList();
+            if (members.Count < 2)
+            {
+                continue;
+            }
+
+            var groupId = string.IsNullOrWhiteSpace(group.Id) ? Guid.NewGuid().ToString("N") : group.Id;
+            var bestPhoto = members.FirstOrDefault(photo => string.Equals(photo.PhotoId, group.BestPhotoId, StringComparison.Ordinal));
+            var mainPhoto = bestPhoto ?? members[0];
+            var orderedMembers = new[] { mainPhoto }
+                .Concat(members.Where(photo => !ReferenceEquals(photo, mainPhoto)))
+                .ToList();
+            _duplicateGroupsById[groupId] = orderedMembers;
+            var category = GetHighestPriorityCategory(members.Select(photo => photo.Category));
+            foreach (var member in members)
+            {
+                member.DuplicateGroupId = groupId;
+                member.DuplicateGroupCount = members.Count;
+                member.DuplicateStackPhoto = orderedMembers.LastOrDefault(photo => !ReferenceEquals(photo, mainPhoto));
+                member.IsBestInDuplicateGroup = ReferenceEquals(member, bestPhoto);
+                member.Category = category;
+            }
+
+            mainPhoto.IsDuplicateGroupMain = true;
         }
     }
 
@@ -2925,10 +3173,11 @@ public partial class MainViewModel : ViewModelBase
     private void RebuildCategoryRows()
     {
         ClearCategoryRows();
-        AddGroups(UncategorizedPhotoGroups, Photos.Where(photo => string.IsNullOrWhiteSpace(photo.Category)));
-        AddGroups(NicePhotoGroups, Photos.Where(photo => string.Equals(photo.Category, "nice", StringComparison.Ordinal)));
-        AddGroups(OkPhotoGroups, Photos.Where(photo => string.Equals(photo.Category, "ok", StringComparison.Ordinal)));
-        AddGroups(TrashPhotoGroups, Photos.Where(photo => string.Equals(photo.Category, "trash", StringComparison.Ordinal)));
+        var visiblePhotos = GetVisiblePhotos().ToList();
+        AddGroups(UncategorizedPhotoGroups, visiblePhotos.Where(photo => string.IsNullOrWhiteSpace(photo.Category)));
+        AddGroups(NicePhotoGroups, visiblePhotos.Where(photo => string.Equals(photo.Category, "nice", StringComparison.Ordinal)));
+        AddGroups(OkPhotoGroups, visiblePhotos.Where(photo => string.Equals(photo.Category, "ok", StringComparison.Ordinal)));
+        AddGroups(TrashPhotoGroups, visiblePhotos.Where(photo => string.Equals(photo.Category, "trash", StringComparison.Ordinal)));
         OnPropertyChanged(nameof(UncategorizedTabHeader));
         OnPropertyChanged(nameof(NiceTabHeader));
         OnPropertyChanged(nameof(OkTabHeader));
@@ -3196,6 +3445,17 @@ public partial class MainViewModel : ViewModelBase
             _selectedViewedPhoto.IsSelectedForViewing = true;
         }
 
+        PhotoViewerDuplicatePhotos.Clear();
+        if (_selectedViewedPhoto is not null &&
+            !string.IsNullOrWhiteSpace(_selectedViewedPhoto.DuplicateGroupId) &&
+            _duplicateGroupsById.TryGetValue(_selectedViewedPhoto.DuplicateGroupId, out var members))
+        {
+            foreach (var member in members)
+            {
+                PhotoViewerDuplicatePhotos.Add(member);
+            }
+        }
+
         UpdateCurrentPhotoActionVisibility();
     }
 
@@ -3214,6 +3474,15 @@ public partial class MainViewModel : ViewModelBase
         CanShowCurrentPhotoTrashAction = ShouldShowCurrentPhotoTrashAction;
         CanNavigatePhotoViewerCategory = _selectedViewedPhoto is not null && GetPhotosForCategory(category).Any();
         CanDownloadCurrentPhoto = _selectedViewedPhoto is not null;
+        CanRemoveCurrentPhotoFromDuplicates = _selectedViewedPhoto is not null &&
+            !string.IsNullOrWhiteSpace(_selectedViewedPhoto.DuplicateGroupId);
+        IsCurrentPhotoBestInDuplicateGroup = _selectedViewedPhoto?.IsBestInDuplicateGroup == true;
+        UpdatePhotoViewerDuplicateStripVisibility();
+    }
+
+    private void UpdatePhotoViewerDuplicateStripVisibility()
+    {
+        IsPhotoViewerDuplicateStripVisible = IsPhotoViewerActionsVisible && CanRemoveCurrentPhotoFromDuplicates;
     }
 
     private void UpdateBulkPhotoSelectionState()
@@ -3244,6 +3513,13 @@ public partial class MainViewModel : ViewModelBase
         CanShowSelectedPhotosTrashAction = ShouldShowSelectedPhotosTrashAction;
         CanDownloadSelectedPhotos = selectedPhotos.Count > 0;
         CanRotateSelectedPhotos = selectedPhotos.Count > 0;
+        var selectedPhotosWithDuplicateMembers = selectedPhotos
+            .SelectMany(GetDuplicateGroupMembers)
+            .Distinct()
+            .ToList();
+        CanMarkSelectedPhotosAsDuplicates = selectedPhotosWithDuplicateMembers.Count >= 2 &&
+            CanModifyFeedback &&
+            selectedPhotosWithDuplicateMembers.All(photo => !photo.IsFrozen);
     }
 
     private bool CanApplyBulkCategory(string category, IReadOnlyList<AlbumPhotoViewModel> selectedPhotos)
@@ -3253,7 +3529,12 @@ public partial class MainViewModel : ViewModelBase
             return false;
         }
 
-        return selectedPhotos.All(photo =>
+        var actionPhotos = selectedPhotos
+            .SelectMany(GetDuplicateGroupMembers)
+            .Distinct()
+            .ToList();
+
+        return actionPhotos.All(photo =>
             !photo.IsFrozen &&
             (string.IsNullOrWhiteSpace(category)
                 ? !string.IsNullOrWhiteSpace(photo.Category)
@@ -3321,8 +3602,9 @@ public partial class MainViewModel : ViewModelBase
             return;
         }
 
-        var uncategorizedCount = Photos.Count(photo => !photo.IsFrozen && string.IsNullOrWhiteSpace(photo.Category));
-        var niceCount = Photos.Count(photo => string.Equals(photo.Category, "nice", StringComparison.Ordinal));
+        var visiblePhotos = GetVisiblePhotos().ToList();
+        var uncategorizedCount = visiblePhotos.Count(photo => !photo.IsFrozen && string.IsNullOrWhiteSpace(photo.Category));
+        var niceCount = visiblePhotos.Count(photo => string.Equals(photo.Category, "nice", StringComparison.Ordinal));
         var targetNiceCount = _currentManifest?.TargetNicePhotoCount ?? Math.Max(0, TargetNicePhotoCount);
 
         if (niceCount != targetNiceCount)
@@ -3360,7 +3642,11 @@ public partial class MainViewModel : ViewModelBase
             return;
         }
 
-        var currentIndex = categoryPhotos.FindIndex(photo => ReferenceEquals(photo, _selectedViewedPhoto));
+        var currentPhotoForNavigation = !string.IsNullOrWhiteSpace(_selectedViewedPhoto.DuplicateGroupId) &&
+            _duplicateGroupsById.TryGetValue(_selectedViewedPhoto.DuplicateGroupId, out var members)
+                ? members.FirstOrDefault(photo => photo.IsDuplicateGroupMain) ?? _selectedViewedPhoto
+                : _selectedViewedPhoto;
+        var currentIndex = categoryPhotos.FindIndex(photo => ReferenceEquals(photo, currentPhotoForNavigation));
         if (currentIndex < 0)
         {
             currentIndex = 0;
@@ -3393,14 +3679,49 @@ public partial class MainViewModel : ViewModelBase
 
     private IEnumerable<AlbumPhotoViewModel> GetPhotosForCategory(string category)
     {
+        var photos = GetVisiblePhotos();
         return string.IsNullOrWhiteSpace(category)
-            ? Photos.Where(photo => string.IsNullOrWhiteSpace(photo.Category))
-            : Photos.Where(photo => string.Equals(photo.Category, category, StringComparison.Ordinal));
+            ? photos.Where(photo => string.IsNullOrWhiteSpace(photo.Category))
+            : photos.Where(photo => string.Equals(photo.Category, category, StringComparison.Ordinal));
     }
 
     private IEnumerable<AlbumPhotoViewModel> GetSelectedPhotos()
     {
         return Photos.Where(photo => photo.IsSelectedForBulk);
+    }
+
+    private IEnumerable<AlbumPhotoViewModel> GetVisiblePhotos()
+    {
+        return Photos.Where(photo => string.IsNullOrWhiteSpace(photo.DuplicateGroupId) || photo.IsDuplicateGroupMain);
+    }
+
+    private IEnumerable<AlbumPhotoViewModel> GetDuplicateGroupMembers(AlbumPhotoViewModel photo)
+    {
+        return !string.IsNullOrWhiteSpace(photo.DuplicateGroupId) &&
+            _duplicateGroupsById.TryGetValue(photo.DuplicateGroupId, out var members)
+                ? members
+                : [photo];
+    }
+
+    private static string GetHighestPriorityCategory(IEnumerable<string> categories)
+    {
+        var categoryList = categories.ToList();
+        if (categoryList.Any(category => string.Equals(category, "nice", StringComparison.Ordinal)))
+        {
+            return "nice";
+        }
+
+        if (categoryList.Any(category => string.Equals(category, "ok", StringComparison.Ordinal)))
+        {
+            return "ok";
+        }
+
+        if (categoryList.Any(category => string.Equals(category, "trash", StringComparison.Ordinal)))
+        {
+            return "trash";
+        }
+
+        return "";
     }
 
     private void ClearBulkPhotoSelection()

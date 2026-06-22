@@ -388,6 +388,17 @@ public partial class MainView : UserControl
         }
     }
 
+    private async void DuplicatePhotoViewerItem_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is MainViewModel viewModel &&
+            sender is Control { DataContext: AlbumPhotoViewModel photo })
+        {
+            await viewModel.ShowDuplicatePhotoInViewerAsync(photo);
+            await Dispatcher.UIThread.InvokeAsync(ResetPhotoViewerZoom, DispatcherPriority.Render);
+            e.Handled = true;
+        }
+    }
+
     private void AlbumReviewTabs_SelectionChanged(object? sender, SelectionChangedEventArgs e)
     {
         if (DataContext is MainViewModel viewModel &&

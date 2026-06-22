@@ -45,6 +45,36 @@
                     </Image.RenderTransform>
                   </Image>
                 </Button>
+                <Border Width="72"
+                        Height="54"
+                        Margin="0,0,8,8"
+                        HorizontalAlignment="Right"
+                        VerticalAlignment="Bottom"
+                        Background="#E627343B"
+                        BorderBrush="White"
+                        BorderThickness="1"
+                        IsVisible="{Binding HasDuplicateGroup}">
+                  <Grid>
+                    <Border Margin="8,4,0,0"
+                            Background="#9AD9E5E8"
+                            BorderBrush="#27343B"
+                            BorderThickness="1"/>
+                    <Border Margin="4,8,4,4"
+                            Background="#D9FFFFFF"
+                            BorderBrush="#27343B"
+                            BorderThickness="1"
+                            ClipToBounds="True">
+                      <Image Source="{Binding DuplicateStackPhoto.Image}"
+                             Stretch="UniformToFill"/>
+                    </Border>
+                    <TextBlock Text="{Binding DuplicateGroupCountText}"
+                               HorizontalAlignment="Center"
+                               VerticalAlignment="Center"
+                               FontSize="20"
+                               FontWeight="Bold"
+                               Foreground="White"/>
+                  </Grid>
+                </Border>
                 <Button HorizontalAlignment="Right"
                         VerticalAlignment="Top"
                         MinWidth="38"
@@ -903,6 +933,9 @@
                         <MenuItem Header="Rotate right"
                                   Command="{Binding RotateSelectedPhotosRightCommand}"
                                   IsEnabled="{Binding CanRotateSelectedPhotos}"/>
+                        <MenuItem Header="Mark as duplicates"
+                                  Command="{Binding MarkSelectedPhotosAsDuplicatesCommand}"
+                                  IsEnabled="{Binding CanMarkSelectedPhotosAsDuplicates}"/>
                         <MenuItem Header="Trash"
                                   Command="{Binding MarkSelectedPhotosTrashCommand}"
                                   IsVisible="{Binding CanShowSelectedPhotosTrashAction}"
@@ -1486,6 +1519,58 @@
             </ScrollViewer>
             <Border Background="#99000000"
                     CornerRadius="6"
+                    Padding="8"
+                    Margin="0,0,0,92"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Bottom"
+                    IsVisible="{Binding IsPhotoViewerDuplicateStripVisible}">
+              <ItemsControl ItemsSource="{Binding PhotoViewerDuplicatePhotos}">
+                <ItemsControl.ItemsPanel>
+                  <ItemsPanelTemplate>
+                    <StackPanel Orientation="Horizontal"/>
+                  </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="vm:AlbumPhotoViewModel">
+                    <Button Width="68"
+                            Height="52"
+                            Margin="0,0,6,0"
+                            Padding="0"
+                            Click="DuplicatePhotoViewerItem_Click"
+                            BorderBrush="{Binding CardBorderBrush}"
+                            BorderThickness="{Binding CardBorderThickness}"
+                            ClipToBounds="True">
+                      <Grid>
+                        <Image Source="{Binding Image}"
+                               Stretch="UniformToFill"
+                               RenderTransformOrigin="50%,50%">
+                          <Image.RenderTransform>
+                            <RotateTransform Angle="{Binding RotationDegrees}"/>
+                          </Image.RenderTransform>
+                        </Image>
+                        <Border Width="22"
+                                Height="22"
+                                HorizontalAlignment="Right"
+                                VerticalAlignment="Bottom"
+                                Background="#1E8E3E"
+                                BorderBrush="White"
+                                BorderThickness="1"
+                                IsVisible="{Binding IsBestMarkerVisible}">
+                          <TextBlock Text="V"
+                                     Foreground="White"
+                                     FontSize="16"
+                                     FontWeight="Bold"
+                                     HorizontalAlignment="Center"
+                                     VerticalAlignment="Center"/>
+                        </Border>
+                      </Grid>
+                    </Button>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </Border>
+            <Border Background="#99000000"
+                    CornerRadius="6"
                     Padding="10"
                     Margin="0,0,0,18"
                     HorizontalAlignment="Center"
@@ -1588,6 +1673,18 @@
                                 Command="{Binding MarkCurrentPhotoTrashCommand}"
                                 IsVisible="{Binding CanShowCurrentPhotoTrashAction}"
                                 IsEnabled="{Binding CanMarkCurrentPhotoTrash}"/>
+                      <MenuItem Header="Remove from duplicates"
+                                Command="{Binding RemoveCurrentPhotoFromDuplicatesCommand}"
+                                IsEnabled="{Binding CanRemoveCurrentPhotoFromDuplicates}"/>
+                      <MenuItem Command="{Binding ToggleCurrentPhotoBestInDuplicateGroupCommand}"
+                                IsEnabled="{Binding CanRemoveCurrentPhotoFromDuplicates}">
+                        <MenuItem.Header>
+                          <CheckBox IsChecked="{Binding IsCurrentPhotoBestInDuplicateGroup}"
+                                    IsHitTestVisible="False">
+                            Best in the group
+                          </CheckBox>
+                        </MenuItem.Header>
+                      </MenuItem>
                       <MenuItem Header="Download..."
                                 Click="DownloadCurrentPhoto_Click"
                                 IsEnabled="{Binding CanDownloadCurrentPhoto}"/>

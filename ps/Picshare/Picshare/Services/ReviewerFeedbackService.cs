@@ -142,6 +142,94 @@ public sealed class ReviewerFeedbackService
         session.State = state;
     }
 
+    public async Task SaveLocalDuplicateGroupAsync(
+        ReviewerFeedbackSession session,
+        ReviewerFeedbackDatabase database,
+        IReadOnlyList<string> photoIds,
+        CancellationToken cancellationToken)
+    {
+        var normalizedPhotoIds = photoIds
+            .Where(photoId => !string.IsNullOrWhiteSpace(photoId))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        if (normalizedPhotoIds.Count < 2)
+        {
+            return;
+        }
+
+        var normalizedSet = normalizedPhotoIds.ToHashSet(StringComparer.Ordinal);
+        var bestPhotoId = database.DuplicateGroups
+            .Where(group => group.PhotoIds.Any(normalizedSet.Contains) &&
+                normalizedSet.Contains(group.BestPhotoId))
+            .Select(group => group.BestPhotoId)
+            .FirstOrDefault() ?? "";
+        database.DuplicateGroups.RemoveAll(group => group.PhotoIds.Any(normalizedSet.Contains));
+        database.DuplicateGroups.Add(new DuplicatePhotoGroup
+        {
+            Id = Guid.NewGuid().ToString("N"),
+            PhotoIds = normalizedPhotoIds,
+            BestPhotoId = bestPhotoId
+        });
+
+        database.UpdatedAt = DateTimeOffset.UtcNow;
+        var state = session.State;
+        state.LocalDirty = true;
+
+        await SaveLocalDatabaseAsync(session.LocalFolderPath, database, cancellationToken);
+        await SaveLocalStateAsync(session.LocalFolderPath, state, cancellationToken);
+        session.State = state;
+    }
+
+    public async Task RemoveLocalPhotoFromDuplicateGroupAsync(
+        ReviewerFeedbackSession session,
+        ReviewerFeedbackDatabase database,
+        string photoId,
+        CancellationToken cancellationToken)
+    {
+        foreach (var group in database.DuplicateGroups)
+        {
+            group.PhotoIds.RemoveAll(id => string.Equals(id, photoId, StringComparison.Ordinal));
+            if (string.Equals(group.BestPhotoId, photoId, StringComparison.Ordinal))
+            {
+                group.BestPhotoId = "";
+            }
+        }
+
+        database.DuplicateGroups.RemoveAll(group => group.PhotoIds.Distinct(StringComparer.Ordinal).Count() < 2);
+        database.UpdatedAt = DateTimeOffset.UtcNow;
+        var state = session.State;
+        state.LocalDirty = true;
+
+        await SaveLocalDatabaseAsync(session.LocalFolderPath, database, cancellationToken);
+        await SaveLocalStateAsync(session.LocalFolderPath, state, cancellationToken);
+        session.State = state;
+    }
+
+    public async Task SetLocalDuplicateGroupBestPhotoAsync(
+        ReviewerFeedbackSession session,
+        ReviewerFeedbackDatabase database,
+        string groupId,
+        string photoId,
+        bool isBest,
+        CancellationToken cancellationToken)
+    {
+        var group = database.DuplicateGroups.FirstOrDefault(candidate =>
+            string.Equals(candidate.Id, groupId, StringComparison.Ordinal));
+        if (group is null || !group.PhotoIds.Contains(photoId, StringComparer.Ordinal))
+        {
+            return;
+        }
+
+        group.BestPhotoId = isBest ? photoId : "";
+        database.UpdatedAt = DateTimeOffset.UtcNow;
+        var state = session.State;
+        state.LocalDirty = true;
+
+        await SaveLocalDatabaseAsync(session.LocalFolderPath, database, cancellationToken);
+        await SaveLocalStateAsync(session.LocalFolderPath, state, cancellationToken);
+        session.State = state;
+    }
+
     public async Task<ReviewerFeedbackSyncResult> SyncAsync(
         ReviewerFeedbackSession session,
         ReviewerFeedbackDatabase localDatabase,
@@ -360,6 +448,13 @@ public sealed class ReviewerFeedbackService
             mergedCategories[photo.Id] = allTrash ? "trash" : "ok";
             frozenPhotoIds.Add(photo.Id);
         }
+
+        ResolveDuplicateGroups(
+            committedDatabases,
+            manifest.Photos.Select(photo => photo.Id).ToList(),
+            mergedCategories,
+            photoScores,
+            frozenPhotoIds);
 
         var nicePhotoIds = manifest.Photos
             .Select(photo => photo.Id)
@@ -858,6 +953,129 @@ public sealed class ReviewerFeedbackService
             .OrderBy(item => item.UpdatedAt)
             .ThenBy(item => item.Reviewer.DisplayLabel, StringComparer.OrdinalIgnoreCase)
             .ToList();
+    }
+
+    private static void ResolveDuplicateGroups(
+        IReadOnlyList<ReviewerFeedbackDatabase> committedDatabases,
+        IReadOnlyList<string> manifestPhotoIds,
+        Dictionary<string, string> mergedCategories,
+        Dictionary<string, int> photoScores,
+        HashSet<string> frozenPhotoIds)
+    {
+        var manifestPhotoIdSet = manifestPhotoIds.ToHashSet(StringComparer.Ordinal);
+        var reviewerGroups = committedDatabases
+            .SelectMany((database, reviewerIndex) => database.DuplicateGroups
+                .Select(group => new
+                {
+                    ReviewerIndex = reviewerIndex,
+                    BestPhotoId = group.BestPhotoId,
+                    PhotoIds = group.PhotoIds
+                        .Where(manifestPhotoIdSet.Contains)
+                        .Distinct(StringComparer.Ordinal)
+                        .ToHashSet(StringComparer.Ordinal)
+                })
+                .Where(group => group.PhotoIds.Count > 1))
+            .ToList();
+        if (reviewerGroups.Count == 0)
+        {
+            return;
+        }
+
+        var survivedGroups = new List<HashSet<string>>();
+        if (committedDatabases.Count == 1)
+        {
+            survivedGroups.AddRange(reviewerGroups.Select(group => group.PhotoIds));
+        }
+        else
+        {
+            for (var left = 0; left < reviewerGroups.Count; left++)
+            {
+                for (var right = left + 1; right < reviewerGroups.Count; right++)
+                {
+                    if (reviewerGroups[left].ReviewerIndex == reviewerGroups[right].ReviewerIndex)
+                    {
+                        continue;
+                    }
+
+                    var intersection = reviewerGroups[left].PhotoIds.Intersect(reviewerGroups[right].PhotoIds, StringComparer.Ordinal).ToHashSet(StringComparer.Ordinal);
+                    if (intersection.Count > 1 && !survivedGroups.Any(group => group.SetEquals(intersection)))
+                    {
+                        survivedGroups.Add(intersection);
+                    }
+                }
+            }
+        }
+
+        survivedGroups = survivedGroups
+            .Where(group => !survivedGroups.Any(other => !ReferenceEquals(group, other) && other.Count > group.Count && group.IsSubsetOf(other)))
+            .ToList();
+
+        foreach (var group in survivedGroups)
+        {
+            var category = GetHighestPriorityCategory(group.Select(photoId => mergedCategories.TryGetValue(photoId, out var value) ? value : ""));
+            if (string.Equals(category, "trash", StringComparison.Ordinal))
+            {
+                foreach (var photoId in group)
+                {
+                    mergedCategories[photoId] = "trash";
+                    frozenPhotoIds.Add(photoId);
+                }
+
+                continue;
+            }
+
+            if (!string.Equals(category, "nice", StringComparison.Ordinal) &&
+                !string.Equals(category, "ok", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var bestVotes = group.ToDictionary(
+                photoId => photoId,
+                photoId => reviewerGroups.Count(reviewerGroup =>
+                    reviewerGroup.PhotoIds.IsSupersetOf(group) &&
+                    string.Equals(reviewerGroup.BestPhotoId, photoId, StringComparison.Ordinal)),
+                StringComparer.Ordinal);
+            var winner = group
+                .OrderByDescending(photoId => bestVotes.TryGetValue(photoId, out var votes) ? votes : 0)
+                .ThenByDescending(photoId => photoScores.TryGetValue(photoId, out var score) ? score : 0)
+                .ThenBy(photoId => StableTieBreaker(photoId))
+                .First();
+
+            foreach (var photoId in group)
+            {
+                mergedCategories[photoId] = string.Equals(photoId, winner, StringComparison.Ordinal)
+                    ? category
+                    : "trash";
+                frozenPhotoIds.Add(photoId);
+            }
+        }
+    }
+
+    private static string GetHighestPriorityCategory(IEnumerable<string> categories)
+    {
+        var categoryList = categories.ToList();
+        if (categoryList.Any(category => string.Equals(category, "nice", StringComparison.Ordinal)))
+        {
+            return "nice";
+        }
+
+        if (categoryList.Any(category => string.Equals(category, "ok", StringComparison.Ordinal)))
+        {
+            return "ok";
+        }
+
+        if (categoryList.Any(category => string.Equals(category, "trash", StringComparison.Ordinal)))
+        {
+            return "trash";
+        }
+
+        return "";
+    }
+
+    private static int StableTieBreaker(string value)
+    {
+        return StringComparer.Ordinal.GetHashCode(value);
     }
 
     private static ReviewerFeedbackDatabase CreateEmptyDatabase(string albumId, string reviewerUserId)

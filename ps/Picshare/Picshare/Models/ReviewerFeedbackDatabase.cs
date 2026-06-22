@@ -21,6 +21,17 @@ public sealed class ReviewerFeedbackDatabase
     public HashSet<string> FrozenPhotoIds { get; set; } = new(StringComparer.Ordinal);
 
     public Dictionary<string, int> PhotoRotations { get; set; } = new(StringComparer.Ordinal);
+
+    public List<DuplicatePhotoGroup> DuplicateGroups { get; set; } = new();
+}
+
+public sealed class DuplicatePhotoGroup
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+
+    public List<string> PhotoIds { get; set; } = new();
+
+    public string BestPhotoId { get; set; } = "";
 }
 
 public sealed class ReviewerFeedbackLocalState

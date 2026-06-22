@@ -69,6 +69,27 @@ public partial class AlbumPhotoViewModel : ObservableObject
     [ObservableProperty]
     private bool _isSelectedForBulk;
 
+    [ObservableProperty]
+    private bool _isDuplicateGroupMain;
+
+    [ObservableProperty]
+    private string _duplicateGroupId = "";
+
+    [ObservableProperty]
+    private int _duplicateGroupCount;
+
+    [ObservableProperty]
+    private AlbumPhotoViewModel? _duplicateStackPhoto;
+
+    [ObservableProperty]
+    private bool _isBestInDuplicateGroup;
+
+    public bool HasDuplicateGroup => IsDuplicateGroupMain && DuplicateGroupCount > 1;
+
+    public string DuplicateGroupCountText => DuplicateGroupCount > 1 ? DuplicateGroupCount.ToString() : "";
+
+    public bool IsBestMarkerVisible => IsBestInDuplicateGroup;
+
     public IBrush CardBorderBrush => IsSelectedForViewing
         ? Brushes.DeepSkyBlue
         : IsSelectedForBulk
@@ -217,5 +238,21 @@ public partial class AlbumPhotoViewModel : ObservableObject
         OnPropertyChanged(nameof(SelectionGlyph));
         OnPropertyChanged(nameof(SelectionBackground));
         OnPropertyChanged(nameof(SelectionForeground));
+    }
+
+    partial void OnIsDuplicateGroupMainChanged(bool value)
+    {
+        OnPropertyChanged(nameof(HasDuplicateGroup));
+    }
+
+    partial void OnDuplicateGroupCountChanged(int value)
+    {
+        OnPropertyChanged(nameof(HasDuplicateGroup));
+        OnPropertyChanged(nameof(DuplicateGroupCountText));
+    }
+
+    partial void OnIsBestInDuplicateGroupChanged(bool value)
+    {
+        OnPropertyChanged(nameof(IsBestMarkerVisible));
     }
 }
