@@ -153,6 +153,32 @@ public partial class MainView : UserControl
         }
     }
 
+    private async void DownloadSelectedPhotos_Click(object? sender, RoutedEventArgs e)
+    {
+        await DownloadSelectedPhotosAsync(asArchive: false);
+    }
+
+    private async void DownloadSelectedPhotosArchive_Click(object? sender, RoutedEventArgs e)
+    {
+        await DownloadSelectedPhotosAsync(asArchive: true);
+    }
+
+    private async Task DownloadSelectedPhotosAsync(bool asArchive)
+    {
+        if (DataContext is MainViewModel viewModel && TopLevel.GetTopLevel(this) is { } topLevel)
+        {
+            var folders = await OpenSingleFolderPickerAsync(
+                topLevel,
+                asArchive ? "Choose archive destination folder" : "Choose download folder",
+                viewModel.PictureDefaultDownloadDirectoryPath);
+
+            if (folders.Count > 0)
+            {
+                await viewModel.DownloadSelectedPhotosAsync(folders[0].TryGetLocalPath() ?? "", asArchive);
+            }
+        }
+    }
+
     private async void ChooseAlbumDownloadCategoryDestination_Click(object? sender, RoutedEventArgs e)
     {
         if (sender is not Control { DataContext: AlbumDownloadCategoryViewModel category } ||
@@ -349,6 +375,16 @@ public partial class MainView : UserControl
         {
             await viewModel.OpenPhotoViewerAsync(photo);
             await Dispatcher.UIThread.InvokeAsync(ResetPhotoViewerZoom, DispatcherPriority.Render);
+        }
+    }
+
+    private void AlbumPhotoSelection_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is MainViewModel viewModel &&
+            sender is Control { DataContext: AlbumPhotoViewModel photo })
+        {
+            viewModel.TogglePhotoSelection(photo);
+            e.Handled = true;
         }
     }
 

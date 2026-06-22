@@ -66,13 +66,26 @@ public partial class AlbumPhotoViewModel : ObservableObject
     [ObservableProperty]
     private int _rotationDegrees;
 
+    [ObservableProperty]
+    private bool _isSelectedForBulk;
+
     public IBrush CardBorderBrush => IsSelectedForViewing
         ? Brushes.DeepSkyBlue
+        : IsSelectedForBulk
+            ? Brushes.ForestGreen
         : new SolidColorBrush(Color.Parse("#D6D8D1"));
 
     public Thickness CardBorderThickness => IsSelectedForViewing
         ? new Thickness(3)
+        : IsSelectedForBulk
+            ? new Thickness(3)
         : new Thickness(1);
+
+    public string SelectionGlyph => IsSelectedForBulk ? "On" : "+";
+
+    public IBrush SelectionBackground => IsSelectedForBulk ? Brushes.ForestGreen : Brushes.White;
+
+    public IBrush SelectionForeground => IsSelectedForBulk ? Brushes.White : Brushes.Black;
 
     private CancellationTokenSource? _loadCancellation;
     private bool _isLoading;
@@ -195,5 +208,14 @@ public partial class AlbumPhotoViewModel : ObservableObject
     {
         OnPropertyChanged(nameof(CardBorderBrush));
         OnPropertyChanged(nameof(CardBorderThickness));
+    }
+
+    partial void OnIsSelectedForBulkChanged(bool value)
+    {
+        OnPropertyChanged(nameof(CardBorderBrush));
+        OnPropertyChanged(nameof(CardBorderThickness));
+        OnPropertyChanged(nameof(SelectionGlyph));
+        OnPropertyChanged(nameof(SelectionBackground));
+        OnPropertyChanged(nameof(SelectionForeground));
     }
 }
