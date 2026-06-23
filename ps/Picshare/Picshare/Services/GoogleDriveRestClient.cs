@@ -109,6 +109,22 @@ public sealed class GoogleDriveRestClient
         return await JsonSerializer.DeserializeAsync<DriveItemPage>(stream, JsonOptions, cancellationToken) ?? new DriveItemPage();
     }
 
+    public async Task<IReadOnlyList<DriveItemInfo>> ListAllChildrenAsync(
+        string parentFolderId,
+        CancellationToken cancellationToken)
+    {
+        var children = new List<DriveItemInfo>();
+        string? pageToken = null;
+        do
+        {
+            var page = await ListChildrenAsync(parentFolderId, pageToken, 1000, cancellationToken);
+            children.AddRange(page.Files);
+            pageToken = page.NextPageToken;
+        } while (!string.IsNullOrWhiteSpace(pageToken));
+
+        return children;
+    }
+
     public async Task<DriveItemInfo?> FindChildByNameAsync(
         string parentFolderId,
         string name,

@@ -56,7 +56,11 @@ public sealed class LocalUserSettingsStore
 
 public sealed class LocalUserSettings
 {
+    public const int DefaultMaximumParallelism = 8;
+
     public string AnonymousReviewerName { get; set; } = "";
+
+    public int MaximumParallelism { get; set; } = DefaultMaximumParallelism;
 
     public string PictureDefaultDownloadDirectoryPath { get; set; } = "";
 

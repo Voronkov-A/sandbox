@@ -13,6 +13,12 @@ public partial class MainViewModel : ViewModelBase
 {
     private const string LocalToGoogleDriveAlbumTypeId = "local-to-google-drive";
     private const string LocalAlbumTypeId = "local-file-system";
+    private const string UncategorizedReviewTabId = "uncategorized";
+    private const string NiceReviewTabId = "nice";
+    private const string OkReviewTabId = "ok";
+    private const string TrashReviewTabId = "trash";
+    private const string UnresolvedDuplicatesReviewTabId = "unresolved-duplicates";
+    private const string FlowReviewTabId = "flow";
     private const int PhotosPerRow = 4;
     private const int MaxRecentAlbumCount = 10;
 
@@ -108,6 +114,9 @@ public partial class MainViewModel : ViewModelBase
 
     [ObservableProperty]
     private string _anonymousReviewerName = "";
+
+    [ObservableProperty]
+    private int _maximumParallelism = LocalUserSettings.DefaultMaximumParallelism;
 
     [ObservableProperty]
     private string _pictureDefaultDownloadDirectoryPath = "";
@@ -257,6 +266,42 @@ public partial class MainViewModel : ViewModelBase
     private int _albumDownloadProgressMaximum = 1;
 
     [ObservableProperty]
+    private bool _isAlbumCreationProgressVisible;
+
+    [ObservableProperty]
+    private string _albumCreationProgressMessage = "";
+
+    [ObservableProperty]
+    private int _albumCreationProgressValue;
+
+    [ObservableProperty]
+    private int _albumCreationProgressMaximum = 1;
+
+    [ObservableProperty]
+    private bool _isAlbumDeletionProgressVisible;
+
+    [ObservableProperty]
+    private string _albumDeletionProgressMessage = "";
+
+    [ObservableProperty]
+    private int _albumDeletionProgressValue;
+
+    [ObservableProperty]
+    private int _albumDeletionProgressMaximum = 1;
+
+    [ObservableProperty]
+    private bool _isCancelAlbumDeletionConfirmationVisible;
+
+    [ObservableProperty]
+    private string _cancelAlbumDeletionConfirmationMessage = "";
+
+    [ObservableProperty]
+    private bool _isClearAlbumDestinationConfirmationVisible;
+
+    [ObservableProperty]
+    private string _clearAlbumDestinationConfirmationMessage = "";
+
+    [ObservableProperty]
     private bool _canMarkCurrentPhotoUncategorized;
 
     [ObservableProperty]
@@ -392,7 +437,11 @@ public partial class MainViewModel : ViewModelBase
 
     public ObservableCollection<AlbumPhotoSourceViewModel> AlbumPhotos { get; } = new();
 
+    public ObservableCollection<AlbumPhotoSourceRowViewModel> AlbumPhotoRows { get; } = new();
+
     public ObservableCollection<AlbumPhotoSourceViewModel> ImportCandidates { get; } = new();
+
+    public ObservableCollection<AlbumPhotoSourceRowViewModel> ImportCandidateRows { get; } = new();
 
     public ObservableCollection<DriveItemViewModel> DriveItems { get; } = new();
 
@@ -409,6 +458,8 @@ public partial class MainViewModel : ViewModelBase
     public ObservableCollection<AlbumPhotoGroupViewModel> OkPhotoGroups { get; } = new();
 
     public ObservableCollection<AlbumPhotoGroupViewModel> TrashPhotoGroups { get; } = new();
+
+    public ObservableCollection<AlbumPhotoGroupViewModel> UnresolvedDuplicatePhotoGroups { get; } = new();
 
     public ObservableCollection<ReviewerFeedbackFlowItemViewModel> CommittedReviewers { get; } = new();
 
@@ -427,6 +478,10 @@ public partial class MainViewModel : ViewModelBase
     public string OkTabHeader => $"Ok ({GetVisiblePhotos().Count(photo => string.Equals(photo.Category, "ok", StringComparison.Ordinal))})";
 
     public string TrashTabHeader => $"Trash ({GetVisiblePhotos().Count(photo => string.Equals(photo.Category, "trash", StringComparison.Ordinal))})";
+
+    public string UnresolvedDuplicatesTabHeader => $"Unresolved duplicates ({GetUnresolvedDuplicatePhotos().Count()})";
+
+    public bool HasUnresolvedDuplicatePhotos => GetUnresolvedDuplicatePhotos().Any();
 
     public string FlowTabHeader => "Flow";
 
@@ -447,6 +502,7 @@ public partial class MainViewModel : ViewModelBase
     private readonly PicshareSettingsProvider _settingsProvider = new();
     private readonly LocalUserSettingsStore _localUserSettingsStore;
     private readonly AlbumOpenHistoryStore _albumOpenHistoryStore;
+    private readonly PersistentAlbumCreationService _albumCreationService;
     private readonly GoogleOAuthTokenStore _tokenStore;
     private readonly ReviewerFeedbackService _reviewerFeedbackService;
     private readonly ImageCacheService _imageCache;
@@ -460,16 +516,22 @@ public partial class MainViewModel : ViewModelBase
     private CancellationTokenSource? _feedbackSyncCancellation;
     private CancellationTokenSource? _flowMonitorCancellation;
     private CancellationTokenSource? _albumDownloadCancellation;
+    private CancellationTokenSource? _albumCreationCancellation;
+    private CancellationTokenSource? _albumDeletionCancellation;
+    private PendingAlbumCreation? _activePendingAlbumCreation;
+    private AlbumManifest? _activeDeletingAlbumManifest;
     private AlbumManifest? _currentManifest;
     private AlbumManifest? _pendingGoogleAuthorizationManifest;
     private AlbumPhotoViewModel? _selectedViewedPhoto;
     private string _selectedViewedPhotoSourceCategory = "";
+    private string _selectedViewedPhotoSourceReviewTabId = UncategorizedReviewTabId;
     private ReviewerFeedbackSession? _feedbackSession;
     private ReviewerFeedbackDatabase? _feedbackDatabase;
     private ReviewerFeedbackStatus? _feedbackStatus;
     private FeedbackReviewerIdentity? _currentReviewerIdentity;
     private readonly Dictionary<string, IReadOnlyList<AlbumPhotoViewModel>> _duplicateGroupsById = new(StringComparer.Ordinal);
     private bool _isFlowTabActive;
+    private string _activeReviewTabId = UncategorizedReviewTabId;
     private int _unfrozenCollectedPhotoCount;
     private bool _hasCollectedFeedback;
     private bool _isFeedbackFinalized;
@@ -483,6 +545,7 @@ public partial class MainViewModel : ViewModelBase
     {
         _localUserSettingsStore = new LocalUserSettingsStore(_settingsProvider.LocalStorageRootPath);
         _albumOpenHistoryStore = new AlbumOpenHistoryStore(_settingsProvider.LocalStorageRootPath);
+        _albumCreationService = new PersistentAlbumCreationService(_settingsProvider.LocalStorageRootPath);
         _tokenStore = new GoogleOAuthTokenStore(_settingsProvider.LocalStorageRootPath);
         _reviewerFeedbackService = new ReviewerFeedbackService(_settingsProvider.LocalStorageRootPath);
         _imageCache = new ImageCacheService(_settingsProvider.LocalStorageRootPath);
@@ -493,6 +556,7 @@ public partial class MainViewModel : ViewModelBase
         var localSettings = _localUserSettingsStore.Load();
         var albumOpenHistory = _albumOpenHistoryStore.Load();
         AnonymousReviewerName = localSettings.AnonymousReviewerName;
+        MaximumParallelism = NormalizeMaximumParallelism(localSettings.MaximumParallelism);
         _lastOpenAlbumLink = albumOpenHistory.LastOpenAlbumLink;
         OpenAlbumLink = albumOpenHistory.LastOpenAlbumLink;
         PictureDefaultDownloadDirectoryPath = GetConfiguredOrDefaultDownloadDirectoryPath(localSettings.PictureDefaultDownloadDirectoryPath);
@@ -510,6 +574,7 @@ public partial class MainViewModel : ViewModelBase
     private async Task InitializeAsync()
     {
         await ResumePendingAlbumDeletionsAsync();
+        await ResumePendingAlbumCreationAsync();
         await OpenLastAlbumOnStartupAsync(_lastOpenAlbumLink);
     }
 
@@ -1077,7 +1142,7 @@ public partial class MainViewModel : ViewModelBase
             Status = "Deleting album...";
             PrepareOpenAlbumForDeletion();
             var backend = await CreateFeedbackBackendAsync(manifest, CancellationToken.None);
-            await ExecuteAlbumDeletionAsync(manifest, reviewer, backend, CancellationToken.None);
+            await ExecuteAlbumDeletionAsync(manifest, reviewer, backend, CancellationToken.None, showProgress: true);
         }
         catch (Exception ex)
         {
@@ -1087,6 +1152,44 @@ public partial class MainViewModel : ViewModelBase
         {
             IsBusy = false;
         }
+    }
+
+    [RelayCommand]
+    private void CancelAlbumDeletionProgress()
+    {
+        if (_activeDeletingAlbumManifest is null)
+        {
+            return;
+        }
+
+        CancelAlbumDeletionConfirmationMessage = "Stop trying to delete this album? Picshare will forget the deletion and consider the album deleted, even if some backend files remain.";
+        IsCancelAlbumDeletionConfirmationVisible = true;
+    }
+
+    [RelayCommand]
+    private void KeepAlbumDeletionRunning()
+    {
+        IsCancelAlbumDeletionConfirmationVisible = false;
+        CancelAlbumDeletionConfirmationMessage = "";
+    }
+
+    [RelayCommand]
+    private void ForceCancelAlbumDeletion()
+    {
+        var manifest = _activeDeletingAlbumManifest;
+        IsCancelAlbumDeletionConfirmationVisible = false;
+        CancelAlbumDeletionConfirmationMessage = "";
+        _albumDeletionCancellation?.Cancel();
+        if (manifest is not null)
+        {
+            _albumDeletionService.ForgetPendingDeletion(manifest.AlbumId);
+            ForgetOpenedAlbumReference(manifest);
+        }
+
+        ClearOpenedAlbumState();
+        IsAlbumDeletionProgressVisible = false;
+        _activeDeletingAlbumManifest = null;
+        Status = "Album deletion was stopped and the album is considered deleted.";
     }
 
     [RelayCommand]
@@ -1242,6 +1345,27 @@ public partial class MainViewModel : ViewModelBase
     [RelayCommand]
     private async Task CreateAlbumAsync()
     {
+        await CreateAlbumCoreAsync(clearExistingDestination: false);
+    }
+
+    [RelayCommand]
+    private void CancelClearAlbumDestination()
+    {
+        IsClearAlbumDestinationConfirmationVisible = false;
+        ClearAlbumDestinationConfirmationMessage = "";
+        Status = "Album creation cancelled.";
+    }
+
+    [RelayCommand]
+    private async Task ConfirmClearAlbumDestinationAsync()
+    {
+        IsClearAlbumDestinationConfirmationVisible = false;
+        ClearAlbumDestinationConfirmationMessage = "";
+        await CreateAlbumCoreAsync(clearExistingDestination: true);
+    }
+
+    private async Task CreateAlbumCoreAsync(bool clearExistingDestination)
+    {
         if (IsBusy)
         {
             return;
@@ -1281,54 +1405,73 @@ public partial class MainViewModel : ViewModelBase
         try
         {
             IsBusy = true;
-            Status = SelectedAlbumType.Id == LocalAlbumTypeId
-                ? "Creating local album..."
-                : "Uploading selected local photos to Google Drive...";
+            var title = string.IsNullOrWhiteSpace(AlbumTitle) ? "Picshare album" : AlbumTitle.Trim();
+            if (!clearExistingDestination)
+            {
+                Status = "Checking album destination...";
+                var inspection = await _albumCreationService.InspectDestinationAsync(
+                    SelectedAlbumType.Id,
+                    title,
+                    string.IsNullOrWhiteSpace(ParentDriveFolderId) ? null : ParentDriveFolderId.Trim(),
+                    LocalAlbumDestinationPath,
+                    GetGoogleAccessTokenAsync,
+                    CancellationToken.None);
+                if (inspection.HasItems)
+                {
+                    ClearAlbumDestinationConfirmationMessage =
+                        $"The destination album folder \"{inspection.DisplayName}\" already contains files or folders. Clear it and start the upload?";
+                    IsClearAlbumDestinationConfirmationVisible = true;
+                    return;
+                }
+            }
+            else
+            {
+                Status = "Clearing album destination...";
+                await _albumCreationService.ClearDestinationAsync(
+                    SelectedAlbumType.Id,
+                    title,
+                    string.IsNullOrWhiteSpace(ParentDriveFolderId) ? null : ParentDriveFolderId.Trim(),
+                    LocalAlbumDestinationPath,
+                    GetGoogleAccessTokenAsync,
+                    GetMaximumParallelism(),
+                    CancellationToken.None);
+            }
+
             Photos.Clear();
             ShareLink = "";
             DriveFolderLink = "";
 
-            if (SelectedAlbumType.Id == LocalAlbumTypeId)
-            {
-                var result = await _localPublisher.PublishAsync(
-                    new LocalAlbumPublishRequest
-                    {
-                        Title = string.IsNullOrWhiteSpace(AlbumTitle) ? "Picshare album" : AlbumTitle.Trim(),
-                        Photos = AlbumPhotos.Select(photo => photo.Source).ToList(),
-                        TargetNicePhotoCount = Math.Max(0, TargetNicePhotoCount),
-                        ParentFolderPath = LocalAlbumDestinationPath,
-                        Author = CreateLocalReviewerIdentity()!
-                    },
-                    CancellationToken.None);
+            _albumCreationCancellation?.Cancel();
+            _albumCreationCancellation?.Dispose();
+            _albumCreationCancellation = new CancellationTokenSource();
+            var cancellation = _albumCreationCancellation;
+            _activePendingAlbumCreation = await _albumCreationService.CreatePendingCreationAsync(
+                SelectedAlbumType.Id,
+                title,
+                Math.Max(0, TargetNicePhotoCount),
+                string.IsNullOrWhiteSpace(ParentDriveFolderId) ? null : ParentDriveFolderId.Trim(),
+                LocalAlbumDestinationPath,
+                SelectedAlbumType.Id == LocalAlbumTypeId
+                    ? CreateLocalReviewerIdentity()!
+                    : CreateGoogleReviewerIdentity(_googleTokenSet!),
+                AlbumPhotos.Select(photo => photo.Source).ToList(),
+                cancellation.Token);
 
-                ShareLink = result.PicshareLink;
-                DriveFolderLink = result.AlbumFolderPath;
-                OpenAlbumLink = result.PicshareLink;
-                Status = $"Local album created with {result.Manifest.Photos.Count} photo(s).";
-                await LoadAlbumAsync(result.Manifest);
-                SaveOpenedAlbumReference(result.Manifest, result.PicshareLink);
-            }
-            else
+            IsAlbumCreationProgressVisible = true;
+            AlbumCreationProgressValue = 0;
+            AlbumCreationProgressMaximum = Math.Max(1, AlbumPhotos.Count + 3);
+            Status = SelectedAlbumType.Id == LocalAlbumTypeId
+                ? "Creating local album..."
+                : "Uploading selected local photos to Google Drive...";
+            var result = await ResumePendingAlbumCreationCoreAsync(_activePendingAlbumCreation, cancellation.Token);
+            await CompleteAlbumCreationAsync(result);
+        }
+        catch (OperationCanceledException)
+        {
+            Status = "Album creation cancellation requested.";
+            if (_activePendingAlbumCreation is not null)
             {
-                var accessToken = await GetGoogleAccessTokenAsync(CancellationToken.None);
-                var result = await _publisher.PublishAsync(
-                    new DriveAlbumPublishRequest
-                    {
-                        Title = string.IsNullOrWhiteSpace(AlbumTitle) ? "Picshare album" : AlbumTitle.Trim(),
-                        Photos = AlbumPhotos.Select(photo => photo.Source).ToList(),
-                        TargetNicePhotoCount = Math.Max(0, TargetNicePhotoCount),
-                        ParentDriveFolderId = string.IsNullOrWhiteSpace(ParentDriveFolderId) ? null : ParentDriveFolderId.Trim(),
-                        AccessToken = accessToken,
-                        Author = CreateGoogleReviewerIdentity(_googleTokenSet!)
-                    },
-                    CancellationToken.None);
-
-                ShareLink = result.PicshareLink;
-                DriveFolderLink = result.AlbumFolderUrl;
-                OpenAlbumLink = result.PicshareLink;
-                Status = $"Album created with {result.Manifest.Photos.Count} photo(s).";
-                await LoadAlbumAsync(result.Manifest);
-                SaveOpenedAlbumReference(result.Manifest, result.PicshareLink);
+                await CancelPendingAlbumCreationAsync(_activePendingAlbumCreation);
             }
         }
         catch (Exception ex)
@@ -1337,7 +1480,116 @@ public partial class MainViewModel : ViewModelBase
         }
         finally
         {
+            _albumCreationCancellation?.Dispose();
+            _albumCreationCancellation = null;
+            _activePendingAlbumCreation = null;
+            IsAlbumCreationProgressVisible = false;
             IsBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    private void CancelAlbumCreationProgress()
+    {
+        _albumCreationCancellation?.Cancel();
+    }
+
+    private async Task ResumePendingAlbumCreationAsync()
+    {
+        var pendingCreation = await _albumCreationService.LoadPendingCreationAsync(CancellationToken.None);
+        if (pendingCreation is null)
+        {
+            return;
+        }
+
+        try
+        {
+            IsBusy = true;
+            IsAlbumCreationProgressVisible = true;
+            _activePendingAlbumCreation = pendingCreation;
+            _albumCreationCancellation?.Cancel();
+            _albumCreationCancellation?.Dispose();
+            _albumCreationCancellation = new CancellationTokenSource();
+            Status = "Resuming album creation...";
+            var result = await ResumePendingAlbumCreationCoreAsync(pendingCreation, _albumCreationCancellation.Token);
+            await CompleteAlbumCreationAsync(result);
+        }
+        catch (OperationCanceledException)
+        {
+            if (_activePendingAlbumCreation is not null)
+            {
+                await CancelPendingAlbumCreationAsync(_activePendingAlbumCreation);
+            }
+        }
+        catch (Exception ex)
+        {
+            Status = ex.Message;
+        }
+        finally
+        {
+            _albumCreationCancellation?.Dispose();
+            _albumCreationCancellation = null;
+            _activePendingAlbumCreation = null;
+            IsAlbumCreationProgressVisible = false;
+            IsBusy = false;
+        }
+    }
+
+    private async Task<AlbumCreationResumeResult> ResumePendingAlbumCreationCoreAsync(
+        PendingAlbumCreation pendingCreation,
+        CancellationToken cancellationToken)
+    {
+        var progress = new Progress<AlbumCreationProgress>(progress =>
+        {
+            AlbumCreationProgressMessage = progress.Message;
+            AlbumCreationProgressValue = progress.Value;
+            AlbumCreationProgressMaximum = Math.Max(1, progress.Maximum);
+            Status = progress.Message;
+        });
+
+        return await _albumCreationService.ResumeAsync(
+            pendingCreation,
+            GetGoogleAccessTokenAsync,
+            progress,
+            GetMaximumParallelism(),
+            cancellationToken);
+    }
+
+    private async Task CompleteAlbumCreationAsync(AlbumCreationResumeResult result)
+    {
+        ShareLink = result.PicshareLink;
+        DriveFolderLink = result.AlbumLocation;
+        OpenAlbumLink = result.PicshareLink;
+        Status = $"Album created with {result.Manifest.Photos.Count} photo(s).";
+        await LoadAlbumAsync(result.Manifest);
+        SaveOpenedAlbumReference(result.Manifest, result.PicshareLink);
+    }
+
+    private async Task CancelPendingAlbumCreationAsync(PendingAlbumCreation pendingCreation)
+    {
+        Status = "Cancelling album creation...";
+        var manifest = _albumCreationService.CreateDeletionManifest(pendingCreation);
+        _albumCreationService.ForgetPendingCreation(pendingCreation.AlbumId);
+        if (manifest is null)
+        {
+            Status = "Album creation cancelled.";
+            return;
+        }
+
+        try
+        {
+            IsAlbumCreationProgressVisible = false;
+            var backend = await CreateFeedbackBackendAsync(manifest, CancellationToken.None);
+            await ExecuteAlbumDeletionAsync(manifest, pendingCreation.Author, backend, CancellationToken.None, showProgress: true);
+            Status = "Album creation cancelled and created storage was deleted.";
+        }
+        catch (OperationCanceledException)
+        {
+            Status = "Album deletion was stopped and the album is considered deleted.";
+        }
+        catch (Exception ex)
+        {
+            Status = $"Album creation was cancelled. Deletion will continue later: {ex.Message}";
         }
     }
 
@@ -1711,6 +1963,7 @@ public partial class MainViewModel : ViewModelBase
             folder.TryGetLocalPath() ?? folder.Path.ToString()));
         IsFolderDateImportVisible = _folderDateImportFolders.Count > 0;
         ImportCandidates.Clear();
+        RefreshImportCandidateRows();
         OnPropertyChanged(nameof(IsImportCandidatesVisible));
         Status = "Choose a date and scan the selected folders.";
     }
@@ -1721,6 +1974,7 @@ public partial class MainViewModel : ViewModelBase
         FolderDateImportSourceText = "";
         _folderDateImportFolders.Clear();
         ImportCandidates.Clear();
+        RefreshImportCandidateRows();
         OnPropertyChanged(nameof(IsImportCandidatesVisible));
     }
 
@@ -1747,20 +2001,23 @@ public partial class MainViewModel : ViewModelBase
 
             var importDate = DateOnly.FromDateTime((ImportDate ?? DateTimeOffset.Now).Date);
             var photos = await _photoScanner.FindPhotosAsync(_folderDateImportFolders, importDate, CancellationToken.None);
+            var existingSortKeys = AlbumPhotos
+                .Select(photo => photo.Source.SortKey)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
             ImportCandidates.Clear();
             foreach (var photo in photos)
             {
-                if (AlbumPhotos.Any(existing => string.Equals(existing.Source.SortKey, photo.SortKey, StringComparison.OrdinalIgnoreCase)))
+                if (existingSortKeys.Contains(photo.SortKey))
                 {
                     continue;
                 }
 
                 var photoViewModel = new AlbumPhotoSourceViewModel(photo);
                 ImportCandidates.Add(photoViewModel);
-                StartThumbnailLoad(photoViewModel);
             }
 
+            RefreshImportCandidateRows();
             OnPropertyChanged(nameof(IsImportCandidatesVisible));
             Status = $"Found {ImportCandidates.Count} photo(s) for {importDate:yyyy-MM-dd}.";
         }
@@ -1777,6 +2034,9 @@ public partial class MainViewModel : ViewModelBase
     public void AddManualPhotoFiles(IEnumerable<IStorageFile> files)
     {
         var added = 0;
+        var existingSortKeys = AlbumPhotos
+            .Select(photo => photo.Source.SortKey)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
         foreach (var file in files)
         {
             var localPath = file.TryGetLocalPath();
@@ -1784,7 +2044,7 @@ public partial class MainViewModel : ViewModelBase
                 ? Path.GetFullPath(localPath)
                 : file.Path.AbsoluteUri;
 
-            if (AlbumPhotos.Any(photo => string.Equals(photo.Source.SortKey, key, StringComparison.OrdinalIgnoreCase)))
+            if (!existingSortKeys.Add(key))
             {
                 continue;
             }
@@ -1792,12 +2052,13 @@ public partial class MainViewModel : ViewModelBase
             var photoViewModel = new AlbumPhotoSourceViewModel(new PhotoUploadSource(
                 file.Name,
                 key,
-                async () => await file.OpenReadAsync()));
+                async () => await file.OpenReadAsync(),
+                string.IsNullOrWhiteSpace(localPath) ? null : Path.GetFullPath(localPath)));
             AlbumPhotos.Add(photoViewModel);
-            StartThumbnailLoad(photoViewModel);
             added++;
         }
 
+        RefreshAlbumPhotoRows();
         CloseFolderDateImport();
         Status = $"Added {added} photo(s) to the album.";
     }
@@ -1812,24 +2073,29 @@ public partial class MainViewModel : ViewModelBase
     private void ClearImportCandidates()
     {
         ImportCandidates.Clear();
+        RefreshImportCandidateRows();
         OnPropertyChanged(nameof(IsImportCandidatesVisible));
     }
 
     public void AddImportCandidates(IEnumerable<AlbumPhotoSourceViewModel> candidates)
     {
         var added = 0;
+        var existingSortKeys = AlbumPhotos
+            .Select(photo => photo.Source.SortKey)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
         foreach (var candidate in candidates.ToList())
         {
-            if (AlbumPhotos.Any(photo => string.Equals(photo.Source.SortKey, candidate.Source.SortKey, StringComparison.OrdinalIgnoreCase)))
+            if (!existingSortKeys.Add(candidate.Source.SortKey))
             {
                 continue;
             }
 
+            candidate.IsSelected = false;
             AlbumPhotos.Add(candidate);
-            StartThumbnailLoad(candidate);
             added++;
         }
 
+        RefreshAlbumPhotoRows();
         CloseFolderDateImport();
         Status = $"Added {added} photo(s) to the album.";
     }
@@ -1846,12 +2112,18 @@ public partial class MainViewModel : ViewModelBase
         }
 
         SelectedAlbumPhoto = null;
+        RefreshAlbumPhotoRows();
         Status = $"Removed {removed} photo(s) from the album.";
     }
 
-    private static void StartThumbnailLoad(AlbumPhotoSourceViewModel photo)
+    public void ToggleAlbumPhotoSourceSelection(AlbumPhotoSourceViewModel photo)
     {
-        _ = photo.LoadThumbnailAsync();
+        photo.IsSelected = !photo.IsSelected;
+    }
+
+    public void ToggleImportCandidateSelection(AlbumPhotoSourceViewModel photo)
+    {
+        photo.IsSelected = !photo.IsSelected;
     }
 
     [RelayCommand]
@@ -2225,6 +2497,7 @@ public partial class MainViewModel : ViewModelBase
 
         var changedPhoto = _selectedViewedPhoto;
         var sourceCategory = _selectedViewedPhotoSourceCategory;
+        var sourceReviewTabId = _selectedViewedPhotoSourceReviewTabId;
         var sourcePhotosBeforeChange = GetPhotosForCategory(sourceCategory).ToList();
         var changedPhotoIndex = sourcePhotosBeforeChange.FindIndex(photo => ReferenceEquals(photo, changedPhoto));
         var photosToUpdate = GetDuplicateGroupMembers(changedPhoto).ToList();
@@ -2264,7 +2537,14 @@ public partial class MainViewModel : ViewModelBase
             ? $"{changedPhoto.FileName} moved to uncategorized."
             : $"{changedPhoto.FileName} marked as {category}.";
 
-        await AdvanceFullImageViewerAfterCategoryChangeAsync(sourceCategory, changedPhotoIndex);
+        if (string.Equals(sourceReviewTabId, UnresolvedDuplicatesReviewTabId, StringComparison.Ordinal))
+        {
+            SelectViewedPhoto(changedPhoto);
+        }
+        else
+        {
+            await AdvanceFullImageViewerAfterCategoryChangeAsync(sourceCategory, changedPhotoIndex);
+        }
     }
 
     private async Task RotateCurrentPhotoAsync(int degrees)
@@ -2445,6 +2725,16 @@ public partial class MainViewModel : ViewModelBase
         }
 
         var photo = _selectedViewedPhoto;
+        var sourceGroupId = photo.DuplicateGroupId;
+        var sourceReviewTabId = _selectedViewedPhotoSourceReviewTabId;
+        var sourceMembers = _duplicateGroupsById.TryGetValue(sourceGroupId, out var members)
+            ? members.ToList()
+            : [photo];
+        var sourceMemberIndex = sourceMembers.FindIndex(member => ReferenceEquals(member, photo));
+        var sourceTabPhotos = GetPhotosForReviewTab(sourceReviewTabId).ToList();
+        var sourceTabIndex = sourceTabPhotos.FindIndex(candidate =>
+            ReferenceEquals(candidate, GetPhotoViewerNavigationAnchor(photo)));
+
         await _reviewerFeedbackService.RemoveLocalPhotoFromDuplicateGroupAsync(
             _feedbackSession,
             _feedbackDatabase,
@@ -2454,8 +2744,20 @@ public partial class MainViewModel : ViewModelBase
         _ = SyncFeedbackAsync();
         ApplyDuplicateGroupsToPhotos();
         RebuildCategoryRows();
-        SelectViewedPhoto(photo);
         Status = $"{photo.FileName} removed from duplicates.";
+        if (string.Equals(sourceReviewTabId, UnresolvedDuplicatesReviewTabId, StringComparison.Ordinal))
+        {
+            await OpenNextPhotoAfterDuplicateRemovalAsync(
+                sourceGroupId,
+                sourceMembers,
+                sourceMemberIndex,
+                sourceReviewTabId,
+                sourceTabIndex);
+        }
+        else
+        {
+            SelectViewedPhoto(photo);
+        }
     }
 
     private async Task ToggleCurrentPhotoBestInDuplicateGroupCoreAsync()
@@ -2468,6 +2770,13 @@ public partial class MainViewModel : ViewModelBase
         var photo = _selectedViewedPhoto;
         var groupId = photo.DuplicateGroupId;
         var isBest = !photo.IsBestInDuplicateGroup;
+        var shouldAdvanceAfterBestSelection = isBest &&
+            string.Equals(_selectedViewedPhotoSourceReviewTabId, UnresolvedDuplicatesReviewTabId, StringComparison.Ordinal);
+        var sourcePhotosBeforeChange = shouldAdvanceAfterBestSelection
+            ? GetPhotosForReviewTab(_selectedViewedPhotoSourceReviewTabId).ToList()
+            : [];
+        var changedPhotoIndex = sourcePhotosBeforeChange.FindIndex(candidate =>
+            ReferenceEquals(candidate, GetPhotoViewerNavigationAnchor(photo)));
         await _reviewerFeedbackService.SetLocalDuplicateGroupBestPhotoAsync(
             _feedbackSession,
             _feedbackDatabase,
@@ -2483,6 +2792,11 @@ public partial class MainViewModel : ViewModelBase
         Status = isBest
             ? $"{photo.FileName} marked as best in the group."
             : $"{photo.FileName} unmarked as best in the group.";
+
+        if (shouldAdvanceAfterBestSelection)
+        {
+            await AdvanceFullImageViewerAfterReviewTabItemResolvedAsync(_selectedViewedPhotoSourceReviewTabId, changedPhotoIndex);
+        }
     }
 
     partial void OnPhotoViewerImageChanging(Bitmap? value)
@@ -2593,43 +2907,59 @@ public partial class MainViewModel : ViewModelBase
     {
         var destinationDirectory = Path.GetFullPath(destinationDirectoryPath.Trim());
         Directory.CreateDirectory(destinationDirectory);
+        var reservedDestinationPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var destinationLock = new object();
+        var completed = 0;
 
-        foreach (var photo in photos)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            AlbumDownloadProgressMessage = $"Downloading {progressScope}: {photo.FileName}";
-
-            var destinationPath = GetAvailableDestinationPath(destinationDirectory, GetSafeDownloadFileName(photo));
-            var tempPath = Path.Combine(destinationDirectory, $".{Guid.NewGuid():N}.tmp");
-            try
+        await Parallel.ForEachAsync(
+            photos,
+            new ParallelOptions
             {
-                await using (var destination = new FileStream(
-                    tempPath,
-                    FileMode.CreateNew,
-                    FileAccess.Write,
-                    FileShare.None))
+                MaxDegreeOfParallelism = GetMaximumParallelism(),
+                CancellationToken = cancellationToken
+            },
+            async (photo, token) =>
+            {
+                Dispatcher.UIThread.Post(() => AlbumDownloadProgressMessage = $"Downloading {progressScope}: {photo.FileName}");
+
+                string destinationPath;
+                lock (destinationLock)
                 {
-                    await _imageCache.CopyOriginalToAsync(
-                        photo.AlbumId,
-                        GetFullPhotoCacheFileName(photo),
-                        photo.DownloadUrl,
-                        _imageHttpClient,
-                        destination,
-                        cancellationToken);
+                    destinationPath = GetAvailableDestinationPath(destinationDirectory, GetSafeDownloadFileName(photo), reservedDestinationPaths);
+                    reservedDestinationPaths.Add(destinationPath);
                 }
 
-                File.Move(tempPath, destinationPath);
-            }
-            finally
-            {
-                if (File.Exists(tempPath))
+                var tempPath = Path.Combine(destinationDirectory, $".{Guid.NewGuid():N}.tmp");
+                try
                 {
-                    File.Delete(tempPath);
-                }
-            }
+                    await using (var destination = new FileStream(
+                        tempPath,
+                        FileMode.CreateNew,
+                        FileAccess.Write,
+                        FileShare.None))
+                    {
+                        await _imageCache.CopyOriginalToAsync(
+                            photo.AlbumId,
+                            GetFullPhotoCacheFileName(photo),
+                            photo.DownloadUrl,
+                            _imageHttpClient,
+                            destination,
+                            token);
+                    }
 
-            AlbumDownloadProgressValue++;
-        }
+                    File.Move(tempPath, destinationPath);
+                }
+                finally
+                {
+                    if (File.Exists(tempPath))
+                    {
+                        File.Delete(tempPath);
+                    }
+                }
+
+                var value = Interlocked.Increment(ref completed);
+                Dispatcher.UIThread.Post(() => AlbumDownloadProgressValue = value);
+            });
     }
 
     private async Task DownloadPhotoArchiveAsync(
@@ -2706,8 +3036,16 @@ public partial class MainViewModel : ViewModelBase
 
     private static string GetAvailableDestinationPath(string destinationDirectoryPath, string fileName)
     {
+        return GetAvailableDestinationPath(destinationDirectoryPath, fileName, null);
+    }
+
+    private static string GetAvailableDestinationPath(
+        string destinationDirectoryPath,
+        string fileName,
+        HashSet<string>? reservedDestinationPaths)
+    {
         var targetPath = Path.Combine(destinationDirectoryPath, fileName);
-        if (!File.Exists(targetPath))
+        if (!File.Exists(targetPath) && reservedDestinationPaths?.Contains(targetPath) != true)
         {
             return targetPath;
         }
@@ -2717,7 +3055,7 @@ public partial class MainViewModel : ViewModelBase
         for (var index = 1; ; index++)
         {
             targetPath = Path.Combine(destinationDirectoryPath, $"{baseName} ({index}){extension}");
-            if (!File.Exists(targetPath))
+            if (!File.Exists(targetPath) && reservedDestinationPaths?.Contains(targetPath) != true)
             {
                 return targetPath;
             }
@@ -2940,7 +3278,7 @@ public partial class MainViewModel : ViewModelBase
                 IsAuthorFlowVisible = true;
                 Status = "Album deletion was already started. Continuing deletion...";
                 PrepareOpenAlbumForDeletion();
-                await ExecuteAlbumDeletionAsync(manifest, reviewerIdentity, backend, CancellationToken.None);
+                await ExecuteAlbumDeletionAsync(manifest, reviewerIdentity, backend, CancellationToken.None, showProgress: true);
             }
             else
             {
@@ -2982,18 +3320,55 @@ public partial class MainViewModel : ViewModelBase
         AlbumManifest manifest,
         FeedbackReviewerIdentity reviewer,
         IReviewerFeedbackBackend backend,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool showProgress = false)
     {
-        await _albumDeletionService.RequestDeletionAsync(
-            manifest,
-            reviewer,
-            backend,
-            GetGoogleAccessTokenAsync,
-            cancellationToken);
+        _activeDeletingAlbumManifest = manifest;
+        if (showProgress)
+        {
+            _albumDeletionCancellation?.Cancel();
+            _albumDeletionCancellation?.Dispose();
+            _albumDeletionCancellation = new CancellationTokenSource();
+            cancellationToken = _albumDeletionCancellation.Token;
+            IsAlbumDeletionProgressVisible = true;
+            AlbumDeletionProgressValue = 0;
+            AlbumDeletionProgressMaximum = 4;
+            AlbumDeletionProgressMessage = "Deleting album...";
+        }
 
-        ForgetOpenedAlbumReference(manifest);
-        ClearOpenedAlbumState();
-        Status = "Album deleted.";
+        var progress = new Progress<AlbumDeletionProgress>(progress =>
+        {
+            AlbumDeletionProgressMessage = progress.Message;
+            AlbumDeletionProgressValue = progress.Value;
+            AlbumDeletionProgressMaximum = Math.Max(1, progress.Maximum);
+            Status = progress.Message;
+        });
+
+        try
+        {
+            await _albumDeletionService.RequestDeletionAsync(
+                manifest,
+                reviewer,
+                backend,
+                GetGoogleAccessTokenAsync,
+                cancellationToken,
+                progress,
+                GetMaximumParallelism());
+
+            ForgetOpenedAlbumReference(manifest);
+            ClearOpenedAlbumState();
+            Status = "Album deleted.";
+        }
+        finally
+        {
+            if (showProgress)
+            {
+                IsAlbumDeletionProgressVisible = false;
+                _activeDeletingAlbumManifest = null;
+                _albumDeletionCancellation?.Dispose();
+                _albumDeletionCancellation = null;
+            }
+        }
     }
 
     private void PrepareOpenAlbumForDeletion()
@@ -3065,16 +3440,41 @@ public partial class MainViewModel : ViewModelBase
                     }
 
                     var backend = await CreateFeedbackBackendAsync(manifest, CancellationToken.None);
+                    _albumDeletionCancellation?.Cancel();
+                    _albumDeletionCancellation?.Dispose();
+                    _albumDeletionCancellation = new CancellationTokenSource();
+                    _activeDeletingAlbumManifest = manifest;
+                    IsAlbumDeletionProgressVisible = true;
+                    AlbumDeletionProgressValue = 0;
+                    AlbumDeletionProgressMaximum = 4;
+                    AlbumDeletionProgressMessage = "Deleting album...";
+                    var progress = new Progress<AlbumDeletionProgress>(progress =>
+                    {
+                        AlbumDeletionProgressMessage = progress.Message;
+                        AlbumDeletionProgressValue = progress.Value;
+                        AlbumDeletionProgressMaximum = Math.Max(1, progress.Maximum);
+                        Status = progress.Message;
+                    });
                     await _albumDeletionService.RequestDeletionAsync(
                         manifest,
                         pendingDeletion.RequestedBy,
                         backend,
                         GetGoogleAccessTokenAsync,
-                        CancellationToken.None);
+                        _albumDeletionCancellation.Token,
+                        progress,
+                        GetMaximumParallelism());
+                    IsAlbumDeletionProgressVisible = false;
+                    _activeDeletingAlbumManifest = null;
+                    _albumDeletionCancellation.Dispose();
+                    _albumDeletionCancellation = null;
                     ForgetOpenedAlbumReference(manifest);
                 }
                 catch
                 {
+                    IsAlbumDeletionProgressVisible = false;
+                    _activeDeletingAlbumManifest = null;
+                    _albumDeletionCancellation?.Dispose();
+                    _albumDeletionCancellation = null;
                 }
             }
         }
@@ -3154,7 +3554,7 @@ public partial class MainViewModel : ViewModelBase
             {
                 member.DuplicateGroupId = groupId;
                 member.DuplicateGroupCount = members.Count;
-                member.DuplicateStackPhoto = orderedMembers.LastOrDefault(photo => !ReferenceEquals(photo, mainPhoto));
+                member.DuplicateStackPhoto = mainPhoto;
                 member.IsBestInDuplicateGroup = ReferenceEquals(member, bestPhoto);
                 member.Category = category;
             }
@@ -3178,10 +3578,13 @@ public partial class MainViewModel : ViewModelBase
         AddGroups(NicePhotoGroups, visiblePhotos.Where(photo => string.Equals(photo.Category, "nice", StringComparison.Ordinal)));
         AddGroups(OkPhotoGroups, visiblePhotos.Where(photo => string.Equals(photo.Category, "ok", StringComparison.Ordinal)));
         AddGroups(TrashPhotoGroups, visiblePhotos.Where(photo => string.Equals(photo.Category, "trash", StringComparison.Ordinal)));
+        AddGroups(UnresolvedDuplicatePhotoGroups, GetUnresolvedDuplicatePhotos());
         OnPropertyChanged(nameof(UncategorizedTabHeader));
         OnPropertyChanged(nameof(NiceTabHeader));
         OnPropertyChanged(nameof(OkTabHeader));
         OnPropertyChanged(nameof(TrashTabHeader));
+        OnPropertyChanged(nameof(UnresolvedDuplicatesTabHeader));
+        OnPropertyChanged(nameof(HasUnresolvedDuplicatePhotos));
         UpdateFeedbackControlState();
         UpdateBulkPhotoSelectionState();
     }
@@ -3192,6 +3595,7 @@ public partial class MainViewModel : ViewModelBase
         NicePhotoGroups.Clear();
         OkPhotoGroups.Clear();
         TrashPhotoGroups.Clear();
+        UnresolvedDuplicatePhotoGroups.Clear();
     }
 
     private static void AddGroups(ObservableCollection<AlbumPhotoGroupViewModel> groups, IEnumerable<AlbumPhotoViewModel> photos)
@@ -3317,9 +3721,10 @@ public partial class MainViewModel : ViewModelBase
         }
     }
 
-    public void SetFlowTabActive(bool isActive)
+    public void SetActiveReviewTab(string tabId)
     {
-        _isFlowTabActive = isActive;
+        _activeReviewTabId = string.IsNullOrWhiteSpace(tabId) ? UncategorizedReviewTabId : tabId;
+        _isFlowTabActive = string.Equals(_activeReviewTabId, FlowReviewTabId, StringComparison.Ordinal);
         UpdateBulkPhotoSelectionState();
         if (_isFlowTabActive && IsAuthorFlowVisible)
         {
@@ -3439,6 +3844,7 @@ public partial class MainViewModel : ViewModelBase
 
         _selectedViewedPhoto = photo;
         _selectedViewedPhotoSourceCategory = photo?.Category ?? "";
+        _selectedViewedPhotoSourceReviewTabId = _activeReviewTabId;
 
         if (_selectedViewedPhoto is not null)
         {
@@ -3472,7 +3878,7 @@ public partial class MainViewModel : ViewModelBase
         CanMarkCurrentPhotoOk = canChangeCurrentPhoto && ShouldShowCurrentPhotoOkAction;
         CanMarkCurrentPhotoTrash = canChangeCurrentPhoto && ShouldShowCurrentPhotoTrashAction;
         CanShowCurrentPhotoTrashAction = ShouldShowCurrentPhotoTrashAction;
-        CanNavigatePhotoViewerCategory = _selectedViewedPhoto is not null && GetPhotosForCategory(category).Any();
+        CanNavigatePhotoViewerCategory = _selectedViewedPhoto is not null && GetPhotosForReviewTab(_selectedViewedPhotoSourceReviewTabId).Any();
         CanDownloadCurrentPhoto = _selectedViewedPhoto is not null;
         CanRemoveCurrentPhotoFromDuplicates = _selectedViewedPhoto is not null &&
             !string.IsNullOrWhiteSpace(_selectedViewedPhoto.DuplicateGroupId);
@@ -3635,30 +4041,27 @@ public partial class MainViewModel : ViewModelBase
             return;
         }
 
-        var categoryPhotos = GetPhotosForCategory(_selectedViewedPhotoSourceCategory).ToList();
-        if (categoryPhotos.Count == 0)
+        var tabPhotos = GetPhotosForReviewTab(_selectedViewedPhotoSourceReviewTabId).ToList();
+        if (tabPhotos.Count == 0)
         {
             ClosePhotoViewer();
             return;
         }
 
-        var currentPhotoForNavigation = !string.IsNullOrWhiteSpace(_selectedViewedPhoto.DuplicateGroupId) &&
-            _duplicateGroupsById.TryGetValue(_selectedViewedPhoto.DuplicateGroupId, out var members)
-                ? members.FirstOrDefault(photo => photo.IsDuplicateGroupMain) ?? _selectedViewedPhoto
-                : _selectedViewedPhoto;
-        var currentIndex = categoryPhotos.FindIndex(photo => ReferenceEquals(photo, currentPhotoForNavigation));
+        var currentPhotoForNavigation = GetPhotoViewerNavigationAnchor(_selectedViewedPhoto);
+        var currentIndex = tabPhotos.FindIndex(photo => ReferenceEquals(photo, currentPhotoForNavigation));
         if (currentIndex < 0)
         {
             currentIndex = 0;
         }
 
-        var nextIndex = (currentIndex + offset) % categoryPhotos.Count;
+        var nextIndex = (currentIndex + offset) % tabPhotos.Count;
         if (nextIndex < 0)
         {
-            nextIndex += categoryPhotos.Count;
+            nextIndex += tabPhotos.Count;
         }
 
-        await OpenPhotoViewerAsync(categoryPhotos[nextIndex]);
+        await OpenPhotoViewerAsync(tabPhotos[nextIndex]);
     }
 
     private async Task AdvanceFullImageViewerAfterCategoryChangeAsync(string sourceCategory, int changedPhotoIndex)
@@ -3677,12 +4080,83 @@ public partial class MainViewModel : ViewModelBase
         await OpenPhotoViewerAsync(sourcePhotos[nextIndex]);
     }
 
+    private async Task AdvanceFullImageViewerAfterReviewTabItemResolvedAsync(string sourceReviewTabId, int changedPhotoIndex)
+    {
+        var sourcePhotos = GetPhotosForReviewTab(sourceReviewTabId).ToList();
+        if (sourcePhotos.Count == 0)
+        {
+            ClosePhotoViewer();
+            return;
+        }
+
+        var nextIndex = changedPhotoIndex >= 0 && changedPhotoIndex < sourcePhotos.Count
+            ? changedPhotoIndex
+            : 0;
+
+        await OpenPhotoViewerAsync(sourcePhotos[nextIndex]);
+    }
+
+    private async Task OpenNextPhotoAfterDuplicateRemovalAsync(
+        string sourceGroupId,
+        IReadOnlyList<AlbumPhotoViewModel> sourceMembers,
+        int sourceMemberIndex,
+        string sourceReviewTabId,
+        int sourceTabIndex)
+    {
+        if (_duplicateGroupsById.TryGetValue(sourceGroupId, out var remainingMembers))
+        {
+            var orderedCandidates = sourceMembers
+                .Skip(Math.Max(0, sourceMemberIndex + 1))
+                .Concat(sourceMembers.Take(Math.Max(0, sourceMemberIndex)))
+                .Where(candidate => remainingMembers.Contains(candidate))
+                .ToList();
+            var nextGroupPhoto = orderedCandidates.FirstOrDefault() ?? remainingMembers.FirstOrDefault();
+            if (nextGroupPhoto is not null)
+            {
+                await OpenPhotoViewerAsync(nextGroupPhoto);
+                return;
+            }
+        }
+
+        var sourcePhotos = GetPhotosForReviewTab(sourceReviewTabId).ToList();
+        if (sourcePhotos.Count == 0)
+        {
+            ClosePhotoViewer();
+            return;
+        }
+
+        var nextIndex = sourceTabIndex >= 0 && sourceTabIndex < sourcePhotos.Count
+            ? sourceTabIndex
+            : 0;
+        await OpenPhotoViewerAsync(sourcePhotos[nextIndex]);
+    }
+
     private IEnumerable<AlbumPhotoViewModel> GetPhotosForCategory(string category)
     {
         var photos = GetVisiblePhotos();
         return string.IsNullOrWhiteSpace(category)
             ? photos.Where(photo => string.IsNullOrWhiteSpace(photo.Category))
             : photos.Where(photo => string.Equals(photo.Category, category, StringComparison.Ordinal));
+    }
+
+    private IEnumerable<AlbumPhotoViewModel> GetPhotosForReviewTab(string tabId)
+    {
+        return tabId switch
+        {
+            NiceReviewTabId => GetPhotosForCategory("nice"),
+            OkReviewTabId => GetPhotosForCategory("ok"),
+            TrashReviewTabId => GetPhotosForCategory("trash"),
+            UnresolvedDuplicatesReviewTabId => GetUnresolvedDuplicatePhotos(),
+            _ => GetPhotosForCategory("")
+        };
+    }
+
+    private AlbumPhotoViewModel GetPhotoViewerNavigationAnchor(AlbumPhotoViewModel photo)
+    {
+        return !string.IsNullOrWhiteSpace(photo.DuplicateGroupId) &&
+            _duplicateGroupsById.TryGetValue(photo.DuplicateGroupId, out var members)
+                ? members.FirstOrDefault(member => member.IsDuplicateGroupMain) ?? photo
+                : photo;
     }
 
     private IEnumerable<AlbumPhotoViewModel> GetSelectedPhotos()
@@ -3693,6 +4167,14 @@ public partial class MainViewModel : ViewModelBase
     private IEnumerable<AlbumPhotoViewModel> GetVisiblePhotos()
     {
         return Photos.Where(photo => string.IsNullOrWhiteSpace(photo.DuplicateGroupId) || photo.IsDuplicateGroupMain);
+    }
+
+    private IEnumerable<AlbumPhotoViewModel> GetUnresolvedDuplicatePhotos()
+    {
+        return GetVisiblePhotos().Where(photo =>
+            photo.HasDuplicateGroup &&
+            _duplicateGroupsById.TryGetValue(photo.DuplicateGroupId, out var members) &&
+            !members.Any(member => member.IsBestInDuplicateGroup));
     }
 
     private IEnumerable<AlbumPhotoViewModel> GetDuplicateGroupMembers(AlbumPhotoViewModel photo)
@@ -3857,6 +4339,7 @@ public partial class MainViewModel : ViewModelBase
         _localUserSettingsStore.Save(new LocalUserSettings
         {
             AnonymousReviewerName = AnonymousReviewerName.Trim(),
+            MaximumParallelism = GetMaximumParallelism(),
             PictureDefaultDownloadDirectoryPath = PictureDefaultDownloadDirectoryPath.Trim(),
             UncategorizedDefaultDownloadDirectoryPath = UncategorizedDefaultDownloadDirectoryPath.Trim(),
             NiceDefaultDownloadDirectoryPath = NiceDefaultDownloadDirectoryPath.Trim(),
@@ -3885,6 +4368,17 @@ public partial class MainViewModel : ViewModelBase
         var invalid = Path.GetInvalidFileNameChars();
         var sanitized = new string(value.Select(character => invalid.Contains(character) ? '_' : character).ToArray());
         return string.IsNullOrWhiteSpace(sanitized) ? "anonymous" : sanitized;
+    }
+
+    private int GetMaximumParallelism()
+    {
+        MaximumParallelism = NormalizeMaximumParallelism(MaximumParallelism);
+        return MaximumParallelism;
+    }
+
+    private static int NormalizeMaximumParallelism(int value)
+    {
+        return Math.Clamp(value <= 0 ? LocalUserSettings.DefaultMaximumParallelism : value, 1, 64);
     }
 
     partial void OnSelectedAlbumTypeChanged(AlbumTypeOptionViewModel? value)
@@ -3961,11 +4455,34 @@ public partial class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(HasMoreDriveItems));
         SelectedAlbumPhoto = null;
         AlbumPhotos.Clear();
+        RefreshAlbumPhotoRows();
         ImportCandidates.Clear();
+        RefreshImportCandidateRows();
         IsFolderDateImportVisible = false;
         FolderDateImportSourceText = "";
         _folderDateImportFolders.Clear();
         OnPropertyChanged(nameof(IsImportCandidatesVisible));
+    }
+
+    private void RefreshAlbumPhotoRows()
+    {
+        RefreshSourceRows(AlbumPhotoRows, AlbumPhotos);
+    }
+
+    private void RefreshImportCandidateRows()
+    {
+        RefreshSourceRows(ImportCandidateRows, ImportCandidates);
+    }
+
+    private static void RefreshSourceRows(
+        ObservableCollection<AlbumPhotoSourceRowViewModel> rows,
+        IEnumerable<AlbumPhotoSourceViewModel> photos)
+    {
+        rows.Clear();
+        foreach (var row in photos.Chunk(PhotosPerRow))
+        {
+            rows.Add(new AlbumPhotoSourceRowViewModel(row));
+        }
     }
 
     private async Task<string> GetGoogleAccessTokenAsync(CancellationToken cancellationToken)

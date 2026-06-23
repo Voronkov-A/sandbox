@@ -158,17 +158,11 @@ public sealed class ReviewerFeedbackService
         }
 
         var normalizedSet = normalizedPhotoIds.ToHashSet(StringComparer.Ordinal);
-        var bestPhotoId = database.DuplicateGroups
-            .Where(group => group.PhotoIds.Any(normalizedSet.Contains) &&
-                normalizedSet.Contains(group.BestPhotoId))
-            .Select(group => group.BestPhotoId)
-            .FirstOrDefault() ?? "";
         database.DuplicateGroups.RemoveAll(group => group.PhotoIds.Any(normalizedSet.Contains));
         database.DuplicateGroups.Add(new DuplicatePhotoGroup
         {
             Id = Guid.NewGuid().ToString("N"),
-            PhotoIds = normalizedPhotoIds,
-            BestPhotoId = bestPhotoId
+            PhotoIds = normalizedPhotoIds
         });
 
         database.UpdatedAt = DateTimeOffset.UtcNow;

@@ -6,38 +6,47 @@ public static class AlbumPublishingWorkflow
 {
     public static async Task<IReadOnlyList<PhotoReference>> PublishPhotosAsync(
         IReadOnlyList<PhotoUploadSource> photos,
+        string albumTitle,
+        int maximumParallelism,
         Func<PreparedAlbumPhoto, CancellationToken, Task<StoredAlbumPhoto>> storePhotoAsync,
         CancellationToken cancellationToken)
     {
-        var photoReferences = new List<PhotoReference>();
-        foreach (var photo in photos)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            var photoId = Guid.NewGuid().ToString("N");
-            var contentType = GetContentType(photo.FileName);
-
-            await using var thumbnailSourceStream = await photo.OpenReadAsync();
-            await using var thumbnailStream = PhotoThumbnailGenerator.CreateJpegThumbnail(thumbnailSourceStream);
-            await using var contentStream = await photo.OpenReadAsync();
-
-            var storedPhoto = await storePhotoAsync(
-                new PreparedAlbumPhoto(photoId, photo.FileName, contentType, contentStream, thumbnailStream),
-                cancellationToken);
-
-            photoReferences.Add(new PhotoReference
+        var photoReferences = new PhotoReference[photos.Count];
+        await Parallel.ForEachAsync(
+            photos.Select((photo, index) => (Photo: photo, Index: index)),
+            new ParallelOptions
             {
-                Id = photoId,
-                FileName = photo.FileName,
-                ContentType = contentType,
-                BackendType = storedPhoto.BackendType,
-                DriveFileId = storedPhoto.DriveFileId,
-                DownloadUrl = storedPhoto.DownloadUrl,
-                ThumbnailDriveFileId = storedPhoto.ThumbnailDriveFileId,
-                ThumbnailDownloadUrl = storedPhoto.ThumbnailDownloadUrl,
-                ThumbnailContentType = PhotoThumbnailGenerator.ContentType
+                MaxDegreeOfParallelism = Math.Max(1, maximumParallelism),
+                CancellationToken = cancellationToken
+            },
+            async (entry, token) =>
+            {
+                var photo = entry.Photo;
+                var storedFileName = CreateStoredPhotoFileName(albumTitle, entry.Index + 1, photo.FileName);
+                var contentType = GetContentType(photo.FileName);
+
+                await using var thumbnailSourceStream = await photo.OpenReadAsync();
+                await using var thumbnailStream = PhotoThumbnailGenerator.CreateJpegThumbnail(thumbnailSourceStream);
+                await using var contentStream = await photo.OpenReadAsync();
+
+                var photoId = Guid.NewGuid().ToString("N");
+                var storedPhoto = await storePhotoAsync(
+                    new PreparedAlbumPhoto(photoId, storedFileName, contentType, contentStream, thumbnailStream),
+                    token);
+
+                photoReferences[entry.Index] = new PhotoReference
+                {
+                    Id = photoId,
+                    FileName = storedFileName,
+                    ContentType = contentType,
+                    BackendType = storedPhoto.BackendType,
+                    DriveFileId = storedPhoto.DriveFileId,
+                    DownloadUrl = storedPhoto.DownloadUrl,
+                    ThumbnailDriveFileId = storedPhoto.ThumbnailDriveFileId,
+                    ThumbnailDownloadUrl = storedPhoto.ThumbnailDownloadUrl,
+                    ThumbnailContentType = PhotoThumbnailGenerator.ContentType
+                };
             });
-        }
 
         return photoReferences;
     }
@@ -73,6 +82,15 @@ public static class AlbumPublishingWorkflow
         return $"{photoId}-thumbnail.jpg";
     }
 
+    public static string CreateStoredPhotoFileName(string albumTitle, int index, string originalFileName)
+    {
+        var albumName = Sanitize(string.IsNullOrWhiteSpace(albumTitle) ? "Picshare_album" : albumTitle.Trim());
+        var extension = Path.GetExtension(originalFileName);
+        return string.IsNullOrWhiteSpace(extension)
+            ? $"{albumName}_{index:00000}"
+            : $"{albumName}_{index:00000}{extension.ToLowerInvariant()}";
+    }
+
     private static string GetContentType(string path)
     {
         return Path.GetExtension(path).ToLowerInvariant() switch
@@ -84,6 +102,13 @@ public static class AlbumPublishingWorkflow
             ".bmp" => "image/bmp",
             _ => "application/octet-stream"
         };
+    }
+
+    private static string Sanitize(string value)
+    {
+        var invalid = Path.GetInvalidFileNameChars();
+        var sanitized = new string(value.Select(character => invalid.Contains(character) ? '_' : character).ToArray());
+        return string.IsNullOrWhiteSpace(sanitized) ? "_" : sanitized;
     }
 }
 

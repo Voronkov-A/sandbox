@@ -41,6 +41,8 @@ public sealed class GoogleDriveAlbumPublisher
 
         var photoReferences = await AlbumPublishingWorkflow.PublishPhotosAsync(
             request.Photos,
+            request.Title,
+            LocalUserSettings.DefaultMaximumParallelism,
             async (photo, token) =>
             {
                 var driveFile = await client.UploadFileAsync(

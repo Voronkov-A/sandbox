@@ -73,6 +73,21 @@
                                FontSize="20"
                                FontWeight="Bold"
                                Foreground="White"/>
+                    <Border Width="22"
+                            Height="22"
+                            HorizontalAlignment="Right"
+                            VerticalAlignment="Bottom"
+                            Background="#1E8E3E"
+                            BorderBrush="White"
+                            BorderThickness="1"
+                            IsVisible="{Binding IsBestMarkerVisible}">
+                      <TextBlock Text="V"
+                                 Foreground="White"
+                                 FontSize="16"
+                                 FontWeight="Bold"
+                                 HorizontalAlignment="Center"
+                                 VerticalAlignment="Center"/>
+                    </Border>
                   </Grid>
                 </Border>
                 <Button HorizontalAlignment="Right"
@@ -110,6 +125,51 @@
         <ItemsControl ItemsSource="{Binding Rows}"
                       ItemTemplate="{StaticResource AlbumPhotoRowTemplate}"/>
       </StackPanel>
+    </DataTemplate>
+
+    <DataTemplate x:Key="AlbumPhotoSourceRowTemplate" x:DataType="vm:AlbumPhotoSourceRowViewModel">
+      <ItemsControl ItemsSource="{Binding Photos}">
+        <ItemsControl.ItemsPanel>
+          <ItemsPanelTemplate>
+            <StackPanel Orientation="Horizontal"/>
+          </ItemsPanelTemplate>
+        </ItemsControl.ItemsPanel>
+        <ItemsControl.ItemTemplate>
+          <DataTemplate x:DataType="vm:AlbumPhotoSourceViewModel">
+            <Button Click="AlbumPhotoSource_Click"
+                    Padding="0"
+                    Margin="0,0,8,8"
+                    Background="Transparent"
+                    BorderThickness="0"
+                    ToolTip.Tip="{Binding FileName}">
+              <Border Width="76"
+                      Height="76"
+                      Background="#EDF0ED"
+                      BorderBrush="{Binding CardBorderBrush}"
+                      BorderThickness="{Binding CardBorderThickness}"
+                      CornerRadius="4"
+                      ClipToBounds="True">
+                <Grid RowDefinitions="*,22">
+                  <TextBlock Text="IMG"
+                             HorizontalAlignment="Center"
+                             VerticalAlignment="Center"
+                             Foreground="#6C756F"
+                             FontSize="12"
+                             FontWeight="SemiBold"/>
+                  <Border Grid.Row="1"
+                          Background="#D9FFFFFF"
+                          Padding="4,2">
+                    <TextBlock Text="{Binding FileName}"
+                               FontSize="10"
+                               TextTrimming="CharacterEllipsis"
+                               HorizontalAlignment="Center"/>
+                  </Border>
+                </Grid>
+              </Border>
+            </Button>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
     </DataTemplate>
   </UserControl.Resources>
 
@@ -185,42 +245,17 @@
                       <ListBox x:Name="AlbumPhotosList"
                                Grid.Row="0"
                                Grid.ColumnSpan="3"
-                               ItemsSource="{Binding AlbumPhotos}"
-                               SelectedItem="{Binding SelectedAlbumPhoto}"
-                               SelectionMode="Multiple"
+                               ItemsSource="{Binding AlbumPhotoRows}"
+                               SelectionMode="Single"
                                MinHeight="150"
                                MaxHeight="260"
+                               ItemTemplate="{StaticResource AlbumPhotoSourceRowTemplate}"
                                ScrollViewer.HorizontalScrollBarVisibility="Disabled">
                         <ListBox.ItemsPanel>
                           <ItemsPanelTemplate>
-                            <WrapPanel Orientation="Horizontal"/>
+                            <VirtualizingStackPanel/>
                           </ItemsPanelTemplate>
                         </ListBox.ItemsPanel>
-                        <ListBox.ItemTemplate>
-                          <DataTemplate x:DataType="vm:AlbumPhotoSourceViewModel">
-                            <Border Width="76"
-                                    Height="76"
-                                    Margin="0,0,8,8"
-                                    Background="#EDF0ED"
-                                    BorderBrush="#D6D8D1"
-                                    BorderThickness="1"
-                                    CornerRadius="4"
-                                    ClipToBounds="True"
-                                    ToolTip.Tip="{Binding FileName}">
-                              <Grid>
-                                <Image Source="{Binding Thumbnail}" Stretch="UniformToFill"/>
-                                <Border Background="#EDF0ED" IsVisible="{Binding HasThumbnailError}">
-                                  <TextBlock Text="IMG"
-                                             HorizontalAlignment="Center"
-                                             VerticalAlignment="Center"
-                                             Foreground="#6C756F"
-                                             FontSize="12"
-                                             FontWeight="SemiBold"/>
-                                </Border>
-                              </Grid>
-                            </Border>
-                          </DataTemplate>
-                        </ListBox.ItemTemplate>
                       </ListBox>
                       <Button Grid.Row="1"
                               Grid.Column="1"
@@ -527,41 +562,17 @@
                 <StackPanel Spacing="8" IsVisible="{Binding IsImportCandidatesVisible}">
                   <TextBlock Text="Matching photos" FontWeight="SemiBold"/>
                   <ListBox x:Name="ImportCandidatesList"
-                           ItemsSource="{Binding ImportCandidates}"
-                           SelectionMode="Multiple"
+                           ItemsSource="{Binding ImportCandidateRows}"
+                           SelectionMode="Single"
                            MinHeight="180"
                            MaxHeight="260"
+                           ItemTemplate="{StaticResource AlbumPhotoSourceRowTemplate}"
                            ScrollViewer.HorizontalScrollBarVisibility="Disabled">
                     <ListBox.ItemsPanel>
                       <ItemsPanelTemplate>
-                        <WrapPanel Orientation="Horizontal"/>
+                        <VirtualizingStackPanel/>
                       </ItemsPanelTemplate>
                     </ListBox.ItemsPanel>
-                    <ListBox.ItemTemplate>
-                      <DataTemplate x:DataType="vm:AlbumPhotoSourceViewModel">
-                        <Border Width="76"
-                                Height="76"
-                                Margin="0,0,8,8"
-                                Background="#EDF0ED"
-                                BorderBrush="#D6D8D1"
-                                BorderThickness="1"
-                                CornerRadius="4"
-                                ClipToBounds="True"
-                                ToolTip.Tip="{Binding FileName}">
-                          <Grid>
-                            <Image Source="{Binding Thumbnail}" Stretch="UniformToFill"/>
-                            <Border Background="#EDF0ED" IsVisible="{Binding HasThumbnailError}">
-                              <TextBlock Text="IMG"
-                                         HorizontalAlignment="Center"
-                                         VerticalAlignment="Center"
-                                         Foreground="#6C756F"
-                                         FontSize="12"
-                                         FontWeight="SemiBold"/>
-                            </Border>
-                          </Grid>
-                        </Border>
-                      </DataTemplate>
-                    </ListBox.ItemTemplate>
                   </ListBox>
                   <Grid ColumnDefinitions="Auto,Auto,*,Auto">
                     <Button Click="AddSelectedImportCandidates_Click" Padding="12,8" Margin="0,0,8,0">Add selected</Button>
@@ -599,8 +610,7 @@
                     <MenuFlyout.ItemTemplate>
                       <DataTemplate x:DataType="vm:RecentAlbumViewModel">
                         <MenuItem Header="{Binding DisplayText}"
-                                  Command="{Binding $parent[UserControl].DataContext.OpenRecentAlbumCommand}"
-                                  CommandParameter="{Binding}"/>
+                                  Click="RecentAlbum_Click"/>
                       </DataTemplate>
                     </MenuFlyout.ItemTemplate>
                   </MenuFlyout>
@@ -659,7 +669,7 @@
                 </Button>
               </Grid>
               <TabControl x:Name="AlbumReviewTabs" Grid.Row="1" SelectionChanged="AlbumReviewTabs_SelectionChanged">
-                <TabItem Header="{Binding UncategorizedTabHeader}">
+                <TabItem Header="{Binding UncategorizedTabHeader}" Tag="uncategorized">
                   <ListBox ItemsSource="{Binding UncategorizedPhotoGroups}"
                            Background="Transparent"
                            BorderThickness="0"
@@ -672,7 +682,7 @@
                     </ListBox.ItemsPanel>
                   </ListBox>
                 </TabItem>
-                <TabItem Header="{Binding NiceTabHeader}">
+                <TabItem Header="{Binding NiceTabHeader}" Tag="nice">
                   <ListBox ItemsSource="{Binding NicePhotoGroups}"
                            Background="Transparent"
                            BorderThickness="0"
@@ -685,7 +695,7 @@
                     </ListBox.ItemsPanel>
                   </ListBox>
                 </TabItem>
-                <TabItem Header="{Binding OkTabHeader}">
+                <TabItem Header="{Binding OkTabHeader}" Tag="ok">
                   <ListBox ItemsSource="{Binding OkPhotoGroups}"
                            Background="Transparent"
                            BorderThickness="0"
@@ -698,7 +708,7 @@
                     </ListBox.ItemsPanel>
                   </ListBox>
                 </TabItem>
-                <TabItem Header="{Binding TrashTabHeader}">
+                <TabItem Header="{Binding TrashTabHeader}" Tag="trash">
                   <ListBox ItemsSource="{Binding TrashPhotoGroups}"
                            Background="Transparent"
                            BorderThickness="0"
@@ -711,7 +721,22 @@
                     </ListBox.ItemsPanel>
                   </ListBox>
                 </TabItem>
-                <TabItem Header="{Binding FlowTabHeader}" IsVisible="{Binding IsAuthorFlowVisible}" Tag="Flow">
+                <TabItem Header="{Binding UnresolvedDuplicatesTabHeader}"
+                         Tag="unresolved-duplicates"
+                         IsVisible="{Binding HasUnresolvedDuplicatePhotos}">
+                  <ListBox ItemsSource="{Binding UnresolvedDuplicatePhotoGroups}"
+                           Background="Transparent"
+                           BorderThickness="0"
+                           ItemTemplate="{StaticResource AlbumPhotoGroupTemplate}"
+                           ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                    <ListBox.ItemsPanel>
+                      <ItemsPanelTemplate>
+                        <VirtualizingStackPanel/>
+                      </ItemsPanelTemplate>
+                    </ListBox.ItemsPanel>
+                  </ListBox>
+                </TabItem>
+                <TabItem Header="{Binding FlowTabHeader}" IsVisible="{Binding IsAuthorFlowVisible}" Tag="flow">
                   <ScrollViewer>
                     <StackPanel Spacing="16">
                       <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto">
@@ -1000,6 +1025,13 @@
                      Watermark="Name shown in local album flow lists"/>
           </StackPanel>
           <StackPanel Spacing="5">
+            <TextBlock Text="Maximum parallel operations" FontWeight="SemiBold"/>
+            <NumericUpDown Value="{Binding MaximumParallelism}"
+                           Minimum="1"
+                           Maximum="64"
+                           Increment="1"/>
+          </StackPanel>
+          <StackPanel Spacing="5">
             <TextBlock Text="Default download directories" FontWeight="SemiBold"/>
             <Grid ColumnDefinitions="150,*,Auto,Auto" RowDefinitions="Auto,Auto,Auto,Auto,Auto">
               <TextBlock Text="Picture" VerticalAlignment="Center" Margin="0,0,8,8"/>
@@ -1199,6 +1231,159 @@
                     Command="{Binding CancelAlbumDownloadProgressCommand}"
                     Padding="12,8">
               Cancel
+            </Button>
+          </Grid>
+        </StackPanel>
+      </Border>
+    </Grid>
+
+    <Grid Grid.RowSpan="3"
+          Background="#80000000"
+          IsVisible="{Binding IsAlbumCreationProgressVisible}">
+      <Border Background="White"
+              BorderBrush="#D6D8D1"
+              BorderThickness="1"
+              CornerRadius="6"
+              Padding="18"
+              Margin="20"
+              MaxWidth="520"
+              HorizontalAlignment="Stretch"
+              VerticalAlignment="Center">
+        <StackPanel Spacing="12">
+          <TextBlock Text="Creating album" FontSize="18" FontWeight="SemiBold"/>
+          <TextBlock Text="{Binding AlbumCreationProgressMessage}" TextWrapping="Wrap"/>
+          <ProgressBar Minimum="0"
+                       Maximum="{Binding AlbumCreationProgressMaximum}"
+                       Value="{Binding AlbumCreationProgressValue}"
+                       Height="10"/>
+          <Grid ColumnDefinitions="*,Auto">
+            <Button Grid.Column="1"
+                    Command="{Binding CancelAlbumCreationProgressCommand}"
+                    Padding="12,8">
+              Cancel
+            </Button>
+          </Grid>
+        </StackPanel>
+      </Border>
+    </Grid>
+
+    <Grid Grid.RowSpan="3"
+          Background="#99000000"
+          IsVisible="{Binding IsClearAlbumDestinationConfirmationVisible}">
+      <Border Background="White"
+              BorderBrush="#B42318"
+              BorderThickness="2"
+              CornerRadius="6"
+              Padding="18"
+              Margin="20"
+              MaxWidth="520"
+              HorizontalAlignment="Stretch"
+              VerticalAlignment="Center">
+        <Grid ColumnDefinitions="64,*" RowDefinitions="Auto,Auto,Auto">
+          <Border Grid.RowSpan="3"
+                  Width="48"
+                  Height="48"
+                  CornerRadius="24"
+                  Background="#FEE4E2"
+                  BorderBrush="#B42318"
+                  BorderThickness="2"
+                  VerticalAlignment="Top">
+            <TextBlock Text="X"
+                       Foreground="#B42318"
+                       FontSize="24"
+                       FontWeight="Bold"
+                       HorizontalAlignment="Center"
+                       VerticalAlignment="Center"/>
+          </Border>
+          <TextBlock Grid.Column="1"
+                     Text="Clear destination"
+                     FontSize="18"
+                     FontWeight="SemiBold"
+                     Foreground="#7A271A"/>
+          <TextBlock Grid.Row="1"
+                     Grid.Column="1"
+                     Text="{Binding ClearAlbumDestinationConfirmationMessage}"
+                     TextWrapping="Wrap"
+                     Margin="0,8,0,14"/>
+          <Grid Grid.Row="2" Grid.Column="1" ColumnDefinitions="*,Auto,Auto">
+            <Button Grid.Column="1"
+                    Command="{Binding CancelClearAlbumDestinationCommand}"
+                    Padding="12,8"
+                    Margin="0,0,8,0">
+              No
+            </Button>
+            <Button Grid.Column="2"
+                    Command="{Binding ConfirmClearAlbumDestinationCommand}"
+                    Background="#B42318"
+                    Foreground="White"
+                    BorderBrush="#7A271A"
+                    Padding="12,8">
+              Yes, clear and upload
+            </Button>
+          </Grid>
+        </Grid>
+      </Border>
+    </Grid>
+
+    <Grid Grid.RowSpan="3"
+          Background="#80000000"
+          IsVisible="{Binding IsAlbumDeletionProgressVisible}">
+      <Border Background="White"
+              BorderBrush="#D6D8D1"
+              BorderThickness="1"
+              CornerRadius="6"
+              Padding="18"
+              Margin="20"
+              MaxWidth="520"
+              HorizontalAlignment="Stretch"
+              VerticalAlignment="Center">
+        <StackPanel Spacing="12">
+          <TextBlock Text="Deleting album" FontSize="18" FontWeight="SemiBold"/>
+          <TextBlock Text="{Binding AlbumDeletionProgressMessage}" TextWrapping="Wrap"/>
+          <ProgressBar Minimum="0"
+                       Maximum="{Binding AlbumDeletionProgressMaximum}"
+                       Value="{Binding AlbumDeletionProgressValue}"
+                       Height="10"/>
+          <Grid ColumnDefinitions="*,Auto">
+            <Button Grid.Column="1"
+                    Command="{Binding CancelAlbumDeletionProgressCommand}"
+                    Padding="12,8">
+              Cancel
+            </Button>
+          </Grid>
+        </StackPanel>
+      </Border>
+    </Grid>
+
+    <Grid Grid.RowSpan="3"
+          Background="#99000000"
+          IsVisible="{Binding IsCancelAlbumDeletionConfirmationVisible}">
+      <Border Background="White"
+              BorderBrush="#B42318"
+              BorderThickness="2"
+              CornerRadius="6"
+              Padding="18"
+              Margin="20"
+              MaxWidth="520"
+              HorizontalAlignment="Stretch"
+              VerticalAlignment="Center">
+        <StackPanel Spacing="12">
+          <TextBlock Text="Stop deletion" FontSize="18" FontWeight="SemiBold" Foreground="#7A271A"/>
+          <TextBlock Text="{Binding CancelAlbumDeletionConfirmationMessage}" TextWrapping="Wrap"/>
+          <Grid ColumnDefinitions="*,Auto,Auto">
+            <Button Grid.Column="1"
+                    Command="{Binding KeepAlbumDeletionRunningCommand}"
+                    Padding="12,8"
+                    Margin="0,0,8,0">
+              No
+            </Button>
+            <Button Grid.Column="2"
+                    Command="{Binding ForceCancelAlbumDeletionCommand}"
+                    Background="#B42318"
+                    Foreground="White"
+                    BorderBrush="#7A271A"
+                    Padding="12,8">
+              Yes, stop
             </Button>
           </Grid>
         </StackPanel>
@@ -1519,6 +1704,20 @@
             </ScrollViewer>
             <Border Background="#99000000"
                     CornerRadius="6"
+                    Padding="10"
+                    Margin="0,18,0,0"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Top"
+                    IsVisible="{Binding IsPhotoViewerDuplicateStripVisible}">
+              <CheckBox Command="{Binding ToggleCurrentPhotoBestInDuplicateGroupCommand}"
+                        IsChecked="{Binding IsCurrentPhotoBestInDuplicateGroup, Mode=OneWay}"
+                        Foreground="White"
+                        FontWeight="SemiBold">
+                Best in the group
+              </CheckBox>
+            </Border>
+            <Border Background="#99000000"
+                    CornerRadius="6"
                     Padding="8"
                     Margin="0,0,0,92"
                     HorizontalAlignment="Center"
@@ -1676,15 +1875,6 @@
                       <MenuItem Header="Remove from duplicates"
                                 Command="{Binding RemoveCurrentPhotoFromDuplicatesCommand}"
                                 IsEnabled="{Binding CanRemoveCurrentPhotoFromDuplicates}"/>
-                      <MenuItem Command="{Binding ToggleCurrentPhotoBestInDuplicateGroupCommand}"
-                                IsEnabled="{Binding CanRemoveCurrentPhotoFromDuplicates}">
-                        <MenuItem.Header>
-                          <CheckBox IsChecked="{Binding IsCurrentPhotoBestInDuplicateGroup}"
-                                    IsHitTestVisible="False">
-                            Best in the group
-                          </CheckBox>
-                        </MenuItem.Header>
-                      </MenuItem>
                       <MenuItem Header="Download..."
                                 Click="DownloadCurrentPhoto_Click"
                                 IsEnabled="{Binding CanDownloadCurrentPhoto}"/>

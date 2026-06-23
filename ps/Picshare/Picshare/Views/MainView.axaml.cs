@@ -285,13 +285,7 @@ public partial class MainView : UserControl
             return;
         }
 
-        var selectedItems = ImportCandidatesList.SelectedItems;
-        if (selectedItems is null)
-        {
-            return;
-        }
-
-        var selectedPhotos = selectedItems.OfType<AlbumPhotoSourceViewModel>().ToList();
+        var selectedPhotos = viewModel.ImportCandidates.Where(photo => photo.IsSelected).ToList();
         viewModel.AddImportCandidates(selectedPhotos);
     }
 
@@ -302,14 +296,25 @@ public partial class MainView : UserControl
             return;
         }
 
-        var selectedItems = AlbumPhotosList.SelectedItems;
-        if (selectedItems is null)
+        var selectedPhotos = viewModel.AlbumPhotos.Where(photo => photo.IsSelected).ToList();
+        viewModel.RemoveAlbumPhotos(selectedPhotos);
+    }
+
+    private void AlbumPhotoSource_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not MainViewModel viewModel ||
+            sender is not Control { DataContext: AlbumPhotoSourceViewModel photo })
         {
             return;
         }
 
-        var selectedPhotos = selectedItems.OfType<AlbumPhotoSourceViewModel>().ToList();
-        viewModel.RemoveAlbumPhotos(selectedPhotos);
+        if (viewModel.ImportCandidates.Contains(photo))
+        {
+            viewModel.ToggleImportCandidateSelection(photo);
+            return;
+        }
+
+        viewModel.ToggleAlbumPhotoSourceSelection(photo);
     }
 
     private async void SignInGoogle_Click(object? sender, RoutedEventArgs e)
@@ -399,18 +404,23 @@ public partial class MainView : UserControl
         }
     }
 
+    private void RecentAlbum_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is MainViewModel viewModel &&
+            sender is Control { DataContext: RecentAlbumViewModel recentAlbum } &&
+            viewModel.OpenRecentAlbumCommand.CanExecute(recentAlbum))
+        {
+            viewModel.OpenRecentAlbumCommand.Execute(recentAlbum);
+            e.Handled = true;
+        }
+    }
+
     private void AlbumReviewTabs_SelectionChanged(object? sender, SelectionChangedEventArgs e)
     {
         if (DataContext is MainViewModel viewModel &&
-            sender is TabControl { SelectedItem: TabItem { Tag: "Flow" } })
+            sender is TabControl { SelectedItem: TabItem selectedTab })
         {
-            viewModel.SetFlowTabActive(true);
-            return;
-        }
-
-        if (DataContext is MainViewModel inactiveViewModel)
-        {
-            inactiveViewModel.SetFlowTabActive(false);
+            viewModel.SetActiveReviewTab(selectedTab.Tag?.ToString() ?? "");
         }
     }
 

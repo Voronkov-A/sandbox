@@ -29,10 +29,14 @@ public sealed class AlbumDeletionService
         FeedbackReviewerIdentity requestedBy,
         IReviewerFeedbackBackend feedbackBackend,
         Func<CancellationToken, Task<string>> getGoogleAccessTokenAsync,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IProgress<AlbumDeletionProgress>? progress = null,
+        int maximumParallelism = LocalUserSettings.DefaultMaximumParallelism)
     {
+        progress?.Report(new AlbumDeletionProgress("Saving deletion request", 0, 4));
         await SavePendingDeletionAsync(manifest, requestedBy, cancellationToken);
 
+        progress?.Report(new AlbumDeletionProgress("Writing deletion marker", 1, 4));
         var existingMarker = await feedbackBackend.LoadAlbumDeletionMarkerAsync(cancellationToken);
         if (existingMarker is null)
         {
@@ -44,9 +48,12 @@ public sealed class AlbumDeletionService
             }, cancellationToken);
         }
 
-        await DeleteRemoteStorageAsync(manifest, getGoogleAccessTokenAsync, cancellationToken);
+        progress?.Report(new AlbumDeletionProgress("Deleting album storage", 2, 4));
+        await DeleteRemoteStorageAsync(manifest, getGoogleAccessTokenAsync, maximumParallelism, cancellationToken);
+        progress?.Report(new AlbumDeletionProgress("Deleting local state", 3, 4));
         await DeleteLocalStateAsync(manifest.AlbumId);
         DeletePendingDeletion(manifest.AlbumId);
+        progress?.Report(new AlbumDeletionProgress("Album deleted", 4, 4));
     }
 
     public async Task<IReadOnlyList<PendingAlbumDeletion>> LoadPendingDeletionsAsync(CancellationToken cancellationToken)
@@ -122,6 +129,7 @@ public sealed class AlbumDeletionService
     private static async Task DeleteRemoteStorageAsync(
         AlbumManifest manifest,
         Func<CancellationToken, Task<string>> getGoogleAccessTokenAsync,
+        int maximumParallelism,
         CancellationToken cancellationToken)
     {
         if (manifest.GoogleDrive is not null)
@@ -173,3 +181,5 @@ public sealed record PendingAlbumDeletion
 
     public required DateTimeOffset UpdatedAt { get; init; }
 }
+
+public sealed record AlbumDeletionProgress(string Message, int Value, int Maximum);

@@ -33,13 +33,11 @@ public sealed class LocalFileSystemAlbumPublisher
 
         var photoReferences = await AlbumPublishingWorkflow.PublishPhotosAsync(
             request.Photos,
+            request.Title,
+            LocalUserSettings.DefaultMaximumParallelism,
             async (photo, token) =>
             {
-                var extension = Path.GetExtension(photo.FileName);
-                var storedFileName = string.IsNullOrWhiteSpace(extension)
-                    ? photo.PhotoId
-                    : $"{photo.PhotoId}{extension}";
-                var storedPath = Path.Combine(photosFolderPath, storedFileName);
+                var storedPath = Path.Combine(photosFolderPath, photo.FileName);
                 var thumbnailPath = Path.Combine(photosFolderPath, AlbumPublishingWorkflow.CreateThumbnailFileName(photo.PhotoId));
 
                 await using (var destination = File.Create(storedPath))

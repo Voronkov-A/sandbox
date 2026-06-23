@@ -69,7 +69,8 @@ public sealed class LocalPhotoScanner
                 new PhotoUploadSource(
                     file.Name,
                     key,
-                    async () => await file.OpenReadAsync()));
+                    async () => await file.OpenReadAsync(),
+                    string.IsNullOrWhiteSpace(localPath) ? null : Path.GetFullPath(localPath)));
         }
     }
 
