@@ -475,15 +475,15 @@ public partial class MainViewModel : ViewModelBase
 
     public ObservableCollection<RecentAlbumViewModel> RecentAlbums { get; } = new();
 
-    public ObservableCollection<AlbumPhotoGroupViewModel> UncategorizedPhotoGroups { get; } = new();
+    public ObservableCollection<object> UncategorizedPhotoGroups { get; } = new();
 
-    public ObservableCollection<AlbumPhotoGroupViewModel> NicePhotoGroups { get; } = new();
+    public ObservableCollection<object> NicePhotoGroups { get; } = new();
 
-    public ObservableCollection<AlbumPhotoGroupViewModel> OkPhotoGroups { get; } = new();
+    public ObservableCollection<object> OkPhotoGroups { get; } = new();
 
-    public ObservableCollection<AlbumPhotoGroupViewModel> TrashPhotoGroups { get; } = new();
+    public ObservableCollection<object> TrashPhotoGroups { get; } = new();
 
-    public ObservableCollection<AlbumPhotoGroupViewModel> UnresolvedDuplicatePhotoGroups { get; } = new();
+    public ObservableCollection<object> UnresolvedDuplicatePhotoGroups { get; } = new();
 
     public ObservableCollection<ReviewerFeedbackFlowItemViewModel> CommittedReviewers { get; } = new();
 
@@ -893,7 +893,9 @@ public partial class MainViewModel : ViewModelBase
         {
             if (string.IsNullOrWhiteSpace(category.DestinationDirectoryPath))
             {
-                Status = $"Choose a destination directory for {category.CategoryName}.";
+                Status = category.SelectedMode.Id == "archive"
+                    ? $"Choose a destination archive file for {category.CategoryName}."
+                    : $"Choose a destination directory for {category.CategoryName}.";
                 return;
             }
         }
@@ -1392,15 +1394,26 @@ public partial class MainViewModel : ViewModelBase
         }
     }
 
-    public async Task DownloadCurrentPhotoAsync(string destinationDirectoryPath)
+    public string CurrentPhotoDownloadFileName => _selectedViewedPhoto is { } photo
+        ? GetSafeDownloadFileName(photo)
+        : "photo";
+
+    public string SelectedPhotosArchiveFileName => GetSafeArchiveFileName($"{CurrentAlbumTitle}_selected.zip");
+
+    public string GetAlbumCategoryArchiveFileName(AlbumDownloadCategoryViewModel category)
     {
-        if (string.IsNullOrWhiteSpace(destinationDirectoryPath))
+        return GetSafeArchiveFileName($"{CurrentAlbumTitle}_{category.CategoryName}.zip");
+    }
+
+    public async Task DownloadCurrentPhotoAsync(string destinationFilePath)
+    {
+        if (string.IsNullOrWhiteSpace(destinationFilePath))
         {
-            Status = "Choose a destination folder.";
+            Status = "Choose a destination file.";
             return;
         }
 
-        await CopyCurrentOriginalPhotoAsync(destinationDirectoryPath, "Downloaded");
+        await CopyCurrentOriginalPhotoAsync(destinationFilePath, "Downloaded");
     }
 
     [RelayCommand]
@@ -2501,6 +2514,18 @@ public partial class MainViewModel : ViewModelBase
         photo.StopViewportLoad();
     }
 
+    public void PrioritizePhotoViewportLoads(IReadOnlyList<AlbumPhotoViewModel> photos)
+    {
+        var priorityPhotos = photos
+            .SelectMany(photo => photo.DuplicateStackPhoto is not null && !ReferenceEquals(photo.DuplicateStackPhoto, photo)
+                ? new[] { photo, photo.DuplicateStackPhoto }
+                : new[] { photo })
+            .Where(photo => !photo.IsFullImageLoaded)
+            .ToList();
+
+        AlbumPhotoViewModel.PrioritizeViewportLoads(priorityPhotos);
+    }
+
     public void TogglePhotoSelection(AlbumPhotoViewModel photo)
     {
         photo.IsSelectedForBulk = !photo.IsSelectedForBulk;
@@ -2575,11 +2600,11 @@ public partial class MainViewModel : ViewModelBase
         }
     }
 
-    public async Task DownloadSelectedPhotosAsync(string destinationDirectoryPath, bool asArchive)
+    public async Task DownloadSelectedPhotosAsync(string destinationPath, bool asArchive)
     {
-        if (string.IsNullOrWhiteSpace(destinationDirectoryPath))
+        if (string.IsNullOrWhiteSpace(destinationPath))
         {
-            Status = "Choose a destination folder.";
+            Status = asArchive ? "Choose a destination archive file." : "Choose a destination folder.";
             return;
         }
 
@@ -2608,8 +2633,7 @@ public partial class MainViewModel : ViewModelBase
             {
                 await DownloadPhotoArchiveAsync(
                     photos,
-                    destinationDirectoryPath,
-                    GetSafeArchiveFileName($"{CurrentAlbumTitle}-selected.zip"),
+                    destinationPath,
                     "selected photos",
                     cancellation.Token);
             }
@@ -2617,7 +2641,7 @@ public partial class MainViewModel : ViewModelBase
             {
                 await DownloadPhotoFilesAsync(
                     photos,
-                    destinationDirectoryPath,
+                    destinationPath,
                     "selected photos",
                     cancellation.Token);
             }
@@ -2967,7 +2991,7 @@ public partial class MainViewModel : ViewModelBase
         }
     }
 
-    private async Task CopyCurrentOriginalPhotoAsync(string destinationDirectoryPath, string successVerb)
+    private async Task CopyCurrentOriginalPhotoAsync(string destinationFilePath, string successVerb)
     {
         if (_selectedViewedPhoto is not { } photo)
         {
@@ -2978,11 +3002,15 @@ public partial class MainViewModel : ViewModelBase
         try
         {
             IsBusy = true;
-            Directory.CreateDirectory(destinationDirectoryPath);
+            var destinationPath = Path.GetFullPath(destinationFilePath.Trim());
+            var destinationDirectoryPath = Path.GetDirectoryName(destinationPath);
+            if (string.IsNullOrWhiteSpace(destinationDirectoryPath))
+            {
+                Status = "Choose a destination file.";
+                return;
+            }
 
-            var destinationPath = GetAvailableDestinationPath(
-                destinationDirectoryPath,
-                GetSafeDownloadFileName(photo));
+            Directory.CreateDirectory(destinationDirectoryPath);
             var tempPath = Path.Combine(destinationDirectoryPath, $".{Guid.NewGuid():N}.tmp");
 
             try
@@ -3002,7 +3030,7 @@ public partial class MainViewModel : ViewModelBase
                         CancellationToken.None);
                 }
 
-                File.Move(tempPath, destinationPath);
+                File.Move(tempPath, destinationPath, overwrite: true);
             }
             finally
             {
@@ -3031,6 +3059,7 @@ public partial class MainViewModel : ViewModelBase
             categoryName,
             GetPhotosForCategory(categoryKey).Count(),
             defaultDestination,
+            GetSafeArchiveFileName($"{CurrentAlbumTitle}_{categoryName}.zip"),
             defaultModeId));
     }
 
@@ -3054,7 +3083,6 @@ public partial class MainViewModel : ViewModelBase
         await DownloadPhotoArchiveAsync(
             photos,
             category.DestinationDirectoryPath,
-            GetSafeArchiveFileName($"{CurrentAlbumTitle}-{category.CategoryName}.zip"),
             category.CategoryName,
             cancellationToken);
     }
@@ -3124,14 +3152,18 @@ public partial class MainViewModel : ViewModelBase
 
     private async Task DownloadPhotoArchiveAsync(
         IReadOnlyList<AlbumPhotoViewModel> photos,
-        string destinationDirectoryPath,
-        string archiveFileName,
+        string archiveFilePath,
         string progressScope,
         CancellationToken cancellationToken)
     {
-        var destinationDirectory = Path.GetFullPath(destinationDirectoryPath.Trim());
+        var archivePath = Path.GetFullPath(archiveFilePath.Trim());
+        var destinationDirectory = Path.GetDirectoryName(archivePath);
+        if (string.IsNullOrWhiteSpace(destinationDirectory))
+        {
+            throw new InvalidOperationException("Choose a destination archive file.");
+        }
+
         Directory.CreateDirectory(destinationDirectory);
-        var archivePath = GetAvailableDestinationPath(destinationDirectory, archiveFileName);
         var tempArchivePath = Path.Combine(destinationDirectory, $".{Guid.NewGuid():N}.zip.tmp");
         var entryNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
@@ -3158,7 +3190,7 @@ public partial class MainViewModel : ViewModelBase
                 }
             }
 
-            File.Move(tempArchivePath, archivePath);
+            File.Move(tempArchivePath, archivePath, overwrite: true);
         }
         finally
         {
@@ -3769,7 +3801,7 @@ public partial class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(HasUnresolvedDuplicatePhotos));
     }
 
-    private static void AddGroups(ObservableCollection<AlbumPhotoGroupViewModel> groups, IEnumerable<AlbumPhotoViewModel> photos)
+    private static void AddGroups(ObservableCollection<object> groups, IEnumerable<AlbumPhotoViewModel> photos)
     {
         var materialized = photos.ToList();
         AddGroup(groups, "Uncommitted", materialized.Where(photo => !photo.IsFrozen));
@@ -3777,7 +3809,7 @@ public partial class MainViewModel : ViewModelBase
     }
 
     private static void AddGroup(
-        ObservableCollection<AlbumPhotoGroupViewModel> groups,
+        ObservableCollection<object> groups,
         string header,
         IEnumerable<AlbumPhotoViewModel> photos)
     {
@@ -3787,7 +3819,11 @@ public partial class MainViewModel : ViewModelBase
             return;
         }
 
-        groups.Add(new AlbumPhotoGroupViewModel(header, materialized, PhotosPerRow));
+        groups.Add(new AlbumPhotoGroupHeaderViewModel(header));
+        foreach (var row in materialized.Chunk(PhotosPerRow))
+        {
+            groups.Add(new AlbumPhotoRowViewModel(row));
+        }
     }
 
     private void ClearFlowReviewers()

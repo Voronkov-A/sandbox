@@ -11,8 +11,16 @@ public partial class AlbumPhotoViewModel : ObservableObject
     private const int ThumbnailPixelSize = 64;
     private const int DisplayPixelWidth = 220;
     private const int DisplayPixelHeight = 150;
+    private const int MaxConcurrentThumbnailLoads = 4;
+    private static readonly TimeSpan DeferredImageReleaseDelay = TimeSpan.FromSeconds(30);
+    private static readonly object ThumbnailLoadQueueSync = new();
+    private static readonly Dictionary<AlbumPhotoViewModel, ThumbnailLoadRequest> PendingThumbnailLoads = new();
+    private static readonly HashSet<AlbumPhotoViewModel> PrioritizedThumbnailPhotos = new();
+    private static int _activeThumbnailLoadCount;
+    private static long _thumbnailLoadSequence;
     private static readonly object DisplayImageLoadQueueSync = new();
     private static readonly Dictionary<AlbumPhotoViewModel, DisplayImageLoadRequest> PendingDisplayImageLoads = new();
+    private static readonly HashSet<AlbumPhotoViewModel> PrioritizedDisplayImagePhotos = new();
     private static bool _isDisplayImageLoadActive;
     private static long _displayImageLoadSequence;
 
@@ -116,6 +124,31 @@ public partial class AlbumPhotoViewModel : ObservableObject
     public IBrush SelectionForeground => IsSelectedForBulk ? Brushes.White : Brushes.Black;
 
     private CancellationTokenSource? _loadCancellation;
+    private CancellationTokenSource? _imageReleaseCancellation;
+    private int _thumbnailPriorityRank = int.MaxValue;
+    private int _displayImagePriorityRank = int.MaxValue;
+
+    private sealed class ThumbnailLoadRequest
+    {
+        public ThumbnailLoadRequest(AlbumPhotoViewModel photo, CancellationToken cancellationToken)
+        {
+            Photo = photo;
+            CancellationToken = cancellationToken;
+            Completion = new TaskCompletionSource<ThumbnailLoadPermit>(TaskCreationOptions.RunContinuationsAsynchronously);
+        }
+
+        public AlbumPhotoViewModel Photo { get; }
+
+        public CancellationToken CancellationToken { get; set; }
+
+        public bool IsVisiblePriority { get; set; }
+
+        public int PriorityRank { get; set; } = int.MaxValue;
+
+        public long Sequence { get; set; }
+
+        public TaskCompletionSource<ThumbnailLoadPermit> Completion { get; }
+    }
 
     private sealed class DisplayImageLoadRequest
     {
@@ -132,9 +165,27 @@ public partial class AlbumPhotoViewModel : ObservableObject
 
         public bool IsVisiblePriority { get; set; }
 
+        public int PriorityRank { get; set; } = int.MaxValue;
+
         public long Sequence { get; set; }
 
         public TaskCompletionSource<DisplayImageLoadPermit> Completion { get; }
+    }
+
+    private sealed class ThumbnailLoadPermit : IDisposable
+    {
+        private bool _disposed;
+
+        public void Dispose()
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            _disposed = true;
+            CompleteThumbnailLoad();
+        }
     }
 
     private sealed class DisplayImageLoadPermit : IDisposable
@@ -160,6 +211,7 @@ public partial class AlbumPhotoViewModel : ObservableObject
             return;
         }
 
+        CancelDeferredImageRelease();
         _loadCancellation?.Cancel();
         _loadCancellation?.Dispose();
         var cancellation = new CancellationTokenSource();
@@ -193,9 +245,10 @@ public partial class AlbumPhotoViewModel : ObservableObject
     public void StopViewportLoad()
     {
         _loadCancellation?.Cancel();
+        CancelPendingThumbnailLoad(this);
         CancelPendingDisplayImageLoad(this);
         IsImageLoading = false;
-        ReleaseCachedImage();
+        ScheduleDeferredImageRelease();
     }
 
     private async Task LoadThumbnailAsync(ImageCacheService imageCache, HttpClient httpClient, CancellationToken cancellationToken)
@@ -203,6 +256,12 @@ public partial class AlbumPhotoViewModel : ObservableObject
         try
         {
             Status = "Loading thumbnail";
+            using var permit = await EnqueueThumbnailLoadAsync(this, cancellationToken);
+            if (Image is not null)
+            {
+                return;
+            }
+
             Image = await imageCache.LoadDisplayBitmapAsync(
                 AlbumId,
                 $"{PhotoId}-thumbnail.jpg",
@@ -221,6 +280,30 @@ public partial class AlbumPhotoViewModel : ObservableObject
                 Status = ex.Message;
             }
         }
+    }
+
+    private static Task<ThumbnailLoadPermit> EnqueueThumbnailLoadAsync(
+        AlbumPhotoViewModel photo,
+        CancellationToken cancellationToken)
+    {
+        Task<ThumbnailLoadPermit> task;
+        lock (ThumbnailLoadQueueSync)
+        {
+            if (!PendingThumbnailLoads.TryGetValue(photo, out var request))
+            {
+                request = new ThumbnailLoadRequest(photo, cancellationToken);
+                PendingThumbnailLoads.Add(photo, request);
+            }
+
+            request.CancellationToken = cancellationToken;
+            request.IsVisiblePriority = photo._thumbnailPriorityRank != int.MaxValue;
+            request.PriorityRank = photo._thumbnailPriorityRank;
+            request.Sequence = ++_thumbnailLoadSequence;
+            task = request.Completion.Task;
+        }
+
+        ProcessThumbnailLoadQueue();
+        return task;
     }
 
     private async Task LoadDisplayImageAsync(ImageCacheService imageCache, HttpClient httpClient, CancellationToken cancellationToken)
@@ -274,13 +357,109 @@ public partial class AlbumPhotoViewModel : ObservableObject
             }
 
             request.CancellationToken = cancellationToken;
-            request.IsVisiblePriority = true;
+            request.IsVisiblePriority = photo._displayImagePriorityRank != int.MaxValue;
+            request.PriorityRank = photo._displayImagePriorityRank;
             request.Sequence = ++_displayImageLoadSequence;
             task = request.Completion.Task;
         }
 
         ProcessDisplayImageLoadQueue();
         return task;
+    }
+
+    public static void PrioritizeViewportLoads(IReadOnlyList<AlbumPhotoViewModel> prioritizedPhotos)
+    {
+        PrioritizeThumbnailLoads(prioritizedPhotos);
+        PrioritizeDisplayImageLoads(prioritizedPhotos);
+    }
+
+    private static void PrioritizeThumbnailLoads(IReadOnlyList<AlbumPhotoViewModel> prioritizedPhotos)
+    {
+        var priorityByPhoto = prioritizedPhotos
+            .Select((photo, index) => new { photo, index })
+            .GroupBy(item => item.photo)
+            .ToDictionary(group => group.Key, group => group.Min(item => item.index));
+
+        lock (ThumbnailLoadQueueSync)
+        {
+            foreach (var photo in PrioritizedThumbnailPhotos)
+            {
+                photo._thumbnailPriorityRank = int.MaxValue;
+            }
+
+            PrioritizedThumbnailPhotos.Clear();
+
+            foreach (var request in PendingThumbnailLoads.Values)
+            {
+                request.Photo._thumbnailPriorityRank = int.MaxValue;
+            }
+
+            foreach (var (photo, index) in priorityByPhoto)
+            {
+                photo._thumbnailPriorityRank = index;
+                PrioritizedThumbnailPhotos.Add(photo);
+            }
+
+            foreach (var request in PendingThumbnailLoads.Values)
+            {
+                request.IsVisiblePriority = priorityByPhoto.TryGetValue(request.Photo, out var index);
+                request.PriorityRank = request.IsVisiblePriority ? index : int.MaxValue;
+            }
+        }
+
+        ProcessThumbnailLoadQueue();
+    }
+
+    private static void PrioritizeDisplayImageLoads(IReadOnlyList<AlbumPhotoViewModel> prioritizedPhotos)
+    {
+        var priorityByPhoto = prioritizedPhotos
+            .Select((photo, index) => new { photo, index })
+            .GroupBy(item => item.photo)
+            .ToDictionary(group => group.Key, group => group.Min(item => item.index));
+
+        lock (DisplayImageLoadQueueSync)
+        {
+            foreach (var photo in PrioritizedDisplayImagePhotos)
+            {
+                photo._displayImagePriorityRank = int.MaxValue;
+            }
+
+            PrioritizedDisplayImagePhotos.Clear();
+
+            foreach (var request in PendingDisplayImageLoads.Values)
+            {
+                request.Photo._displayImagePriorityRank = int.MaxValue;
+            }
+
+            foreach (var (photo, index) in priorityByPhoto)
+            {
+                photo._displayImagePriorityRank = index;
+                PrioritizedDisplayImagePhotos.Add(photo);
+            }
+
+            foreach (var request in PendingDisplayImageLoads.Values)
+            {
+                request.IsVisiblePriority = priorityByPhoto.TryGetValue(request.Photo, out var index);
+                request.PriorityRank = request.IsVisiblePriority ? index : int.MaxValue;
+            }
+        }
+
+        ProcessDisplayImageLoadQueue();
+    }
+
+    private static void CancelPendingThumbnailLoad(AlbumPhotoViewModel photo)
+    {
+        ThumbnailLoadRequest? cancelledRequest = null;
+        lock (ThumbnailLoadQueueSync)
+        {
+            if (PendingThumbnailLoads.Remove(photo, out var request))
+            {
+                cancelledRequest = request;
+            }
+        }
+
+        cancelledRequest?.Completion.TrySetCanceled(cancelledRequest.CancellationToken);
+        ProcessThumbnailLoadQueue();
     }
 
     private static void CancelPendingDisplayImageLoad(AlbumPhotoViewModel photo)
@@ -298,6 +477,16 @@ public partial class AlbumPhotoViewModel : ObservableObject
         ProcessDisplayImageLoadQueue();
     }
 
+    private static void CompleteThumbnailLoad()
+    {
+        lock (ThumbnailLoadQueueSync)
+        {
+            _activeThumbnailLoadCount = Math.Max(0, _activeThumbnailLoadCount - 1);
+        }
+
+        ProcessThumbnailLoadQueue();
+    }
+
     private static void CompleteDisplayImageLoad()
     {
         lock (DisplayImageLoadQueueSync)
@@ -306,6 +495,59 @@ public partial class AlbumPhotoViewModel : ObservableObject
         }
 
         ProcessDisplayImageLoadQueue();
+    }
+
+    private static void ProcessThumbnailLoadQueue()
+    {
+        List<ThumbnailLoadRequest> cancelledRequests = new();
+        List<ThumbnailLoadRequest> selectedRequests = new();
+
+        lock (ThumbnailLoadQueueSync)
+        {
+            foreach (var request in PendingThumbnailLoads.Values.ToList())
+            {
+                if (request.CancellationToken.IsCancellationRequested || request.Photo.Image is not null)
+                {
+                    PendingThumbnailLoads.Remove(request.Photo);
+                    cancelledRequests.Add(request);
+                }
+            }
+
+            while (_activeThumbnailLoadCount < MaxConcurrentThumbnailLoads)
+            {
+                var selectedRequest = PendingThumbnailLoads.Values
+                    .OrderByDescending(request => request.IsVisiblePriority)
+                    .ThenBy(request => request.PriorityRank)
+                    .ThenBy(request => request.Sequence)
+                    .FirstOrDefault();
+
+                if (selectedRequest is null)
+                {
+                    break;
+                }
+
+                PendingThumbnailLoads.Remove(selectedRequest.Photo);
+                selectedRequests.Add(selectedRequest);
+                _activeThumbnailLoadCount++;
+            }
+        }
+
+        foreach (var request in cancelledRequests)
+        {
+            if (request.CancellationToken.IsCancellationRequested)
+            {
+                request.Completion.TrySetCanceled(request.CancellationToken);
+            }
+            else
+            {
+                request.Completion.TrySetResult(new ThumbnailLoadPermit());
+            }
+        }
+
+        foreach (var request in selectedRequests)
+        {
+            request.Completion.TrySetResult(new ThumbnailLoadPermit());
+        }
     }
 
     private static void ProcessDisplayImageLoadQueue()
@@ -331,7 +573,8 @@ public partial class AlbumPhotoViewModel : ObservableObject
 
             selectedRequest = PendingDisplayImageLoads.Values
                 .OrderByDescending(request => request.IsVisiblePriority)
-                .ThenByDescending(request => request.Sequence)
+                .ThenBy(request => request.PriorityRank)
+                .ThenBy(request => request.Sequence)
                 .FirstOrDefault();
 
             if (selectedRequest is not null)
@@ -358,9 +601,44 @@ public partial class AlbumPhotoViewModel : ObservableObject
 
     public void ReleaseCachedImage()
     {
+        CancelDeferredImageRelease();
         Image = null;
         IsFullImageLoaded = false;
         Status = "Loading";
+    }
+
+    private void ScheduleDeferredImageRelease()
+    {
+        if (Image is null)
+        {
+            return;
+        }
+
+        CancelDeferredImageRelease();
+        _imageReleaseCancellation = new CancellationTokenSource();
+        _ = ReleaseCachedImageAfterDelayAsync(_imageReleaseCancellation);
+    }
+
+    private async Task ReleaseCachedImageAfterDelayAsync(CancellationTokenSource cancellation)
+    {
+        try
+        {
+            await Task.Delay(DeferredImageReleaseDelay, cancellation.Token);
+            if (ReferenceEquals(_imageReleaseCancellation, cancellation))
+            {
+                ReleaseCachedImage();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private void CancelDeferredImageRelease()
+    {
+        _imageReleaseCancellation?.Cancel();
+        _imageReleaseCancellation?.Dispose();
+        _imageReleaseCancellation = null;
     }
 
     partial void OnImageChanging(Bitmap? value)

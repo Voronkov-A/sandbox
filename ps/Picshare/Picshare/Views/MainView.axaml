@@ -10,8 +10,8 @@
     <vm:MainViewModel />
   </Design.DataContext>
 
-  <UserControl.Resources>
-    <DataTemplate x:Key="AlbumPhotoRowTemplate" x:DataType="vm:AlbumPhotoRowViewModel">
+  <UserControl.DataTemplates>
+    <DataTemplate DataType="{x:Type vm:AlbumPhotoRowViewModel}" x:DataType="vm:AlbumPhotoRowViewModel">
       <ItemsControl ItemsSource="{Binding Photos}">
         <ItemsControl.ItemsPanel>
           <ItemsPanelTemplate>
@@ -20,7 +20,8 @@
         </ItemsControl.ItemsPanel>
         <ItemsControl.ItemTemplate>
           <DataTemplate x:DataType="vm:AlbumPhotoViewModel">
-            <Border Width="220"
+            <Border x:Name="AlbumPhotoCard"
+                    Width="220"
                     Height="190"
                     Margin="0,0,12,12"
                     Background="White"
@@ -126,17 +127,16 @@
       </ItemsControl>
     </DataTemplate>
 
-    <DataTemplate x:Key="AlbumPhotoGroupTemplate" x:DataType="vm:AlbumPhotoGroupViewModel">
-      <StackPanel Spacing="8" Margin="0,0,0,12">
-        <TextBlock Text="{Binding Header}"
-                   FontSize="14"
-                   FontWeight="SemiBold"
-                   Foreground="#27343B"/>
-        <ItemsControl ItemsSource="{Binding Rows}"
-                      ItemTemplate="{StaticResource AlbumPhotoRowTemplate}"/>
-      </StackPanel>
+    <DataTemplate DataType="{x:Type vm:AlbumPhotoGroupHeaderViewModel}" x:DataType="vm:AlbumPhotoGroupHeaderViewModel">
+      <TextBlock Text="{Binding Header}"
+                 FontSize="14"
+                 FontWeight="SemiBold"
+                 Foreground="#27343B"
+                 Margin="0,0,0,8"/>
     </DataTemplate>
+  </UserControl.DataTemplates>
 
+  <UserControl.Resources>
     <DataTemplate x:Key="AlbumPhotoSourceRowTemplate" x:DataType="vm:AlbumPhotoSourceRowViewModel">
       <ItemsControl ItemsSource="{Binding Photos}">
         <ItemsControl.ItemsPanel>
@@ -197,6 +197,23 @@
       </ItemsControl>
     </DataTemplate>
   </UserControl.Resources>
+
+  <UserControl.Styles>
+    <Style Selector="ListBox.album-photo-list ListBoxItem">
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="Padding" Value="0"/>
+      <Setter Property="Margin" Value="0"/>
+    </Style>
+    <Style Selector="ListBox.album-photo-list ListBoxItem:pointerover">
+      <Setter Property="Background" Value="Transparent"/>
+    </Style>
+    <Style Selector="ListBox.album-photo-list ListBoxItem:selected">
+      <Setter Property="Background" Value="Transparent"/>
+    </Style>
+    <Style Selector="ListBox.album-photo-list ListBoxItem:focus">
+      <Setter Property="Background" Value="Transparent"/>
+    </Style>
+  </UserControl.Styles>
 
   <Grid RowDefinitions="Auto,*,Auto" Background="#F7F7F4">
     <Border Grid.Row="0" Background="#27343B" Padding="20,16">
@@ -761,9 +778,11 @@
               <TabControl x:Name="AlbumReviewTabs" Grid.Row="1" SelectionChanged="AlbumReviewTabs_SelectionChanged">
                 <TabItem Header="{Binding UncategorizedTabHeader}" Tag="uncategorized">
                   <ListBox ItemsSource="{Binding UncategorizedPhotoGroups}"
+                           Classes="album-photo-list"
+                           Loaded="AlbumPhotoList_Loaded"
+                           SelectionChanged="AlbumPhotoList_SelectionChanged"
                            Background="Transparent"
                            BorderThickness="0"
-                           ItemTemplate="{StaticResource AlbumPhotoGroupTemplate}"
                            ScrollViewer.HorizontalScrollBarVisibility="Disabled">
                     <ListBox.ItemsPanel>
                       <ItemsPanelTemplate>
@@ -774,9 +793,11 @@
                 </TabItem>
                 <TabItem Header="{Binding NiceTabHeader}" Tag="nice">
                   <ListBox ItemsSource="{Binding NicePhotoGroups}"
+                           Classes="album-photo-list"
+                           Loaded="AlbumPhotoList_Loaded"
+                           SelectionChanged="AlbumPhotoList_SelectionChanged"
                            Background="Transparent"
                            BorderThickness="0"
-                           ItemTemplate="{StaticResource AlbumPhotoGroupTemplate}"
                            ScrollViewer.HorizontalScrollBarVisibility="Disabled">
                     <ListBox.ItemsPanel>
                       <ItemsPanelTemplate>
@@ -787,9 +808,11 @@
                 </TabItem>
                 <TabItem Header="{Binding OkTabHeader}" Tag="ok">
                   <ListBox ItemsSource="{Binding OkPhotoGroups}"
+                           Classes="album-photo-list"
+                           Loaded="AlbumPhotoList_Loaded"
+                           SelectionChanged="AlbumPhotoList_SelectionChanged"
                            Background="Transparent"
                            BorderThickness="0"
-                           ItemTemplate="{StaticResource AlbumPhotoGroupTemplate}"
                            ScrollViewer.HorizontalScrollBarVisibility="Disabled">
                     <ListBox.ItemsPanel>
                       <ItemsPanelTemplate>
@@ -800,9 +823,11 @@
                 </TabItem>
                 <TabItem Header="{Binding TrashTabHeader}" Tag="trash">
                   <ListBox ItemsSource="{Binding TrashPhotoGroups}"
+                           Classes="album-photo-list"
+                           Loaded="AlbumPhotoList_Loaded"
+                           SelectionChanged="AlbumPhotoList_SelectionChanged"
                            Background="Transparent"
                            BorderThickness="0"
-                           ItemTemplate="{StaticResource AlbumPhotoGroupTemplate}"
                            ScrollViewer.HorizontalScrollBarVisibility="Disabled">
                     <ListBox.ItemsPanel>
                       <ItemsPanelTemplate>
@@ -815,9 +840,11 @@
                          Tag="unresolved-duplicates"
                          IsVisible="{Binding HasUnresolvedDuplicatePhotos}">
                   <ListBox ItemsSource="{Binding UnresolvedDuplicatePhotoGroups}"
+                           Classes="album-photo-list"
+                           Loaded="AlbumPhotoList_Loaded"
+                           SelectionChanged="AlbumPhotoList_SelectionChanged"
                            Background="Transparent"
                            BorderThickness="0"
-                           ItemTemplate="{StaticResource AlbumPhotoGroupTemplate}"
                            ScrollViewer.HorizontalScrollBarVisibility="Disabled">
                     <ListBox.ItemsPanel>
                       <ItemsPanelTemplate>
@@ -1294,13 +1321,13 @@
                       <TextBox Grid.Column="2"
                                Text="{Binding DestinationDirectoryPath}"
                                IsEnabled="{Binding IsDestinationDirectoryEnabled}"
-                               Watermark="Destination directory"
+                               Watermark="{Binding DestinationPathWatermark}"
                                Margin="0,0,10,0"/>
                       <Button Grid.Column="3"
                               Click="ChooseAlbumDownloadCategoryDestination_Click"
                               IsEnabled="{Binding IsDestinationDirectoryEnabled}"
                               Padding="12,8">
-                        Select
+                        <TextBlock Text="{Binding DestinationSelectButtonText}"/>
                       </Button>
                     </Grid>
                   </Border>

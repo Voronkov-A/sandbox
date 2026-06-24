@@ -5,6 +5,7 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using Picshare.ViewModels;
 
 namespace Picshare.Views;
@@ -13,6 +14,14 @@ public partial class MainView : UserControl
 {
     private const double MinimumPhotoViewerZoom = 1;
     private const double MaximumPhotoViewerZoom = 8;
+    private static readonly IReadOnlyList<FilePickerFileType> ZipFileTypeChoices =
+    [
+        new("Zip archive")
+        {
+            Patterns = ["*.zip"],
+            MimeTypes = ["application/zip"]
+        }
+    ];
 
     private readonly Dictionary<object, Point> _photoViewerPointers = new();
     private double _photoViewerBaseWidth;
@@ -25,6 +34,7 @@ public partial class MainView : UserControl
     private bool _photoViewerPinchActive;
     private Point _photoViewerPointerStart;
     private INotifyPropertyChanged? _viewModelPropertyChanged;
+    private readonly HashSet<ScrollViewer> _albumPhotoScrollViewers = new();
 
     public MainView()
     {
@@ -141,14 +151,16 @@ public partial class MainView : UserControl
     {
         if (DataContext is MainViewModel viewModel && TopLevel.GetTopLevel(this) is { } topLevel)
         {
-            var folders = await OpenSingleFolderPickerAsync(
+            var file = await OpenSaveFilePickerAsync(
                 topLevel,
-                "Choose download folder",
-                viewModel.PictureDefaultDownloadDirectoryPath);
+                "Save photo",
+                viewModel.PictureDefaultDownloadDirectoryPath,
+                viewModel.CurrentPhotoDownloadFileName,
+                GetImageFileTypeChoices(viewModel.CurrentPhotoDownloadFileName));
 
-            if (folders.Count > 0)
+            if (file?.TryGetLocalPath() is { } destinationPath)
             {
-                await viewModel.DownloadCurrentPhotoAsync(folders[0].TryGetLocalPath() ?? "");
+                await viewModel.DownloadCurrentPhotoAsync(destinationPath);
             }
         }
     }
@@ -167,34 +179,70 @@ public partial class MainView : UserControl
     {
         if (DataContext is MainViewModel viewModel && TopLevel.GetTopLevel(this) is { } topLevel)
         {
-            var folders = await OpenSingleFolderPickerAsync(
-                topLevel,
-                asArchive ? "Choose archive destination folder" : "Choose download folder",
-                viewModel.PictureDefaultDownloadDirectoryPath);
-
-            if (folders.Count > 0)
+            if (asArchive)
             {
-                await viewModel.DownloadSelectedPhotosAsync(folders[0].TryGetLocalPath() ?? "", asArchive);
+                var file = await OpenSaveFilePickerAsync(
+                    topLevel,
+                    "Save selected photos archive",
+                    viewModel.PictureDefaultDownloadDirectoryPath,
+                    viewModel.SelectedPhotosArchiveFileName,
+                    ZipFileTypeChoices);
+
+                if (file?.TryGetLocalPath() is { } archivePath)
+                {
+                    await viewModel.DownloadSelectedPhotosAsync(archivePath, asArchive: true);
+                }
+            }
+            else
+            {
+                var folders = await OpenSingleFolderPickerAsync(
+                    topLevel,
+                    "Choose download folder",
+                    viewModel.PictureDefaultDownloadDirectoryPath);
+
+                if (folders.Count > 0)
+                {
+                    await viewModel.DownloadSelectedPhotosAsync(folders[0].TryGetLocalPath() ?? "", asArchive: false);
+                }
             }
         }
     }
 
     private async void ChooseAlbumDownloadCategoryDestination_Click(object? sender, RoutedEventArgs e)
     {
-        if (sender is not Control { DataContext: AlbumDownloadCategoryViewModel category } ||
+        if (DataContext is not MainViewModel viewModel ||
+            sender is not Control { DataContext: AlbumDownloadCategoryViewModel category } ||
             TopLevel.GetTopLevel(this) is not { } topLevel)
         {
             return;
         }
 
-        var folders = await OpenSingleFolderPickerAsync(
-            topLevel,
-            $"Choose destination for {category.CategoryName}",
-            category.DestinationDirectoryPath);
-
-        if (folders.Count > 0 && folders[0].TryGetLocalPath() is { } destinationPath)
+        if (category.IsArchiveMode)
         {
-            category.DestinationDirectoryPath = destinationPath;
+            var startPath = GetPickerStartPath(category.DestinationDirectoryPath);
+            var file = await OpenSaveFilePickerAsync(
+                topLevel,
+                $"Save {category.CategoryName} archive",
+                startPath,
+                viewModel.GetAlbumCategoryArchiveFileName(category),
+                ZipFileTypeChoices);
+
+            if (file?.TryGetLocalPath() is { } destinationPath)
+            {
+                category.DestinationDirectoryPath = destinationPath;
+            }
+        }
+        else
+        {
+            var folders = await OpenSingleFolderPickerAsync(
+                topLevel,
+                $"Choose destination for {category.CategoryName}",
+                category.DestinationDirectoryPath);
+
+            if (folders.Count > 0 && folders[0].TryGetLocalPath() is { } destinationPath)
+            {
+                category.DestinationDirectoryPath = destinationPath;
+            }
         }
     }
 
@@ -239,6 +287,69 @@ public partial class MainView : UserControl
             AllowMultiple = false,
             SuggestedStartLocation = suggestedStartLocation
         });
+    }
+
+    private static async Task<IStorageFile?> OpenSaveFilePickerAsync(
+        TopLevel topLevel,
+        string title,
+        string? suggestedStartPath,
+        string suggestedFileName,
+        IReadOnlyList<FilePickerFileType>? fileTypeChoices)
+    {
+        IStorageFolder? suggestedStartLocation = null;
+        var startPath = GetPickerStartPath(suggestedStartPath);
+        if (!string.IsNullOrWhiteSpace(startPath))
+        {
+            try
+            {
+                suggestedStartLocation = await topLevel.StorageProvider.TryGetFolderFromPathAsync(startPath);
+            }
+            catch
+            {
+                suggestedStartLocation = null;
+            }
+        }
+
+        var extension = Path.GetExtension(suggestedFileName);
+        return await topLevel.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+        {
+            Title = title,
+            SuggestedStartLocation = suggestedStartLocation,
+            SuggestedFileName = suggestedFileName,
+            DefaultExtension = string.IsNullOrWhiteSpace(extension) ? null : extension,
+            FileTypeChoices = fileTypeChoices,
+            ShowOverwritePrompt = true
+        });
+    }
+
+    private static string GetPickerStartPath(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return "";
+        }
+
+        return string.Equals(Path.GetExtension(path), ".zip", StringComparison.OrdinalIgnoreCase) ||
+            (!Directory.Exists(path) && !string.IsNullOrWhiteSpace(Path.GetFileName(path)))
+                ? Path.GetDirectoryName(path) ?? ""
+                : path;
+    }
+
+    private static IReadOnlyList<FilePickerFileType>? GetImageFileTypeChoices(string fileName)
+    {
+        var extension = Path.GetExtension(fileName);
+        if (string.IsNullOrWhiteSpace(extension))
+        {
+            return null;
+        }
+
+        return
+        [
+            new("Image")
+            {
+                Patterns = [$"*{extension}"]
+            }
+        ];
     }
 
     private static async Task OpenManualPhotoPickerAsync(TopLevel topLevel, MainViewModel viewModel)
@@ -368,6 +479,7 @@ public partial class MainView : UserControl
         if (DataContext is MainViewModel viewModel &&
             sender is Control { DataContext: AlbumPhotoViewModel photo })
         {
+            UpdateVisibleAlbumPhotoPriorities();
             await viewModel.StartPhotoViewportLoadAsync(photo);
         }
     }
@@ -379,6 +491,112 @@ public partial class MainView : UserControl
         {
             viewModel.StopPhotoViewportLoad(photo);
         }
+    }
+
+    private void AlbumPhotoList_Loaded(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not ListBox listBox)
+        {
+            return;
+        }
+
+        _ = Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            foreach (var scrollViewer in listBox.GetVisualDescendants().OfType<ScrollViewer>())
+            {
+                if (_albumPhotoScrollViewers.Add(scrollViewer))
+                {
+                    scrollViewer.ScrollChanged += AlbumPhotoScrollViewer_ScrollChanged;
+                }
+            }
+
+            UpdateVisibleAlbumPhotoPriorities();
+        }, DispatcherPriority.Loaded);
+    }
+
+    private void AlbumPhotoScrollViewer_ScrollChanged(object? sender, ScrollChangedEventArgs e)
+    {
+        UpdateVisibleAlbumPhotoPriorities();
+    }
+
+    private void AlbumPhotoList_SelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (sender is ListBox { SelectedItem: not null } listBox)
+        {
+            listBox.SelectedItem = null;
+        }
+    }
+
+    private void UpdateVisibleAlbumPhotoPriorities()
+    {
+        if (DataContext is not MainViewModel viewModel)
+        {
+            return;
+        }
+
+        var visiblePhotos = this.GetVisualDescendants()
+            .OfType<Control>()
+            .Where(control => string.Equals(control.Name, "AlbumPhotoCard", StringComparison.Ordinal) &&
+                control.IsVisible &&
+                control.DataContext is AlbumPhotoViewModel &&
+                IsControlInViewport(control))
+            .Select(control => new
+            {
+                Control = control,
+                Photo = (AlbumPhotoViewModel)control.DataContext!
+            })
+            .Select(item => new
+            {
+                item.Photo,
+                Bounds = TransformBounds(item.Control, this)
+            })
+            .OrderBy(item => item.Bounds.Y)
+            .ThenBy(item => item.Bounds.X)
+            .Select(item => item.Photo)
+            .ToList();
+
+        viewModel.PrioritizePhotoViewportLoads(visiblePhotos);
+    }
+
+    private static bool IsControlInViewport(Control control)
+    {
+        var scrollViewer = control.GetVisualAncestors().OfType<ScrollViewer>().FirstOrDefault();
+        if (scrollViewer is null)
+        {
+            return false;
+        }
+
+        var transform = control.TransformToVisual(scrollViewer);
+        if (transform is null)
+        {
+            return false;
+        }
+
+        var bounds = TransformBounds(control, scrollViewer);
+        return bounds.Right >= 0 &&
+            bounds.Bottom >= 0 &&
+            bounds.Left <= scrollViewer.Bounds.Width &&
+            bounds.Top <= scrollViewer.Bounds.Height;
+    }
+
+    private static Rect TransformBounds(Control control, Visual target)
+    {
+        var transform = control.TransformToVisual(target);
+        if (transform is null)
+        {
+            return default;
+        }
+
+        var matrix = transform.Value;
+        var topLeft = matrix.Transform(new Point(0, 0));
+        var topRight = matrix.Transform(new Point(control.Bounds.Width, 0));
+        var bottomLeft = matrix.Transform(new Point(0, control.Bounds.Height));
+        var bottomRight = matrix.Transform(new Point(control.Bounds.Width, control.Bounds.Height));
+        var left = Math.Min(Math.Min(topLeft.X, topRight.X), Math.Min(bottomLeft.X, bottomRight.X));
+        var top = Math.Min(Math.Min(topLeft.Y, topRight.Y), Math.Min(bottomLeft.Y, bottomRight.Y));
+        var right = Math.Max(Math.Max(topLeft.X, topRight.X), Math.Max(bottomLeft.X, bottomRight.X));
+        var bottom = Math.Max(Math.Max(topLeft.Y, topRight.Y), Math.Max(bottomLeft.Y, bottomRight.Y));
+        return new Rect(left, top, Math.Max(0, right - left), Math.Max(0, bottom - top));
     }
 
     private async void AlbumPhoto_Click(object? sender, RoutedEventArgs e)
