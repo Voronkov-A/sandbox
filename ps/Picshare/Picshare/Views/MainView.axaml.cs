@@ -300,7 +300,7 @@ public partial class MainView : UserControl
         viewModel.RemoveAlbumPhotos(selectedPhotos);
     }
 
-    private void AlbumPhotoSource_Click(object? sender, RoutedEventArgs e)
+    private void AlbumPhotoSourceSelection_Click(object? sender, RoutedEventArgs e)
     {
         if (DataContext is not MainViewModel viewModel ||
             sender is not Control { DataContext: AlbumPhotoSourceViewModel photo })
@@ -315,6 +315,14 @@ public partial class MainView : UserControl
         }
 
         viewModel.ToggleAlbumPhotoSourceSelection(photo);
+    }
+
+    private async void AlbumPhotoSource_Loaded(object? sender, RoutedEventArgs e)
+    {
+        if (sender is Control { DataContext: AlbumPhotoSourceViewModel photo })
+        {
+            await photo.LoadThumbnailAsync();
+        }
     }
 
     private async void SignInGoogle_Click(object? sender, RoutedEventArgs e)

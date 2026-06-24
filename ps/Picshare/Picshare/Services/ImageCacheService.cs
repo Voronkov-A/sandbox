@@ -97,16 +97,20 @@ public sealed class ImageCacheService
         int maxPixelHeight,
         CancellationToken cancellationToken)
     {
-        var imagePath = await GetOrDownloadAsync(albumId, cacheFileName, downloadUrl, httpClient, cancellationToken);
+        var imagePath = await GetOrCreateDisplayImageAsync(
+            albumId,
+            cacheFileName,
+            downloadUrl,
+            httpClient,
+            maxPixelWidth,
+            maxPixelHeight,
+            cancellationToken);
 
         await DecodeGate.WaitAsync(cancellationToken);
         try
         {
-            await using var resizedStream = await Task.Run(
-                () => CreateDisplayImageStream(imagePath, maxPixelWidth, maxPixelHeight, cancellationToken),
-                cancellationToken);
-
-            return new Bitmap(resizedStream);
+            await using var stream = File.OpenRead(imagePath);
+            return new Bitmap(stream);
         }
         finally
         {
@@ -149,6 +153,64 @@ public sealed class ImageCacheService
         return File.Exists(cachePath) ? cachePath : null;
     }
 
+    private async Task<string> GetOrCreateDisplayImageAsync(
+        string albumId,
+        string cacheFileName,
+        string downloadUrl,
+        HttpClient httpClient,
+        int maxPixelWidth,
+        int maxPixelHeight,
+        CancellationToken cancellationToken)
+    {
+        var sourcePath = await GetOrDownloadAsync(albumId, cacheFileName, downloadUrl, httpClient, cancellationToken);
+        var albumPath = Path.GetDirectoryName(sourcePath)
+            ?? throw new InvalidOperationException("The cache path has no parent directory.");
+        var displayPath = Path.Combine(albumPath, GetDisplayCacheFileName(cacheFileName, maxPixelWidth, maxPixelHeight));
+        if (File.Exists(displayPath))
+        {
+            return displayPath;
+        }
+
+        var tempPath = Path.Combine(albumPath, $".{Guid.NewGuid():N}.display.tmp");
+        try
+        {
+            await DecodeGate.WaitAsync(cancellationToken);
+            try
+            {
+                await Task.Run(
+                    () => CreateDisplayImageFile(sourcePath, tempPath, maxPixelWidth, maxPixelHeight, cancellationToken),
+                    cancellationToken);
+            }
+            finally
+            {
+                DecodeGate.Release();
+            }
+
+            try
+            {
+                File.Move(tempPath, displayPath, overwrite: false);
+            }
+            catch (IOException) when (File.Exists(displayPath))
+            {
+                File.Delete(tempPath);
+            }
+
+            return displayPath;
+        }
+        finally
+        {
+            if (File.Exists(tempPath))
+            {
+                File.Delete(tempPath);
+            }
+        }
+    }
+
+    private static string GetDisplayCacheFileName(string cacheFileName, int maxPixelWidth, int maxPixelHeight)
+    {
+        return SanitizePathSegment($"{cacheFileName}.{maxPixelWidth}x{maxPixelHeight}.display.jpg");
+    }
+
     private static string GetLocalStorageRootPath(string? configuredRootPath)
     {
         if (!string.IsNullOrWhiteSpace(configuredRootPath))
@@ -178,8 +240,9 @@ public sealed class ImageCacheService
         return await httpClient.GetStreamAsync(downloadUrl, cancellationToken);
     }
 
-    private static MemoryStream CreateDisplayImageStream(
+    private static void CreateDisplayImageFile(
         string imagePath,
+        string destinationPath,
         int maxPixelWidth,
         int maxPixelHeight,
         CancellationToken cancellationToken)
@@ -207,9 +270,7 @@ public sealed class ImageCacheService
         using var data = image.Encode(SKEncodedImageFormat.Jpeg, 86)
             ?? throw new InvalidOperationException("The cached image could not be encoded.");
 
-        var output = new MemoryStream();
+        using var output = File.Open(destinationPath, FileMode.CreateNew, FileAccess.Write, FileShare.None);
         data.SaveTo(output);
-        output.Position = 0;
-        return output;
     }
 }

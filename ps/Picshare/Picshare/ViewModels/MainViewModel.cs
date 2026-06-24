@@ -302,6 +302,12 @@ public partial class MainViewModel : ViewModelBase
     private string _clearAlbumDestinationConfirmationMessage = "";
 
     [ObservableProperty]
+    private bool _isInfrastructureErrorVisible;
+
+    [ObservableProperty]
+    private string _infrastructureErrorMessage = "";
+
+    [ObservableProperty]
     private bool _canMarkCurrentPhotoUncategorized;
 
     [ObservableProperty]
@@ -402,6 +408,15 @@ public partial class MainViewModel : ViewModelBase
 
     [ObservableProperty]
     private AlbumPhotoSourceViewModel? _selectedAlbumPhoto;
+
+    [ObservableProperty]
+    private int _selectedAlbumPhotoSourceCount;
+
+    [ObservableProperty]
+    private bool _isAlbumPhotoSourceActionPanelVisible;
+
+    [ObservableProperty]
+    private string _albumPhotoSourceSelectionStatus = "";
 
     public ObservableCollection<AlbumTypeOptionViewModel> AlbumTypes { get; } = new()
     {
@@ -520,6 +535,8 @@ public partial class MainViewModel : ViewModelBase
     private CancellationTokenSource? _albumDeletionCancellation;
     private PendingAlbumCreation? _activePendingAlbumCreation;
     private AlbumManifest? _activeDeletingAlbumManifest;
+    private PendingAlbumCreation? _failedPendingAlbumCreation;
+    private AlbumManifest? _failedDeletingAlbumManifest;
     private AlbumManifest? _currentManifest;
     private AlbumManifest? _pendingGoogleAuthorizationManifest;
     private AlbumPhotoViewModel? _selectedViewedPhoto;
@@ -679,6 +696,40 @@ public partial class MainViewModel : ViewModelBase
     private void ClearSelectedPhotos()
     {
         ClearBulkPhotoSelection();
+    }
+
+    [RelayCommand]
+    private void SelectAllPhotosInCurrentTab()
+    {
+        foreach (var photo in GetPhotosForReviewTab(_activeReviewTabId))
+        {
+            photo.IsSelectedForBulk = true;
+        }
+
+        UpdateBulkPhotoSelectionState();
+    }
+
+    [RelayCommand]
+    private void RemoveSelectedAlbumPhotoSources()
+    {
+        RemoveAlbumPhotos(GetSelectedAlbumPhotoSources());
+    }
+
+    [RelayCommand]
+    private void SelectAllAlbumPhotoSources()
+    {
+        foreach (var photo in AlbumPhotos)
+        {
+            photo.IsSelected = true;
+        }
+
+        UpdateAlbumPhotoSourceSelectionState();
+    }
+
+    [RelayCommand]
+    private void ClearSelectedAlbumPhotoSources()
+    {
+        ClearAlbumPhotoSourceSelection();
     }
 
     [RelayCommand]
@@ -1144,6 +1195,12 @@ public partial class MainViewModel : ViewModelBase
             var backend = await CreateFeedbackBackendAsync(manifest, CancellationToken.None);
             await ExecuteAlbumDeletionAsync(manifest, reviewer, backend, CancellationToken.None, showProgress: true);
         }
+        catch (Exception ex) when (IsInfrastructureException(ex))
+        {
+            Status = ex.Message;
+            _failedDeletingAlbumManifest = manifest;
+            ShowInfrastructureError("Album deletion failed", ex);
+        }
         catch (Exception ex)
         {
             Status = ex.Message;
@@ -1180,6 +1237,39 @@ public partial class MainViewModel : ViewModelBase
         IsCancelAlbumDeletionConfirmationVisible = false;
         CancelAlbumDeletionConfirmationMessage = "";
         _albumDeletionCancellation?.Cancel();
+        ApplyAlbumDeletionStopped(manifest);
+        IsAlbumDeletionProgressVisible = false;
+        _activeDeletingAlbumManifest = null;
+    }
+
+    [RelayCommand]
+    private async Task AcknowledgeInfrastructureErrorAsync()
+    {
+        IsInfrastructureErrorVisible = false;
+        InfrastructureErrorMessage = "";
+
+        var failedCreation = _failedPendingAlbumCreation;
+        var failedDeletion = _failedDeletingAlbumManifest;
+        _failedPendingAlbumCreation = null;
+        _failedDeletingAlbumManifest = null;
+
+        if (failedCreation is not null)
+        {
+            await CancelPendingAlbumCreationAsync(failedCreation);
+            return;
+        }
+
+        if (failedDeletion is not null)
+        {
+            _albumDeletionCancellation?.Cancel();
+            ApplyAlbumDeletionStopped(failedDeletion);
+            IsAlbumDeletionProgressVisible = false;
+            _activeDeletingAlbumManifest = null;
+        }
+    }
+
+    private void ApplyAlbumDeletionStopped(AlbumManifest? manifest)
+    {
         if (manifest is not null)
         {
             _albumDeletionService.ForgetPendingDeletion(manifest.AlbumId);
@@ -1187,9 +1277,20 @@ public partial class MainViewModel : ViewModelBase
         }
 
         ClearOpenedAlbumState();
-        IsAlbumDeletionProgressVisible = false;
-        _activeDeletingAlbumManifest = null;
         Status = "Album deletion was stopped and the album is considered deleted.";
+    }
+
+    private void ShowInfrastructureError(string title, Exception exception)
+    {
+        InfrastructureErrorMessage = $"{title}: {exception.Message}";
+        IsInfrastructureErrorVisible = true;
+    }
+
+    private static bool IsInfrastructureException(Exception exception)
+    {
+        return exception is IOException or UnauthorizedAccessException or HttpRequestException or TimeoutException ||
+            exception is InvalidOperationException invalidOperation &&
+            invalidOperation.Message.StartsWith("Google Drive request failed:", StringComparison.Ordinal);
     }
 
     [RelayCommand]
@@ -1254,6 +1355,7 @@ public partial class MainViewModel : ViewModelBase
             {
                 PhotoViewerImage = viewerImage;
                 PhotoViewerStatus = "";
+                _ = LoadViewedPhotoDisplayImageAsync(photo);
                 _ = PreloadPhotoViewerDuplicatePhotosAsync();
             }
             else
@@ -1419,14 +1521,14 @@ public partial class MainViewModel : ViewModelBase
                 if (inspection.HasItems)
                 {
                     ClearAlbumDestinationConfirmationMessage =
-                        $"The destination album folder \"{inspection.DisplayName}\" already contains files or folders. Clear it and start the upload?";
+                        $"The destination album folder \"{inspection.DisplayName}\" already exists. Delete it and start the upload in a new folder?";
                     IsClearAlbumDestinationConfirmationVisible = true;
                     return;
                 }
             }
             else
             {
-                Status = "Clearing album destination...";
+                Status = "Deleting existing album destination...";
                 await _albumCreationService.ClearDestinationAsync(
                     SelectedAlbumType.Id,
                     title,
@@ -1474,6 +1576,12 @@ public partial class MainViewModel : ViewModelBase
                 await CancelPendingAlbumCreationAsync(_activePendingAlbumCreation);
             }
         }
+        catch (Exception ex) when (IsInfrastructureException(ex))
+        {
+            Status = ex.Message;
+            _failedPendingAlbumCreation = _activePendingAlbumCreation;
+            ShowInfrastructureError("Album creation failed", ex);
+        }
         catch (Exception ex)
         {
             Status = ex.Message;
@@ -1520,6 +1628,12 @@ public partial class MainViewModel : ViewModelBase
             {
                 await CancelPendingAlbumCreationAsync(_activePendingAlbumCreation);
             }
+        }
+        catch (Exception ex) when (IsInfrastructureException(ex))
+        {
+            Status = ex.Message;
+            _failedPendingAlbumCreation = _activePendingAlbumCreation;
+            ShowInfrastructureError("Album creation failed", ex);
         }
         catch (Exception ex)
         {
@@ -1586,6 +1700,12 @@ public partial class MainViewModel : ViewModelBase
         catch (OperationCanceledException)
         {
             Status = "Album deletion was stopped and the album is considered deleted.";
+        }
+        catch (Exception ex) when (IsInfrastructureException(ex))
+        {
+            Status = ex.Message;
+            _failedDeletingAlbumManifest = manifest;
+            ShowInfrastructureError("Album deletion failed", ex);
         }
         catch (Exception ex)
         {
@@ -2114,11 +2234,13 @@ public partial class MainViewModel : ViewModelBase
         SelectedAlbumPhoto = null;
         RefreshAlbumPhotoRows();
         Status = $"Removed {removed} photo(s) from the album.";
+        UpdateAlbumPhotoSourceSelectionState();
     }
 
     public void ToggleAlbumPhotoSourceSelection(AlbumPhotoSourceViewModel photo)
     {
         photo.IsSelected = !photo.IsSelected;
+        UpdateAlbumPhotoSourceSelectionState();
     }
 
     public void ToggleImportCandidateSelection(AlbumPhotoSourceViewModel photo)
@@ -2396,6 +2518,7 @@ public partial class MainViewModel : ViewModelBase
                 _imageHttpClient,
                 cancellation);
             PhotoViewerStatus = "Original loaded";
+            _ = LoadViewedPhotoDisplayImageAsync(photo);
             _ = PreloadPhotoViewerDuplicatePhotosAsync();
         }
         catch (OperationCanceledException)
@@ -2409,9 +2532,29 @@ public partial class MainViewModel : ViewModelBase
 
     private async Task PreloadPhotoViewerDuplicatePhotosAsync()
     {
-        foreach (var photo in PhotoViewerDuplicatePhotos.ToList())
+        var photos = PhotoViewerDuplicatePhotos.ToList();
+        if (_selectedViewedPhoto is not null)
+        {
+            photos = photos
+                .OrderBy(photo => ReferenceEquals(photo, _selectedViewedPhoto) ? 0 : 1)
+                .ToList();
+        }
+
+        foreach (var photo in photos)
         {
             await photo.StartViewportLoadAsync(_imageCache, _imageHttpClient);
+        }
+    }
+
+    private async Task LoadViewedPhotoDisplayImageAsync(AlbumPhotoViewModel photo)
+    {
+        try
+        {
+            await photo.StartViewportLoadAsync(_imageCache, _imageHttpClient);
+        }
+        catch
+        {
+            // The full viewer already reports original-image loading errors.
         }
     }
 
@@ -4467,6 +4610,7 @@ public partial class MainViewModel : ViewModelBase
     private void RefreshAlbumPhotoRows()
     {
         RefreshSourceRows(AlbumPhotoRows, AlbumPhotos);
+        UpdateAlbumPhotoSourceSelectionState();
     }
 
     private void RefreshImportCandidateRows()
@@ -4483,6 +4627,31 @@ public partial class MainViewModel : ViewModelBase
         {
             rows.Add(new AlbumPhotoSourceRowViewModel(row));
         }
+    }
+
+    private IEnumerable<AlbumPhotoSourceViewModel> GetSelectedAlbumPhotoSources()
+    {
+        return AlbumPhotos.Where(photo => photo.IsSelected);
+    }
+
+    private void ClearAlbumPhotoSourceSelection()
+    {
+        foreach (var photo in GetSelectedAlbumPhotoSources().ToList())
+        {
+            photo.IsSelected = false;
+        }
+
+        UpdateAlbumPhotoSourceSelectionState();
+    }
+
+    private void UpdateAlbumPhotoSourceSelectionState()
+    {
+        var selectedCount = AlbumPhotos.Count(photo => photo.IsSelected);
+        SelectedAlbumPhotoSourceCount = selectedCount;
+        IsAlbumPhotoSourceActionPanelVisible = selectedCount > 0;
+        AlbumPhotoSourceSelectionStatus = selectedCount == 0
+            ? ""
+            : $"{selectedCount} selected";
     }
 
     private async Task<string> GetGoogleAccessTokenAsync(CancellationToken cancellationToken)

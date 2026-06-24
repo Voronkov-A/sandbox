@@ -132,7 +132,7 @@ public sealed class PersistentAlbumCreationService
             return new AlbumDestinationInspection(
                 albumFolderPath,
                 File.Exists(albumFolderPath) ||
-                Directory.Exists(albumFolderPath) && Directory.EnumerateFileSystemEntries(albumFolderPath).Any());
+                Directory.Exists(albumFolderPath));
         }
 
         var client = new GoogleDriveRestClient(await getGoogleAccessTokenAsync(cancellationToken));
@@ -142,8 +142,7 @@ public sealed class PersistentAlbumCreationService
             return new AlbumDestinationInspection(title, false);
         }
 
-        var children = await client.ListAllChildrenAsync(albumFolder.Id, cancellationToken);
-        return new AlbumDestinationInspection(albumFolder.Name, children.Count > 0);
+        return new AlbumDestinationInspection(albumFolder.Name, true);
     }
 
     public async Task ClearDestinationAsync(
@@ -169,22 +168,9 @@ public sealed class PersistentAlbumCreationService
                 return;
             }
 
-            if (!Directory.Exists(albumFolderPath))
+            if (Directory.Exists(albumFolderPath))
             {
-                return;
-            }
-
-            foreach (var entry in Directory.EnumerateFileSystemEntries(albumFolderPath).ToList())
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                if (Directory.Exists(entry))
-                {
-                    Directory.Delete(entry, recursive: true);
-                }
-                else if (File.Exists(entry))
-                {
-                    File.Delete(entry);
-                }
+                Directory.Delete(albumFolderPath, recursive: true);
             }
 
             return;
@@ -197,15 +183,7 @@ public sealed class PersistentAlbumCreationService
             return;
         }
 
-        var children = await client.ListAllChildrenAsync(albumFolder.Id, cancellationToken);
-        await Parallel.ForEachAsync(
-            children,
-            new ParallelOptions
-            {
-                MaxDegreeOfParallelism = Math.Max(1, maximumParallelism),
-                CancellationToken = cancellationToken
-            },
-            async (child, token) => await client.DeleteFileAsync(child.Id, token));
+        await client.DeleteFileAsync(albumFolder.Id, cancellationToken);
     }
 
     public AlbumManifest? CreateDeletionManifest(PendingAlbumCreation pending)

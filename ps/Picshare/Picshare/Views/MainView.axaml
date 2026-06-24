@@ -104,10 +104,20 @@
                   <TextBlock Text="{Binding SelectionGlyph}" FontWeight="SemiBold"/>
                 </Button>
                 <Border Grid.Row="1" Background="#F2F2EE" Padding="8">
-                  <StackPanel Spacing="2">
-                    <TextBlock Text="{Binding FileName}" TextTrimming="CharacterEllipsis"/>
-                    <TextBlock Text="{Binding Status}" FontSize="11" Foreground="#7B4B39" TextTrimming="CharacterEllipsis"/>
-                  </StackPanel>
+                  <Grid ColumnDefinitions="*,Auto">
+                    <TextBlock Text="{Binding FileName}"
+                               VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis"/>
+                    <TextBlock Grid.Column="1"
+                               Text="..."
+                               Margin="8,0,0,0"
+                               VerticalAlignment="Center"
+                               FontSize="16"
+                               FontWeight="Bold"
+                               Foreground="#7B4B39"
+                               ToolTip.Tip="Loading image"
+                               IsVisible="{Binding IsImageLoading}"/>
+                  </Grid>
                 </Border>
               </Grid>
             </Border>
@@ -136,26 +146,41 @@
         </ItemsControl.ItemsPanel>
         <ItemsControl.ItemTemplate>
           <DataTemplate x:DataType="vm:AlbumPhotoSourceViewModel">
-            <Button Click="AlbumPhotoSource_Click"
-                    Padding="0"
+            <Border Width="76"
+                    Height="76"
                     Margin="0,0,8,8"
-                    Background="Transparent"
-                    BorderThickness="0"
+                    Background="#EDF0ED"
+                    BorderBrush="{Binding CardBorderBrush}"
+                    BorderThickness="{Binding CardBorderThickness}"
+                    CornerRadius="4"
+                    ClipToBounds="True"
+                    Loaded="AlbumPhotoSource_Loaded"
                     ToolTip.Tip="{Binding FileName}">
-              <Border Width="76"
-                      Height="76"
-                      Background="#EDF0ED"
-                      BorderBrush="{Binding CardBorderBrush}"
-                      BorderThickness="{Binding CardBorderThickness}"
-                      CornerRadius="4"
-                      ClipToBounds="True">
-                <Grid RowDefinitions="*,22">
+              <Grid RowDefinitions="*,22">
+                <Image Source="{Binding Thumbnail}"
+                       Stretch="UniformToFill"/>
+                <Button HorizontalAlignment="Right"
+                        VerticalAlignment="Top"
+                        MinWidth="26"
+                        Height="24"
+                        Margin="0,4,4,0"
+                        Padding="4,0"
+                        Click="AlbumPhotoSourceSelection_Click"
+                        Background="{Binding SelectionBackground}"
+                        Foreground="{Binding SelectionForeground}"
+                        BorderBrush="#27343B"
+                        BorderThickness="1">
+                  <TextBlock Text="{Binding SelectionGlyph}" FontWeight="SemiBold"/>
+                </Button>
+                <Grid RowDefinitions="*,22"
+                      IsHitTestVisible="False">
                   <TextBlock Text="IMG"
                              HorizontalAlignment="Center"
                              VerticalAlignment="Center"
                              Foreground="#6C756F"
                              FontSize="12"
-                             FontWeight="SemiBold"/>
+                             FontWeight="SemiBold"
+                             IsVisible="{Binding HasThumbnailPlaceholder}"/>
                   <Border Grid.Row="1"
                           Background="#D9FFFFFF"
                           Padding="4,2">
@@ -165,8 +190,8 @@
                                HorizontalAlignment="Center"/>
                   </Border>
                 </Grid>
-              </Border>
-            </Button>
+              </Grid>
+            </Border>
           </DataTemplate>
         </ItemsControl.ItemTemplate>
       </ItemsControl>
@@ -241,10 +266,10 @@
 
                   <StackPanel Spacing="5">
                     <TextBlock Text="Photos"/>
-                    <Grid RowDefinitions="Auto,Auto" ColumnDefinitions="*,Auto,Auto">
+                    <Grid RowDefinitions="Auto,Auto,Auto" ColumnDefinitions="*,Auto">
                       <ListBox x:Name="AlbumPhotosList"
                                Grid.Row="0"
-                               Grid.ColumnSpan="3"
+                               Grid.ColumnSpan="2"
                                ItemsSource="{Binding AlbumPhotoRows}"
                                SelectionMode="Single"
                                MinHeight="150"
@@ -257,9 +282,77 @@
                           </ItemsPanelTemplate>
                         </ListBox.ItemsPanel>
                       </ListBox>
-                      <Button Grid.Row="1"
+                      <Border Grid.Row="1"
+                              Grid.ColumnSpan="2"
+                              Background="#99000000"
+                              CornerRadius="6"
+                              Padding="8"
+                              Margin="0,8,0,0"
+                              HorizontalAlignment="Center"
+                              IsVisible="{Binding IsAlbumPhotoSourceActionPanelVisible}">
+                        <WrapPanel Orientation="Horizontal">
+                          <TextBlock Text="{Binding AlbumPhotoSourceSelectionStatus}"
+                                     Foreground="White"
+                                     FontWeight="SemiBold"
+                                     VerticalAlignment="Center"
+                                     Margin="0,0,10,0"/>
+                          <Button Padding="14,10"
+                                  Margin="0,0,8,0"
+                                  Command="{Binding RemoveSelectedAlbumPhotoSourcesCommand}"
+                                  Background="White"
+                                  Foreground="Black"
+                                  BorderBrush="Black"
+                                  BorderThickness="2">
+                            <Grid>
+                              <TextBlock Text="Remove selected" FontWeight="SemiBold" Foreground="White" Margin="-1,-1,0,0"/>
+                              <TextBlock Text="Remove selected" FontWeight="SemiBold" Foreground="White" Margin="1,-1,0,0"/>
+                              <TextBlock Text="Remove selected" FontWeight="SemiBold" Foreground="White" Margin="-1,1,0,0"/>
+                              <TextBlock Text="Remove selected" FontWeight="SemiBold" Foreground="White" Margin="1,1,0,0"/>
+                              <TextBlock Text="Remove selected" FontWeight="SemiBold" Foreground="Black"/>
+                            </Grid>
+                          </Button>
+                          <Button Command="{Binding SelectAllAlbumPhotoSourcesCommand}"
+                                  Width="44"
+                                  Height="44"
+                                  Padding="0"
+                                  Margin="0,0,8,0"
+                                  Background="#33000000"
+                                  BorderBrush="#99FFFFFF"
+                                  BorderThickness="1"
+                                  HorizontalContentAlignment="Center"
+                                  VerticalContentAlignment="Center"
+                                  ToolTip.Tip="Select all">
+                            <Grid Width="28" Height="28">
+                              <TextBlock Text="☑" FontSize="22" FontWeight="Bold" Foreground="Black" Margin="-1,-1,0,0"/>
+                              <TextBlock Text="☑" FontSize="22" FontWeight="Bold" Foreground="Black" Margin="1,-1,0,0"/>
+                              <TextBlock Text="☑" FontSize="22" FontWeight="Bold" Foreground="Black" Margin="-1,1,0,0"/>
+                              <TextBlock Text="☑" FontSize="22" FontWeight="Bold" Foreground="Black" Margin="1,1,0,0"/>
+                              <TextBlock Text="☑" FontSize="22" FontWeight="Bold" Foreground="White"/>
+                            </Grid>
+                          </Button>
+                          <Button Command="{Binding ClearSelectedAlbumPhotoSourcesCommand}"
+                                  Width="44"
+                                  Height="44"
+                                  Padding="0"
+                                  Background="#33000000"
+                                  BorderBrush="#99FFFFFF"
+                                  BorderThickness="1"
+                                  HorizontalContentAlignment="Center"
+                                  VerticalContentAlignment="Center"
+                                  ToolTip.Tip="Clear selection">
+                            <Grid Width="28" Height="28">
+                              <TextBlock Text="X" FontSize="28" FontWeight="Bold" Foreground="Black" Margin="-1,-1,0,0"/>
+                              <TextBlock Text="X" FontSize="28" FontWeight="Bold" Foreground="Black" Margin="1,-1,0,0"/>
+                              <TextBlock Text="X" FontSize="28" FontWeight="Bold" Foreground="Black" Margin="-1,1,0,0"/>
+                              <TextBlock Text="X" FontSize="28" FontWeight="Bold" Foreground="Black" Margin="1,1,0,0"/>
+                              <TextBlock Text="X" FontSize="28" FontWeight="Bold" Foreground="White"/>
+                            </Grid>
+                          </Button>
+                        </WrapPanel>
+                      </Border>
+                      <Button Grid.Row="2"
                               Grid.Column="1"
-                              Margin="0,8,8,0"
+                              Margin="0,8,0,0"
                               Padding="12,8"
                               Content="Add photos">
                         <Button.Flyout>
@@ -276,13 +369,6 @@
                             </StackPanel>
                           </Flyout>
                         </Button.Flyout>
-                      </Button>
-                      <Button Grid.Row="1"
-                              Grid.Column="2"
-                              Click="RemoveSelectedAlbumPhotos_Click"
-                              Margin="0,8,0,0"
-                              Padding="12,8">
-                        Remove selected
                       </Button>
                     </Grid>
                   </StackPanel>
@@ -974,6 +1060,25 @@
                       </MenuFlyout>
                     </Button.Flyout>
                   </Button>
+                  <Button Command="{Binding SelectAllPhotosInCurrentTabCommand}"
+                          Width="44"
+                          Height="44"
+                          Padding="0"
+                          Margin="0,0,8,0"
+                          Background="#33000000"
+                          BorderBrush="#99FFFFFF"
+                          BorderThickness="1"
+                          HorizontalContentAlignment="Center"
+                          VerticalContentAlignment="Center"
+                          ToolTip.Tip="Select all">
+                    <Grid Width="28" Height="28">
+                      <TextBlock Text="☑" FontSize="22" FontWeight="Bold" Foreground="Black" Margin="-1,-1,0,0"/>
+                      <TextBlock Text="☑" FontSize="22" FontWeight="Bold" Foreground="Black" Margin="1,-1,0,0"/>
+                      <TextBlock Text="☑" FontSize="22" FontWeight="Bold" Foreground="Black" Margin="-1,1,0,0"/>
+                      <TextBlock Text="☑" FontSize="22" FontWeight="Bold" Foreground="Black" Margin="1,1,0,0"/>
+                      <TextBlock Text="☑" FontSize="22" FontWeight="Bold" Foreground="White"/>
+                    </Grid>
+                  </Button>
                   <Button Command="{Binding ClearSelectedPhotosCommand}"
                           Width="44"
                           Height="44"
@@ -1296,7 +1401,7 @@
                        VerticalAlignment="Center"/>
           </Border>
           <TextBlock Grid.Column="1"
-                     Text="Clear destination"
+                     Text="Replace destination"
                      FontSize="18"
                      FontWeight="SemiBold"
                      Foreground="#7A271A"/>
@@ -1318,7 +1423,59 @@
                     Foreground="White"
                     BorderBrush="#7A271A"
                     Padding="12,8">
-              Yes, clear and upload
+              Yes, delete and upload
+            </Button>
+          </Grid>
+        </Grid>
+      </Border>
+    </Grid>
+
+    <Grid Grid.RowSpan="3"
+          Background="#99000000"
+          IsVisible="{Binding IsInfrastructureErrorVisible}">
+      <Border Background="White"
+              BorderBrush="#B42318"
+              BorderThickness="2"
+              CornerRadius="6"
+              Padding="18"
+              Margin="20"
+              MaxWidth="520"
+              HorizontalAlignment="Stretch"
+              VerticalAlignment="Center">
+        <Grid ColumnDefinitions="64,*" RowDefinitions="Auto,Auto,Auto">
+          <Border Grid.RowSpan="3"
+                  Width="48"
+                  Height="48"
+                  CornerRadius="24"
+                  Background="#FEE4E2"
+                  BorderBrush="#B42318"
+                  BorderThickness="2"
+                  VerticalAlignment="Top">
+            <TextBlock Text="!"
+                       Foreground="#B42318"
+                       FontSize="30"
+                       FontWeight="Bold"
+                       HorizontalAlignment="Center"
+                       VerticalAlignment="Center"/>
+          </Border>
+          <TextBlock Grid.Column="1"
+                     Text="Operation failed"
+                     FontSize="18"
+                     FontWeight="SemiBold"
+                     Foreground="#7A271A"/>
+          <TextBlock Grid.Row="1"
+                     Grid.Column="1"
+                     Text="{Binding InfrastructureErrorMessage}"
+                     TextWrapping="Wrap"
+                     Margin="0,8,0,14"/>
+          <Grid Grid.Row="2" Grid.Column="1" ColumnDefinitions="*,Auto">
+            <Button Grid.Column="1"
+                    Command="{Binding AcknowledgeInfrastructureErrorCommand}"
+                    Background="#B42318"
+                    Foreground="White"
+                    BorderBrush="#7A271A"
+                    Padding="12,8">
+              OK
             </Button>
           </Grid>
         </Grid>

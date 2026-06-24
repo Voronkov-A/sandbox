@@ -29,15 +29,19 @@ public sealed partial class AlbumPhotoSourceViewModel : ObservableObject
     [ObservableProperty]
     private bool _hasThumbnailError;
 
+    public bool HasThumbnailPlaceholder => Thumbnail is null || HasThumbnailError;
+
     [ObservableProperty]
     private bool _isSelected;
 
-    public IBrush SelectionBackground => IsSelected ? Brushes.White : Brushes.Transparent;
+    public IBrush SelectionBackground => IsSelected ? Brushes.ForestGreen : Brushes.White;
 
-    public IBrush SelectionForeground => IsSelected ? Brushes.White : Brushes.Transparent;
+    public IBrush SelectionForeground => IsSelected ? Brushes.White : Brushes.Black;
+
+    public string SelectionGlyph => IsSelected ? "On" : "+";
 
     public IBrush CardBorderBrush => IsSelected
-        ? new SolidColorBrush(Color.Parse("#27343B"))
+        ? Brushes.ForestGreen
         : new SolidColorBrush(Color.Parse("#D6D8D1"));
 
     public Thickness CardBorderThickness => IsSelected ? new Thickness(3) : new Thickness(1);
@@ -59,11 +63,16 @@ public sealed partial class AlbumPhotoSourceViewModel : ObservableObject
             {
                 Thumbnail = thumbnail;
                 HasThumbnailError = false;
+                OnPropertyChanged(nameof(HasThumbnailPlaceholder));
             });
         }
         catch
         {
-            await Dispatcher.UIThread.InvokeAsync(() => HasThumbnailError = true);
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                HasThumbnailError = true;
+                OnPropertyChanged(nameof(HasThumbnailPlaceholder));
+            });
         }
         finally
         {
@@ -75,8 +84,19 @@ public sealed partial class AlbumPhotoSourceViewModel : ObservableObject
     {
         OnPropertyChanged(nameof(SelectionBackground));
         OnPropertyChanged(nameof(SelectionForeground));
+        OnPropertyChanged(nameof(SelectionGlyph));
         OnPropertyChanged(nameof(CardBorderBrush));
         OnPropertyChanged(nameof(CardBorderThickness));
+    }
+
+    partial void OnThumbnailChanged(Bitmap? value)
+    {
+        OnPropertyChanged(nameof(HasThumbnailPlaceholder));
+    }
+
+    partial void OnHasThumbnailErrorChanged(bool value)
+    {
+        OnPropertyChanged(nameof(HasThumbnailPlaceholder));
     }
 }
 

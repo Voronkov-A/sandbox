@@ -11,6 +11,7 @@ public partial class AlbumPhotoViewModel : ObservableObject
     private const int ThumbnailPixelSize = 64;
     private const int DisplayPixelWidth = 220;
     private const int DisplayPixelHeight = 150;
+    private static readonly SemaphoreSlim DisplayImageLoadGate = new(1, 1);
 
     public AlbumPhotoViewModel(
         string albumId,
@@ -84,6 +85,9 @@ public partial class AlbumPhotoViewModel : ObservableObject
     [ObservableProperty]
     private bool _isBestInDuplicateGroup;
 
+    [ObservableProperty]
+    private bool _isImageLoading;
+
     public bool HasDuplicateGroup => IsDuplicateGroupMain && DuplicateGroupCount > 1;
 
     public string DuplicateGroupCountText => DuplicateGroupCount > 1 ? DuplicateGroupCount.ToString() : "";
@@ -109,11 +113,10 @@ public partial class AlbumPhotoViewModel : ObservableObject
     public IBrush SelectionForeground => IsSelectedForBulk ? Brushes.White : Brushes.Black;
 
     private CancellationTokenSource? _loadCancellation;
-    private bool _isLoading;
 
     public async Task StartViewportLoadAsync(ImageCacheService imageCache, HttpClient httpClient)
     {
-        if (_isLoading)
+        if (IsImageLoading)
         {
             return;
         }
@@ -125,7 +128,7 @@ public partial class AlbumPhotoViewModel : ObservableObject
 
         try
         {
-            _isLoading = true;
+            IsImageLoading = true;
 
             if (Image is null)
             {
@@ -143,7 +146,7 @@ public partial class AlbumPhotoViewModel : ObservableObject
             {
                 _loadCancellation.Dispose();
                 _loadCancellation = null;
-                _isLoading = false;
+                IsImageLoading = false;
             }
         }
     }
@@ -151,6 +154,7 @@ public partial class AlbumPhotoViewModel : ObservableObject
     public void StopViewportLoad()
     {
         _loadCancellation?.Cancel();
+        IsImageLoading = false;
         ReleaseCachedImage();
     }
 
@@ -189,17 +193,30 @@ public partial class AlbumPhotoViewModel : ObservableObject
         try
         {
             Status = "Loading full image";
-            Image = await imageCache.LoadDisplayBitmapAsync(
-                AlbumId,
-                $"{PhotoId}-full{FileExtension}",
-                DownloadUrl,
-                httpClient,
-                DisplayPixelWidth,
-                DisplayPixelHeight,
-                cancellationToken);
+            await DisplayImageLoadGate.WaitAsync(cancellationToken);
+            try
+            {
+                if (IsFullImageLoaded)
+                {
+                    return;
+                }
 
-            IsFullImageLoaded = true;
-            Status = "Full image loaded";
+                Image = await imageCache.LoadDisplayBitmapAsync(
+                    AlbumId,
+                    $"{PhotoId}-full{FileExtension}",
+                    DownloadUrl,
+                    httpClient,
+                    DisplayPixelWidth,
+                    DisplayPixelHeight,
+                    cancellationToken);
+
+                IsFullImageLoaded = true;
+                Status = "Full image loaded";
+            }
+            finally
+            {
+                DisplayImageLoadGate.Release();
+            }
         }
         catch (Exception ex)
         {
