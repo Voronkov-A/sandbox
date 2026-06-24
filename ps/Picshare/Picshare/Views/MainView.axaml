@@ -732,6 +732,10 @@
                                 Command="{Binding PassFeedbackCommand}"
                                 IsVisible="{Binding CanPassFeedback}"
                                 IsEnabled="{Binding CanPassFeedback}"/>
+                      <MenuItem Header="Leave"
+                                Command="{Binding LeaveFeedbackCommand}"
+                                IsVisible="{Binding IsLeaveFeedbackMenuItemVisible}"
+                                IsEnabled="{Binding CanLeaveFeedback}"/>
                       <MenuItem Header="Download the album..."
                                 Command="{Binding OpenAlbumDownloadDialogCommand}"
                                 IsEnabled="{Binding CanUseAlbumMoreMenu}"/>
@@ -908,7 +912,7 @@
                           </ListBox.ItemTemplate>
                         </ListBox>
                       </StackPanel>
-                      <StackPanel Spacing="6" IsVisible="{Binding IsFinalizedFlowVisible}">
+                      <StackPanel Spacing="6" IsVisible="{Binding IsAuthorFlowVisible}">
                         <TextBlock Text="{Binding LeftReviewersHeader}" FontWeight="SemiBold"/>
                         <ListBox ItemsSource="{Binding LeftReviewers}"
                                  Background="Transparent"
@@ -1135,6 +1139,15 @@
                            Minimum="1"
                            Maximum="64"
                            Increment="1"/>
+          </StackPanel>
+          <StackPanel Spacing="6">
+            <TextBlock Text="Image cache" FontWeight="SemiBold"/>
+            <CheckBox IsChecked="{Binding CacheThumbnails}">
+              Cache thumbnails
+            </CheckBox>
+            <CheckBox IsChecked="{Binding CacheOriginalImages}">
+              Cache original images
+            </CheckBox>
           </StackPanel>
           <StackPanel Spacing="5">
             <TextBlock Text="Default download directories" FontWeight="SemiBold"/>

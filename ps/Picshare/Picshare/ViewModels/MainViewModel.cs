@@ -119,6 +119,12 @@ public partial class MainViewModel : ViewModelBase
     private int _maximumParallelism = LocalUserSettings.DefaultMaximumParallelism;
 
     [ObservableProperty]
+    private bool _cacheThumbnails = true;
+
+    [ObservableProperty]
+    private bool _cacheOriginalImages = true;
+
+    [ObservableProperty]
     private string _pictureDefaultDownloadDirectoryPath = "";
 
     [ObservableProperty]
@@ -243,6 +249,9 @@ public partial class MainViewModel : ViewModelBase
 
     [ObservableProperty]
     private bool _isLeaveFeedbackVisible;
+
+    [ObservableProperty]
+    private bool _isLeaveFeedbackMenuItemVisible;
 
     [ObservableProperty]
     private string _finalizedFeedbackMessage = "";
@@ -574,6 +583,9 @@ public partial class MainViewModel : ViewModelBase
         var albumOpenHistory = _albumOpenHistoryStore.Load();
         AnonymousReviewerName = localSettings.AnonymousReviewerName;
         MaximumParallelism = NormalizeMaximumParallelism(localSettings.MaximumParallelism);
+        CacheThumbnails = localSettings.CacheThumbnails;
+        CacheOriginalImages = localSettings.CacheOriginalImages;
+        ApplyImageCacheSettings();
         _lastOpenAlbumLink = albumOpenHistory.LastOpenAlbumLink;
         OpenAlbumLink = albumOpenHistory.LastOpenAlbumLink;
         PictureDefaultDownloadDirectoryPath = GetConfiguredOrDefaultDownloadDirectoryPath(localSettings.PictureDefaultDownloadDirectoryPath);
@@ -956,7 +968,7 @@ public partial class MainViewModel : ViewModelBase
             return;
         }
 
-        LeaveConfirmationMessage = "Leave this finalized album? The author will see that you are done.";
+        LeaveConfirmationMessage = "Leave this album? The author will see that you left.";
         IsLeaveConfirmationVisible = true;
     }
 
@@ -970,7 +982,7 @@ public partial class MainViewModel : ViewModelBase
     [RelayCommand]
     private async Task ConfirmLeaveFeedbackAsync()
     {
-        if (_feedbackSession is null || _currentReviewerIdentity is null || !CanLeaveFeedback)
+        if (_feedbackSession is null || _currentReviewerIdentity is null || _currentManifest is null || !CanLeaveFeedback)
         {
             IsLeaveConfirmationVisible = false;
             return;
@@ -978,6 +990,7 @@ public partial class MainViewModel : ViewModelBase
 
         IsLeaveConfirmationVisible = false;
         LeaveConfirmationMessage = "";
+        var manifest = _currentManifest;
 
         try
         {
@@ -993,9 +1006,10 @@ public partial class MainViewModel : ViewModelBase
             UpdateFeedbackControlState();
             UpdateCurrentPhotoActionVisibility();
             await SyncFeedbackAsync();
+            await CloseOpenedAlbumLocallyAsync(manifest);
             Status = result.RemoteWon
                 ? "You had already left this album remotely. The remote state was loaded."
-                : "You left the finalized album.";
+                : "You left the album.";
         }
         catch (Exception ex)
         {
@@ -1231,13 +1245,13 @@ public partial class MainViewModel : ViewModelBase
     }
 
     [RelayCommand]
-    private void ForceCancelAlbumDeletion()
+    private async Task ForceCancelAlbumDeletionAsync()
     {
         var manifest = _activeDeletingAlbumManifest;
         IsCancelAlbumDeletionConfirmationVisible = false;
         CancelAlbumDeletionConfirmationMessage = "";
         _albumDeletionCancellation?.Cancel();
-        ApplyAlbumDeletionStopped(manifest);
+        await ApplyAlbumDeletionStoppedAsync(manifest);
         IsAlbumDeletionProgressVisible = false;
         _activeDeletingAlbumManifest = null;
     }
@@ -1262,21 +1276,24 @@ public partial class MainViewModel : ViewModelBase
         if (failedDeletion is not null)
         {
             _albumDeletionCancellation?.Cancel();
-            ApplyAlbumDeletionStopped(failedDeletion);
+            await ApplyAlbumDeletionStoppedAsync(failedDeletion);
             IsAlbumDeletionProgressVisible = false;
             _activeDeletingAlbumManifest = null;
         }
     }
 
-    private void ApplyAlbumDeletionStopped(AlbumManifest? manifest)
+    private async Task ApplyAlbumDeletionStoppedAsync(AlbumManifest? manifest)
     {
         if (manifest is not null)
         {
             _albumDeletionService.ForgetPendingDeletion(manifest.AlbumId);
-            ForgetOpenedAlbumReference(manifest);
+            await CloseOpenedAlbumLocallyAsync(manifest);
+        }
+        else
+        {
+            ClearOpenedAlbumState();
         }
 
-        ClearOpenedAlbumState();
         Status = "Album deletion was stopped and the album is considered deleted.";
     }
 
@@ -3425,8 +3442,7 @@ public partial class MainViewModel : ViewModelBase
             }
             else
             {
-                ForgetOpenedAlbumReference(manifest);
-                ClearOpenedAlbumState();
+                await CloseOpenedAlbumLocallyAsync(manifest);
                 Status = "This album is being deleted by its author.";
             }
 
@@ -3498,8 +3514,7 @@ public partial class MainViewModel : ViewModelBase
                 progress,
                 GetMaximumParallelism());
 
-            ForgetOpenedAlbumReference(manifest);
-            ClearOpenedAlbumState();
+            await CloseOpenedAlbumLocallyAsync(manifest);
             Status = "Album deleted.";
         }
         finally
@@ -3557,11 +3572,19 @@ public partial class MainViewModel : ViewModelBase
         ClearBulkPhotoSelection();
         Photos.Clear();
         ClearCategoryRows();
+        NotifyReviewTabHeadersChanged();
         SelectViewedPhoto(null);
         ClosePhotoViewer();
         ClearFlowReviewers();
         UpdateFeedbackControlState();
         UpdateCurrentPhotoActionVisibility();
+    }
+
+    private async Task CloseOpenedAlbumLocallyAsync(AlbumManifest manifest)
+    {
+        ForgetOpenedAlbumReference(manifest);
+        ClearOpenedAlbumState();
+        await _imageCache.ClearAlbumAsync(manifest.AlbumId);
     }
 
     private async Task ResumePendingAlbumDeletionsAsync()
@@ -3722,12 +3745,7 @@ public partial class MainViewModel : ViewModelBase
         AddGroups(OkPhotoGroups, visiblePhotos.Where(photo => string.Equals(photo.Category, "ok", StringComparison.Ordinal)));
         AddGroups(TrashPhotoGroups, visiblePhotos.Where(photo => string.Equals(photo.Category, "trash", StringComparison.Ordinal)));
         AddGroups(UnresolvedDuplicatePhotoGroups, GetUnresolvedDuplicatePhotos());
-        OnPropertyChanged(nameof(UncategorizedTabHeader));
-        OnPropertyChanged(nameof(NiceTabHeader));
-        OnPropertyChanged(nameof(OkTabHeader));
-        OnPropertyChanged(nameof(TrashTabHeader));
-        OnPropertyChanged(nameof(UnresolvedDuplicatesTabHeader));
-        OnPropertyChanged(nameof(HasUnresolvedDuplicatePhotos));
+        NotifyReviewTabHeadersChanged();
         UpdateFeedbackControlState();
         UpdateBulkPhotoSelectionState();
     }
@@ -3739,6 +3757,16 @@ public partial class MainViewModel : ViewModelBase
         OkPhotoGroups.Clear();
         TrashPhotoGroups.Clear();
         UnresolvedDuplicatePhotoGroups.Clear();
+    }
+
+    private void NotifyReviewTabHeadersChanged()
+    {
+        OnPropertyChanged(nameof(UncategorizedTabHeader));
+        OnPropertyChanged(nameof(NiceTabHeader));
+        OnPropertyChanged(nameof(OkTabHeader));
+        OnPropertyChanged(nameof(TrashTabHeader));
+        OnPropertyChanged(nameof(UnresolvedDuplicatesTabHeader));
+        OnPropertyChanged(nameof(HasUnresolvedDuplicatePhotos));
     }
 
     private static void AddGroups(ObservableCollection<AlbumPhotoGroupViewModel> groups, IEnumerable<AlbumPhotoViewModel> photos)
@@ -4093,12 +4121,13 @@ public partial class MainViewModel : ViewModelBase
     private void UpdateFeedbackControlState()
     {
         var hasTerminalFeedbackState = IsFeedbackCommitted || IsFeedbackPassed || IsFeedbackLeft;
-        CanUseAlbumMoreMenu = Photos.Count > 0;
         IsStandardFeedbackActionsVisible = !_isFeedbackFinalized;
-        IsLeaveFeedbackVisible = _isFeedbackFinalized && _feedbackSession is not null && !IsFeedbackLeft;
+        CanLeaveFeedback = _feedbackSession is not null && !IsAuthorFlowVisible && !IsFeedbackLeft;
+        IsLeaveFeedbackVisible = _isFeedbackFinalized && CanLeaveFeedback;
+        IsLeaveFeedbackMenuItemVisible = !_isFeedbackFinalized && CanLeaveFeedback;
+        CanUseAlbumMoreMenu = Photos.Count > 0 || IsLeaveFeedbackMenuItemVisible;
         CanModifyFeedback = _feedbackSession is not null && !hasTerminalFeedbackState && !_hasCollectedFeedback && !_isFeedbackFinalized;
         CanPassFeedback = _feedbackSession is not null && !hasTerminalFeedbackState && !_hasCollectedFeedback && !_isFeedbackFinalized;
-        CanLeaveFeedback = IsLeaveFeedbackVisible;
         IsCollectFeedbackVisible = IsAuthorFlowVisible && !_hasCollectedFeedback && CommittedReviewers.Count > 0;
         CanCollectFeedback = IsCollectFeedbackVisible;
         CanFinalizeFeedback = IsAuthorFlowVisible && !_isFeedbackFinalized;
@@ -4107,13 +4136,17 @@ public partial class MainViewModel : ViewModelBase
         IsRegularFlowVisible = IsAuthorFlowVisible && !_isFeedbackFinalized;
         IsFinalizedFlowVisible = IsAuthorFlowVisible && _isFeedbackFinalized;
         FinalizedFeedbackMessage = _isFeedbackFinalized
-            ? "The album has been finalized. Please leave when you are ready, so the author can safely delete the album."
+            ? IsAuthorFlowVisible
+                ? "The album has been finalized."
+                : "The album has been finalized. Please leave when you are ready, so the author can safely delete the album."
             : "";
         if (_feedbackSession is null)
         {
             CanCommitFeedback = false;
             CanPassFeedback = false;
             CanLeaveFeedback = false;
+            IsLeaveFeedbackVisible = false;
+            IsLeaveFeedbackMenuItemVisible = false;
             CommitFeedbackStatus = "";
             UpdateBulkPhotoSelectionState();
             return;
@@ -4483,12 +4516,21 @@ public partial class MainViewModel : ViewModelBase
         {
             AnonymousReviewerName = AnonymousReviewerName.Trim(),
             MaximumParallelism = GetMaximumParallelism(),
+            CacheThumbnails = CacheThumbnails,
+            CacheOriginalImages = CacheOriginalImages,
             PictureDefaultDownloadDirectoryPath = PictureDefaultDownloadDirectoryPath.Trim(),
             UncategorizedDefaultDownloadDirectoryPath = UncategorizedDefaultDownloadDirectoryPath.Trim(),
             NiceDefaultDownloadDirectoryPath = NiceDefaultDownloadDirectoryPath.Trim(),
             OkDefaultDownloadDirectoryPath = OkDefaultDownloadDirectoryPath.Trim(),
             TrashDefaultDownloadDirectoryPath = TrashDefaultDownloadDirectoryPath.Trim()
         });
+        ApplyImageCacheSettings();
+    }
+
+    private void ApplyImageCacheSettings()
+    {
+        _imageCache.CacheThumbnails = CacheThumbnails;
+        _imageCache.CacheOriginalImages = CacheOriginalImages;
     }
 
     private void SaveAlbumOpenHistory()

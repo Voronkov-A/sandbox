@@ -904,7 +904,9 @@ public sealed class ReviewerFeedbackService
             localStatus,
             cancellationToken);
 
-        if (sync.RemoteWon && sync.Status is { Status: ReviewerFeedbackStatusKind.Committed or ReviewerFeedbackStatusKind.Passed or ReviewerFeedbackStatusKind.Left })
+        if (statusKind != ReviewerFeedbackStatusKind.Left &&
+            sync.RemoteWon &&
+            sync.Status is { Status: ReviewerFeedbackStatusKind.Committed or ReviewerFeedbackStatusKind.Passed or ReviewerFeedbackStatusKind.Left })
         {
             session.State = sync.State;
             return new ReviewerFeedbackStatusResult(sync.Status, sync.State, RemoteWon: true);

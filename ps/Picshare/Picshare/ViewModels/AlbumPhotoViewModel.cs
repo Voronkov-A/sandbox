@@ -11,7 +11,10 @@ public partial class AlbumPhotoViewModel : ObservableObject
     private const int ThumbnailPixelSize = 64;
     private const int DisplayPixelWidth = 220;
     private const int DisplayPixelHeight = 150;
-    private static readonly SemaphoreSlim DisplayImageLoadGate = new(1, 1);
+    private static readonly object DisplayImageLoadQueueSync = new();
+    private static readonly Dictionary<AlbumPhotoViewModel, DisplayImageLoadRequest> PendingDisplayImageLoads = new();
+    private static bool _isDisplayImageLoadActive;
+    private static long _displayImageLoadSequence;
 
     public AlbumPhotoViewModel(
         string albumId,
@@ -114,6 +117,42 @@ public partial class AlbumPhotoViewModel : ObservableObject
 
     private CancellationTokenSource? _loadCancellation;
 
+    private sealed class DisplayImageLoadRequest
+    {
+        public DisplayImageLoadRequest(AlbumPhotoViewModel photo, CancellationToken cancellationToken)
+        {
+            Photo = photo;
+            CancellationToken = cancellationToken;
+            Completion = new TaskCompletionSource<DisplayImageLoadPermit>(TaskCreationOptions.RunContinuationsAsynchronously);
+        }
+
+        public AlbumPhotoViewModel Photo { get; }
+
+        public CancellationToken CancellationToken { get; set; }
+
+        public bool IsVisiblePriority { get; set; }
+
+        public long Sequence { get; set; }
+
+        public TaskCompletionSource<DisplayImageLoadPermit> Completion { get; }
+    }
+
+    private sealed class DisplayImageLoadPermit : IDisposable
+    {
+        private bool _disposed;
+
+        public void Dispose()
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            _disposed = true;
+            CompleteDisplayImageLoad();
+        }
+    }
+
     public async Task StartViewportLoadAsync(ImageCacheService imageCache, HttpClient httpClient)
     {
         if (IsImageLoading)
@@ -154,6 +193,7 @@ public partial class AlbumPhotoViewModel : ObservableObject
     public void StopViewportLoad()
     {
         _loadCancellation?.Cancel();
+        CancelPendingDisplayImageLoad(this);
         IsImageLoading = false;
         ReleaseCachedImage();
     }
@@ -193,30 +233,23 @@ public partial class AlbumPhotoViewModel : ObservableObject
         try
         {
             Status = "Loading full image";
-            await DisplayImageLoadGate.WaitAsync(cancellationToken);
-            try
+            using var permit = await EnqueueDisplayImageLoadAsync(this, cancellationToken);
+            if (IsFullImageLoaded)
             {
-                if (IsFullImageLoaded)
-                {
-                    return;
-                }
-
-                Image = await imageCache.LoadDisplayBitmapAsync(
-                    AlbumId,
-                    $"{PhotoId}-full{FileExtension}",
-                    DownloadUrl,
-                    httpClient,
-                    DisplayPixelWidth,
-                    DisplayPixelHeight,
-                    cancellationToken);
-
-                IsFullImageLoaded = true;
-                Status = "Full image loaded";
+                return;
             }
-            finally
-            {
-                DisplayImageLoadGate.Release();
-            }
+
+            Image = await imageCache.LoadDisplayBitmapAsync(
+                AlbumId,
+                $"{PhotoId}-full{FileExtension}",
+                DownloadUrl,
+                httpClient,
+                DisplayPixelWidth,
+                DisplayPixelHeight,
+                cancellationToken);
+
+            IsFullImageLoaded = true;
+            Status = "Full image loaded";
         }
         catch (Exception ex)
         {
@@ -225,6 +258,102 @@ public partial class AlbumPhotoViewModel : ObservableObject
                 Status = ex.Message;
             }
         }
+    }
+
+    private static Task<DisplayImageLoadPermit> EnqueueDisplayImageLoadAsync(
+        AlbumPhotoViewModel photo,
+        CancellationToken cancellationToken)
+    {
+        Task<DisplayImageLoadPermit> task;
+        lock (DisplayImageLoadQueueSync)
+        {
+            if (!PendingDisplayImageLoads.TryGetValue(photo, out var request))
+            {
+                request = new DisplayImageLoadRequest(photo, cancellationToken);
+                PendingDisplayImageLoads.Add(photo, request);
+            }
+
+            request.CancellationToken = cancellationToken;
+            request.IsVisiblePriority = true;
+            request.Sequence = ++_displayImageLoadSequence;
+            task = request.Completion.Task;
+        }
+
+        ProcessDisplayImageLoadQueue();
+        return task;
+    }
+
+    private static void CancelPendingDisplayImageLoad(AlbumPhotoViewModel photo)
+    {
+        DisplayImageLoadRequest? cancelledRequest = null;
+        lock (DisplayImageLoadQueueSync)
+        {
+            if (PendingDisplayImageLoads.Remove(photo, out var request))
+            {
+                cancelledRequest = request;
+            }
+        }
+
+        cancelledRequest?.Completion.TrySetCanceled(cancelledRequest.CancellationToken);
+        ProcessDisplayImageLoadQueue();
+    }
+
+    private static void CompleteDisplayImageLoad()
+    {
+        lock (DisplayImageLoadQueueSync)
+        {
+            _isDisplayImageLoadActive = false;
+        }
+
+        ProcessDisplayImageLoadQueue();
+    }
+
+    private static void ProcessDisplayImageLoadQueue()
+    {
+        List<DisplayImageLoadRequest> cancelledRequests = new();
+        DisplayImageLoadRequest? selectedRequest = null;
+
+        lock (DisplayImageLoadQueueSync)
+        {
+            if (_isDisplayImageLoadActive)
+            {
+                return;
+            }
+
+            foreach (var request in PendingDisplayImageLoads.Values.ToList())
+            {
+                if (request.CancellationToken.IsCancellationRequested || request.Photo.IsFullImageLoaded)
+                {
+                    PendingDisplayImageLoads.Remove(request.Photo);
+                    cancelledRequests.Add(request);
+                }
+            }
+
+            selectedRequest = PendingDisplayImageLoads.Values
+                .OrderByDescending(request => request.IsVisiblePriority)
+                .ThenByDescending(request => request.Sequence)
+                .FirstOrDefault();
+
+            if (selectedRequest is not null)
+            {
+                PendingDisplayImageLoads.Remove(selectedRequest.Photo);
+                _isDisplayImageLoadActive = true;
+            }
+        }
+
+        foreach (var request in cancelledRequests)
+        {
+            if (request.CancellationToken.IsCancellationRequested)
+            {
+                request.Completion.TrySetCanceled(request.CancellationToken);
+            }
+            else
+            {
+                request.Completion.TrySetResult(new DisplayImageLoadPermit());
+            }
+        }
+
+        selectedRequest?.Completion.TrySetResult(new DisplayImageLoadPermit());
     }
 
     public void ReleaseCachedImage()

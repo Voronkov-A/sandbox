@@ -62,6 +62,10 @@ public sealed class LocalUserSettings
 
     public int MaximumParallelism { get; set; } = DefaultMaximumParallelism;
 
+    public bool CacheThumbnails { get; set; } = true;
+
+    public bool CacheOriginalImages { get; set; } = true;
+
     public string PictureDefaultDownloadDirectoryPath { get; set; } = "";
 
     public string UncategorizedDefaultDownloadDirectoryPath { get; set; } = "";
