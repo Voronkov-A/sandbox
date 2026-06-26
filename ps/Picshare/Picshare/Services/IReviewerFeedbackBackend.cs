@@ -38,6 +38,12 @@ public interface IReviewerFeedbackBackend
         SharedFeedbackVersion version,
         CancellationToken cancellationToken);
 
+    Task<StoredDocument<WorkflowHistoryDatabase>?> LoadWorkflowHistoryAsync(CancellationToken cancellationToken);
+
+    Task<StoredDocument<WorkflowHistoryDatabase>> SaveWorkflowHistoryAsync(
+        WorkflowHistoryDatabase database,
+        CancellationToken cancellationToken);
+
     Task<StoredDocument<AlbumDeletionMarker>?> LoadAlbumDeletionMarkerAsync(CancellationToken cancellationToken);
 
     Task<StoredDocument<AlbumDeletionMarker>> SaveAlbumDeletionMarkerAsync(

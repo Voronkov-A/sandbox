@@ -46,6 +46,41 @@
                     </Image.RenderTransform>
                   </Image>
                 </Button>
+                <Grid Width="70"
+                      Height="36"
+                      Margin="6"
+                      HorizontalAlignment="Left"
+                      VerticalAlignment="Top"
+                      IsVisible="{Binding IsScoreVisible}">
+                  <Grid ColumnDefinitions="32,Auto"
+                          HorizontalAlignment="Right"
+                          VerticalAlignment="Top">
+                    <Grid Width="32" Height="32">
+                      <TextBlock Text="👍" FontSize="25" Foreground="Black" Margin="-1,-1,0,0" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                      <TextBlock Text="👍" FontSize="25" Foreground="Black" Margin="1,-1,0,0" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                      <TextBlock Text="👍" FontSize="25" Foreground="Black" Margin="-1,1,0,0" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                      <TextBlock Text="👍" FontSize="25" Foreground="Black" Margin="1,1,0,0" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                      <TextBlock Text="👍" FontSize="25" Foreground="#FFD84D" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Grid>
+                    <Border Grid.Column="1"
+                            MinWidth="32"
+                            Height="20"
+                            Padding="4,0"
+                            Background="#EFFFFFFF"
+                            BorderBrush="Black"
+                            BorderThickness="1"
+                            CornerRadius="4"
+                            Margin="-2,6,0,0"
+                            VerticalAlignment="Top">
+                      <TextBlock Text="{Binding ScoreText}"
+                                 FontSize="12"
+                                 FontWeight="Bold"
+                                 Foreground="Black"
+                                 HorizontalAlignment="Center"
+                                 VerticalAlignment="Center"/>
+                    </Border>
+                  </Grid>
+                </Grid>
                 <Border Width="72"
                         Height="54"
                         Margin="0,0,8,8"
@@ -724,7 +759,25 @@
 
           <Grid Grid.Row="1" RowDefinitions="Auto,*" Margin="0,16,0,0">
               <Grid Grid.Row="0" ColumnDefinitions="*,Auto,Auto,Auto" Margin="0,0,0,14">
-                <TextBlock Text="{Binding CurrentAlbumTitle}" FontSize="20" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                  <TextBlock Text="{Binding CurrentAlbumTitle}"
+                             FontSize="20"
+                             FontWeight="SemiBold"
+                             VerticalAlignment="Center"
+                             TextTrimming="CharacterEllipsis"/>
+                  <Border Background="#E8EEF0"
+                          BorderBrush="#C8D2D6"
+                          BorderThickness="1"
+                          CornerRadius="6"
+                          Padding="8,4"
+                          IsVisible="{Binding IsAlbumWorkflowStatusVisible}"
+                          VerticalAlignment="Center">
+                    <TextBlock Text="{Binding AlbumWorkflowStatus}"
+                               FontSize="12"
+                               FontWeight="SemiBold"
+                               Foreground="#27343B"/>
+                  </Border>
+                </StackPanel>
                 <TextBlock Grid.Column="1"
                            Text="{Binding CommitFeedbackStatus}"
                            IsVisible="{Binding IsStandardFeedbackActionsVisible}"
@@ -856,7 +909,7 @@
                 <TabItem Header="{Binding FlowTabHeader}" IsVisible="{Binding IsAuthorFlowVisible}" Tag="flow">
                   <ScrollViewer>
                     <StackPanel Spacing="16">
-                      <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto">
+                      <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto">
                         <TextBlock Text="{Binding FlowStatus}"
                                    Foreground="#6C756F"
                                    VerticalAlignment="Center"/>
@@ -877,6 +930,14 @@
                           Next round
                         </Button>
                         <Button Grid.Column="3"
+                                Command="{Binding ApplyRandomVerdictCommand}"
+                                IsVisible="{Binding CanApplyRandomVerdict}"
+                                IsEnabled="{Binding CanApplyRandomVerdict}"
+                                Margin="0,0,8,0"
+                                Padding="12,8">
+                          Random verdict
+                        </Button>
+                        <Button Grid.Column="4"
                                 Command="{Binding FinalizeFeedbackCommand}"
                                 IsVisible="{Binding CanFinalizeFeedback}"
                                 IsEnabled="{Binding CanFinalizeFeedback}"
@@ -884,7 +945,7 @@
                                 Padding="12,8">
                           Finalize
                         </Button>
-                        <Button Grid.Column="4"
+                        <Button Grid.Column="5"
                                 Command="{Binding DeleteAlbumCommand}"
                                 IsVisible="{Binding CanDeleteAlbum}"
                                 IsEnabled="{Binding CanDeleteAlbum}"
@@ -895,6 +956,39 @@
                           Delete the album
                         </Button>
                       </Grid>
+                      <StackPanel Spacing="6">
+                        <TextBlock Text="{Binding WorkflowHistoryHeader}" FontWeight="SemiBold"/>
+                        <ListBox ItemsSource="{Binding WorkflowHistory}"
+                                 Background="Transparent"
+                                 BorderThickness="0">
+                          <ListBox.ItemTemplate>
+                            <DataTemplate x:DataType="vm:WorkflowHistoryEntryViewModel">
+                              <Border Background="White"
+                                      BorderBrush="#D6D8D1"
+                                      BorderThickness="1"
+                                      CornerRadius="6"
+                                      Padding="12"
+                                      Margin="0,0,0,8">
+                                <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto">
+                                  <TextBlock Text="{Binding Title}" FontWeight="SemiBold"/>
+                                  <TextBlock Grid.Column="1"
+                                             Text="{Binding Timestamp}"
+                                             FontSize="12"
+                                             Foreground="#6C756F"
+                                             Margin="12,0,0,0"/>
+                                  <TextBlock Grid.Row="1"
+                                             Grid.ColumnSpan="2"
+                                             Text="{Binding Description}"
+                                             FontSize="12"
+                                             Foreground="#6C756F"
+                                             IsVisible="{Binding HasDescription}"
+                                             Margin="0,4,0,0"/>
+                                </Grid>
+                              </Border>
+                            </DataTemplate>
+                          </ListBox.ItemTemplate>
+                        </ListBox>
+                      </StackPanel>
                       <StackPanel Spacing="6" IsVisible="{Binding IsRegularFlowVisible}">
                         <TextBlock Text="{Binding CommittedReviewersHeader}" FontWeight="SemiBold"/>
                         <ListBox ItemsSource="{Binding CommittedReviewers}"
@@ -987,6 +1081,24 @@
                   </ScrollViewer>
                 </TabItem>
               </TabControl>
+              <Button Grid.Row="1"
+                      Width="38"
+                      Height="34"
+                      Padding="0"
+                      Margin="0,2,12,0"
+                      HorizontalAlignment="Right"
+                      VerticalAlignment="Top"
+                      Command="{Binding ToggleBulkPhotoActionPanelCommand}"
+                      IsVisible="{Binding IsBulkPhotoActionPanelToggleVisible}"
+                      Background="White"
+                      Foreground="Black"
+                      BorderBrush="#27343B"
+                      BorderThickness="1"
+                      ToolTip.Tip="Selection actions">
+                <Grid Width="22" Height="22">
+                  <TextBlock Text="☷" FontSize="20" FontWeight="Bold" Foreground="#27343B" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                </Grid>
+              </Button>
               <Border Grid.Row="1"
                       Background="#EE27343B"
                       BorderBrush="#99FFFFFF"
@@ -1003,6 +1115,25 @@
                              FontWeight="SemiBold"
                              VerticalAlignment="Center"
                              Margin="0,0,10,0"/>
+                  <Button Command="{Binding SelectAllPhotosInCurrentTabCommand}"
+                          Width="44"
+                          Height="44"
+                          Padding="0"
+                          Margin="0,0,8,0"
+                          Background="#33000000"
+                          BorderBrush="#99FFFFFF"
+                          BorderThickness="1"
+                          HorizontalContentAlignment="Center"
+                          VerticalContentAlignment="Center"
+                          ToolTip.Tip="Select all">
+                    <Grid Width="28" Height="28">
+                      <TextBlock Text="☑" FontSize="22" FontWeight="Bold" Foreground="Black" Margin="-1,-1,0,0"/>
+                      <TextBlock Text="☑" FontSize="22" FontWeight="Bold" Foreground="Black" Margin="1,-1,0,0"/>
+                      <TextBlock Text="☑" FontSize="22" FontWeight="Bold" Foreground="Black" Margin="-1,1,0,0"/>
+                      <TextBlock Text="☑" FontSize="22" FontWeight="Bold" Foreground="Black" Margin="1,1,0,0"/>
+                      <TextBlock Text="☑" FontSize="22" FontWeight="Bold" Foreground="White"/>
+                    </Grid>
+                  </Button>
                   <Button Padding="14,10"
                           Margin="0,0,8,0"
                           Command="{Binding MarkSelectedPhotosUncategorizedCommand}"
@@ -1060,21 +1191,48 @@
                           Foreground="Black"
                           BorderBrush="Black"
                           BorderThickness="2">
-                    <Grid>
-                      <TextBlock Text="more... ⚙" FontWeight="SemiBold" Foreground="White" Margin="-1,-1,0,0"/>
-                      <TextBlock Text="more... ⚙" FontWeight="SemiBold" Foreground="White" Margin="1,-1,0,0"/>
-                      <TextBlock Text="more... ⚙" FontWeight="SemiBold" Foreground="White" Margin="-1,1,0,0"/>
-                      <TextBlock Text="more... ⚙" FontWeight="SemiBold" Foreground="White" Margin="1,1,0,0"/>
-                      <TextBlock Text="more... ⚙" FontWeight="SemiBold" Foreground="Black"/>
+                    <Grid Width="24" Height="24">
+                      <TextBlock Text="⋮" FontSize="26" FontWeight="Bold" Foreground="White" Margin="-1,-1,0,0" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                      <TextBlock Text="⋮" FontSize="26" FontWeight="Bold" Foreground="White" Margin="1,-1,0,0" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                      <TextBlock Text="⋮" FontSize="26" FontWeight="Bold" Foreground="White" Margin="-1,1,0,0" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                      <TextBlock Text="⋮" FontSize="26" FontWeight="Bold" Foreground="White" Margin="1,1,0,0" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                      <TextBlock Text="⋮" FontSize="26" FontWeight="Bold" Foreground="Black" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                     </Grid>
                     <Button.Flyout>
                       <MenuFlyout>
+                        <MenuItem Command="{Binding UndoFeedbackActionCommand}"
+                                  IsEnabled="{Binding CanUndoFeedbackAction}">
+                          <MenuItem.Header>
+                            <StackPanel Spacing="1">
+                              <TextBlock Text="Undo"/>
+                              <TextBlock Text="{Binding UndoFeedbackActionDescription}"
+                                         FontSize="11"
+                                         Foreground="#6C756F"/>
+                            </StackPanel>
+                          </MenuItem.Header>
+                        </MenuItem>
                         <MenuItem Header="Rotate left"
                                   Command="{Binding RotateSelectedPhotosLeftCommand}"
                                   IsEnabled="{Binding CanRotateSelectedPhotos}"/>
                         <MenuItem Header="Rotate right"
                                   Command="{Binding RotateSelectedPhotosRightCommand}"
                                   IsEnabled="{Binding CanRotateSelectedPhotos}"/>
+                        <MenuItem Header="Bookmark...">
+                          <MenuItem Header="Set"
+                                    Command="{Binding SetSelectedPhotoBookmarkCommand}"
+                                    IsEnabled="{Binding CanSetSelectedPhotoBookmark}"/>
+                          <MenuItem Command="{Binding OpenBookmarkedPhotoCommand}"
+                                    IsEnabled="{Binding CanOpenBookmarkedPhoto}">
+                            <MenuItem.Header>
+                              <StackPanel Spacing="1">
+                                <TextBlock Text="Open"/>
+                                <TextBlock Text="{Binding BookmarkedPhotoName}"
+                                           FontSize="11"
+                                           Foreground="#6C756F"/>
+                              </StackPanel>
+                            </MenuItem.Header>
+                          </MenuItem>
+                        </MenuItem>
                         <MenuItem Header="Mark as duplicates"
                                   Command="{Binding MarkSelectedPhotosAsDuplicatesCommand}"
                                   IsEnabled="{Binding CanMarkSelectedPhotosAsDuplicates}"/>
@@ -1090,25 +1248,6 @@
                                   IsEnabled="{Binding CanDownloadSelectedPhotos}"/>
                       </MenuFlyout>
                     </Button.Flyout>
-                  </Button>
-                  <Button Command="{Binding SelectAllPhotosInCurrentTabCommand}"
-                          Width="44"
-                          Height="44"
-                          Padding="0"
-                          Margin="0,0,8,0"
-                          Background="#33000000"
-                          BorderBrush="#99FFFFFF"
-                          BorderThickness="1"
-                          HorizontalContentAlignment="Center"
-                          VerticalContentAlignment="Center"
-                          ToolTip.Tip="Select all">
-                    <Grid Width="28" Height="28">
-                      <TextBlock Text="☑" FontSize="22" FontWeight="Bold" Foreground="Black" Margin="-1,-1,0,0"/>
-                      <TextBlock Text="☑" FontSize="22" FontWeight="Bold" Foreground="Black" Margin="1,-1,0,0"/>
-                      <TextBlock Text="☑" FontSize="22" FontWeight="Bold" Foreground="Black" Margin="-1,1,0,0"/>
-                      <TextBlock Text="☑" FontSize="22" FontWeight="Bold" Foreground="Black" Margin="1,1,0,0"/>
-                      <TextBlock Text="☑" FontSize="22" FontWeight="Bold" Foreground="White"/>
-                    </Grid>
                   </Button>
                   <Button Command="{Binding ClearSelectedPhotosCommand}"
                           Width="44"
@@ -1367,6 +1506,16 @@
         <StackPanel Spacing="12">
           <TextBlock Text="Downloading album" FontSize="18" FontWeight="SemiBold"/>
           <TextBlock Text="{Binding AlbumDownloadProgressMessage}" TextWrapping="Wrap"/>
+          <Border Background="#FFF4D6"
+                  BorderBrush="#D18B00"
+                  BorderThickness="1"
+                  CornerRadius="4"
+                  Padding="10,8"
+                  IsVisible="{Binding IsAlbumDownloadProgressWarningVisible}">
+            <TextBlock Text="{Binding AlbumDownloadProgressWarning}"
+                       Foreground="#7A4A00"
+                       TextWrapping="Wrap"/>
+          </Border>
           <ProgressBar Minimum="0"
                        Maximum="{Binding AlbumDownloadProgressMaximum}"
                        Value="{Binding AlbumDownloadProgressValue}"
@@ -1397,6 +1546,16 @@
         <StackPanel Spacing="12">
           <TextBlock Text="Creating album" FontSize="18" FontWeight="SemiBold"/>
           <TextBlock Text="{Binding AlbumCreationProgressMessage}" TextWrapping="Wrap"/>
+          <Border Background="#FFF4D6"
+                  BorderBrush="#D18B00"
+                  BorderThickness="1"
+                  CornerRadius="4"
+                  Padding="10,8"
+                  IsVisible="{Binding IsAlbumCreationProgressWarningVisible}">
+            <TextBlock Text="{Binding AlbumCreationProgressWarning}"
+                       Foreground="#7A4A00"
+                       TextWrapping="Wrap"/>
+          </Border>
           <ProgressBar Minimum="0"
                        Maximum="{Binding AlbumCreationProgressMaximum}"
                        Value="{Binding AlbumCreationProgressValue}"
@@ -1537,6 +1696,16 @@
         <StackPanel Spacing="12">
           <TextBlock Text="Deleting album" FontSize="18" FontWeight="SemiBold"/>
           <TextBlock Text="{Binding AlbumDeletionProgressMessage}" TextWrapping="Wrap"/>
+          <Border Background="#FFF4D6"
+                  BorderBrush="#D18B00"
+                  BorderThickness="1"
+                  CornerRadius="4"
+                  Padding="10,8"
+                  IsVisible="{Binding IsAlbumDeletionProgressWarningVisible}">
+            <TextBlock Text="{Binding AlbumDeletionProgressWarning}"
+                       Foreground="#7A4A00"
+                       TextWrapping="Wrap"/>
+          </Border>
           <ProgressBar Minimum="0"
                        Maximum="{Binding AlbumDeletionProgressMaximum}"
                        Value="{Binding AlbumDeletionProgressValue}"
@@ -1742,6 +1911,38 @@
     </Grid>
 
     <Grid Grid.RowSpan="3"
+          Background="#80000000"
+          IsVisible="{Binding IsRandomVerdictConfirmationVisible}">
+      <Border Background="White"
+              BorderBrush="#D6D8D1"
+              BorderThickness="1"
+              CornerRadius="6"
+              Padding="18"
+              Margin="20"
+              MaxWidth="460"
+              HorizontalAlignment="Stretch"
+              VerticalAlignment="Center">
+        <StackPanel Spacing="12">
+          <TextBlock Text="Random verdict" FontSize="18" FontWeight="SemiBold"/>
+          <TextBlock Text="{Binding RandomVerdictConfirmationMessage}" TextWrapping="Wrap"/>
+          <Grid ColumnDefinitions="*,Auto,Auto">
+            <Button Grid.Column="1"
+                    Command="{Binding CancelRandomVerdictCommand}"
+                    Padding="12,8"
+                    Margin="0,0,8,0">
+              No
+            </Button>
+            <Button Grid.Column="2"
+                    Command="{Binding ConfirmRandomVerdictCommand}"
+                    Padding="12,8">
+              Yes
+            </Button>
+          </Grid>
+        </StackPanel>
+      </Border>
+    </Grid>
+
+    <Grid Grid.RowSpan="3"
           Background="#99000000"
           IsVisible="{Binding IsDeleteAlbumConfirmationVisible}">
       <Border Background="White"
@@ -1899,6 +2100,41 @@
                 </Image.RenderTransform>
               </Image>
             </ScrollViewer>
+            <Grid Width="92"
+                  Height="48"
+                  Margin="18"
+                  HorizontalAlignment="Left"
+                  VerticalAlignment="Top"
+                  IsVisible="{Binding IsCurrentPhotoScoreVisible}">
+              <Grid ColumnDefinitions="42,Auto"
+                    HorizontalAlignment="Left"
+                    VerticalAlignment="Top">
+                <Grid Width="42" Height="42">
+                  <TextBlock Text="👍" FontSize="34" Foreground="Black" Margin="-1,-1,0,0" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                  <TextBlock Text="👍" FontSize="34" Foreground="Black" Margin="1,-1,0,0" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                  <TextBlock Text="👍" FontSize="34" Foreground="Black" Margin="-1,1,0,0" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                  <TextBlock Text="👍" FontSize="34" Foreground="Black" Margin="1,1,0,0" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                  <TextBlock Text="👍" FontSize="34" Foreground="#FFD84D" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                </Grid>
+                <Border Grid.Column="1"
+                        MinWidth="42"
+                        Height="24"
+                        Padding="5,0"
+                        Background="#EFFFFFFF"
+                        BorderBrush="Black"
+                        BorderThickness="1"
+                        CornerRadius="5"
+                        Margin="-2,9,0,0"
+                        VerticalAlignment="Top">
+                  <TextBlock Text="{Binding CurrentPhotoScoreText}"
+                             FontSize="14"
+                             FontWeight="Bold"
+                             Foreground="Black"
+                             HorizontalAlignment="Center"
+                             VerticalAlignment="Center"/>
+                </Border>
+              </Grid>
+            </Grid>
             <Border Background="#99000000"
                     CornerRadius="6"
                     Padding="10"
@@ -1972,7 +2208,7 @@
                     HorizontalAlignment="Center"
                     VerticalAlignment="Bottom"
                     IsVisible="{Binding IsPhotoViewerActionsVisible}">
-              <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,Auto">
+              <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto">
                 <Button Padding="14,10"
                         Margin="0,0,8,0"
                         Command="{Binding ShowPreviousPhotoInCategoryCommand}"
@@ -1990,6 +2226,51 @@
                   </Grid>
                 </Button>
                 <Button Grid.Column="1"
+                        Width="52"
+                        Height="42"
+                        Padding="0"
+                        Margin="0,0,8,0"
+                        Command="{Binding OpenPreviousRecentPhotoCommand}"
+                        IsEnabled="{Binding CanOpenPreviousRecentPhoto}"
+                        Background="White"
+                        Foreground="Black"
+                        BorderBrush="Black"
+                        BorderThickness="2"
+                        ToolTip.Tip="Previous recent photo">
+                  <Canvas Width="34" Height="26">
+                    <Border Canvas.Left="5"
+                            Canvas.Top="5"
+                            Width="18"
+                            Height="16"
+                            Background="#F2F5F6"
+                            BorderBrush="Black"
+                            BorderThickness="1"
+                            RenderTransformOrigin="50%,50%">
+                      <Border.RenderTransform>
+                        <RotateTransform Angle="-14"/>
+                      </Border.RenderTransform>
+                    </Border>
+                    <Border Canvas.Left="11"
+                            Canvas.Top="5"
+                            Width="18"
+                            Height="16"
+                            Background="White"
+                            BorderBrush="Black"
+                            BorderThickness="1"
+                            RenderTransformOrigin="50%,50%">
+                      <Border.RenderTransform>
+                        <RotateTransform Angle="12"/>
+                      </Border.RenderTransform>
+                    </Border>
+                    <TextBlock Canvas.Left="7"
+                               Canvas.Top="-1"
+                               Text="↔"
+                               FontSize="20"
+                               FontWeight="Bold"
+                               Foreground="Black"/>
+                  </Canvas>
+                </Button>
+                <Button Grid.Column="2"
                         Padding="14,10"
                         Margin="0,0,8,0"
                         Command="{Binding MarkCurrentPhotoUncategorizedCommand}"
@@ -2007,7 +2288,7 @@
                     <TextBlock Text="uncategorized 👻" FontWeight="SemiBold" Foreground="Black"/>
                   </Grid>
                 </Button>
-                <Button Grid.Column="2"
+                <Button Grid.Column="3"
                         Padding="14,10"
                         Margin="0,0,8,0"
                         Command="{Binding MarkCurrentPhotoNiceCommand}"
@@ -2025,7 +2306,7 @@
                     <TextBlock Text="nice 😍" FontWeight="SemiBold" Foreground="Black"/>
                   </Grid>
                 </Button>
-                <Button Grid.Column="3"
+                <Button Grid.Column="4"
                         Padding="14,10"
                         Margin="0,0,8,0"
                         Command="{Binding MarkCurrentPhotoOkCommand}"
@@ -2043,28 +2324,65 @@
                     <TextBlock Text="ok 🗿" FontWeight="SemiBold" Foreground="Black"/>
                   </Grid>
                 </Button>
-                <Button Grid.Column="4"
+                <Button Grid.Column="5"
                         Padding="14,10"
                         Margin="0,0,8,0"
                         Background="White"
                         Foreground="Black"
                         BorderBrush="Black"
                         BorderThickness="2">
-                  <Grid>
-                    <TextBlock Text="more... ⚙" FontWeight="SemiBold" Foreground="White" Margin="-1,-1,0,0"/>
-                    <TextBlock Text="more... ⚙" FontWeight="SemiBold" Foreground="White" Margin="1,-1,0,0"/>
-                    <TextBlock Text="more... ⚙" FontWeight="SemiBold" Foreground="White" Margin="-1,1,0,0"/>
-                    <TextBlock Text="more... ⚙" FontWeight="SemiBold" Foreground="White" Margin="1,1,0,0"/>
-                    <TextBlock Text="more... ⚙" FontWeight="SemiBold" Foreground="Black"/>
+                  <Grid Width="24" Height="24">
+                    <TextBlock Text="⋮" FontSize="26" FontWeight="Bold" Foreground="White" Margin="-1,-1,0,0" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    <TextBlock Text="⋮" FontSize="26" FontWeight="Bold" Foreground="White" Margin="1,-1,0,0" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    <TextBlock Text="⋮" FontSize="26" FontWeight="Bold" Foreground="White" Margin="-1,1,0,0" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    <TextBlock Text="⋮" FontSize="26" FontWeight="Bold" Foreground="White" Margin="1,1,0,0" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    <TextBlock Text="⋮" FontSize="26" FontWeight="Bold" Foreground="Black" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                   </Grid>
                   <Button.Flyout>
                     <MenuFlyout>
+                      <MenuItem Command="{Binding UndoFeedbackActionCommand}"
+                                IsEnabled="{Binding CanUndoFeedbackAction}">
+                        <MenuItem.Header>
+                          <StackPanel Spacing="1">
+                            <TextBlock Text="Undo"/>
+                            <TextBlock Text="{Binding UndoFeedbackActionDescription}"
+                                       FontSize="11"
+                                       Foreground="#6C756F"/>
+                          </StackPanel>
+                        </MenuItem.Header>
+                      </MenuItem>
+                      <MenuItem Header="Recent..."
+                                ItemsSource="{Binding RecentPhotos}"
+                                IsEnabled="{Binding HasRecentPhotos}">
+                        <MenuItem.ItemTemplate>
+                          <DataTemplate x:DataType="vm:RecentPhotoViewModel">
+                            <MenuItem Header="{Binding DisplayName}"
+                                      Click="RecentPhoto_Click"/>
+                          </DataTemplate>
+                        </MenuItem.ItemTemplate>
+                      </MenuItem>
                       <MenuItem Header="Rotate left"
                                 Command="{Binding RotateCurrentPhotoLeftCommand}"
                                 IsEnabled="{Binding CanDownloadCurrentPhoto}"/>
                       <MenuItem Header="Rotate right"
                                 Command="{Binding RotateCurrentPhotoRightCommand}"
                                 IsEnabled="{Binding CanDownloadCurrentPhoto}"/>
+                      <MenuItem Header="Bookmark...">
+                        <MenuItem Header="Set"
+                                  Command="{Binding SetCurrentPhotoBookmarkCommand}"
+                                  IsEnabled="{Binding CanSetCurrentPhotoBookmark}"/>
+                        <MenuItem Command="{Binding OpenBookmarkedPhotoCommand}"
+                                  IsEnabled="{Binding CanOpenBookmarkedPhoto}">
+                          <MenuItem.Header>
+                            <StackPanel Spacing="1">
+                              <TextBlock Text="Open"/>
+                              <TextBlock Text="{Binding BookmarkedPhotoName}"
+                                         FontSize="11"
+                                         Foreground="#6C756F"/>
+                            </StackPanel>
+                          </MenuItem.Header>
+                        </MenuItem>
+                      </MenuItem>
                       <MenuItem Header="trash"
                                 Command="{Binding MarkCurrentPhotoTrashCommand}"
                                 IsVisible="{Binding CanShowCurrentPhotoTrashAction}"
@@ -2078,7 +2396,7 @@
                     </MenuFlyout>
                   </Button.Flyout>
                 </Button>
-                <Button Grid.Column="5"
+                <Button Grid.Column="6"
                         Padding="14,10"
                         Command="{Binding ShowNextPhotoInCategoryCommand}"
                         IsEnabled="{Binding CanNavigatePhotoViewerCategory}"

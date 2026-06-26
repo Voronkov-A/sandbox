@@ -79,6 +79,9 @@ public partial class AlbumPhotoViewModel : ObservableObject
     private int _rotationDegrees;
 
     [ObservableProperty]
+    private int _score;
+
+    [ObservableProperty]
     private bool _isSelectedForBulk;
 
     [ObservableProperty]
@@ -104,6 +107,10 @@ public partial class AlbumPhotoViewModel : ObservableObject
     public string DuplicateGroupCountText => DuplicateGroupCount > 1 ? DuplicateGroupCount.ToString() : "";
 
     public bool IsBestMarkerVisible => IsBestInDuplicateGroup;
+
+    public bool IsScoreVisible => Score > 0;
+
+    public string ScoreText => Score.ToString();
 
     public IBrush CardBorderBrush => IsSelectedForViewing
         ? Brushes.DeepSkyBlue
@@ -678,5 +685,11 @@ public partial class AlbumPhotoViewModel : ObservableObject
     partial void OnIsBestInDuplicateGroupChanged(bool value)
     {
         OnPropertyChanged(nameof(IsBestMarkerVisible));
+    }
+
+    partial void OnScoreChanged(int value)
+    {
+        OnPropertyChanged(nameof(IsScoreVisible));
+        OnPropertyChanged(nameof(ScoreText));
     }
 }

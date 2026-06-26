@@ -33,27 +33,49 @@ public sealed class AlbumDeletionService
         IProgress<AlbumDeletionProgress>? progress = null,
         int maximumParallelism = LocalUserSettings.DefaultMaximumParallelism)
     {
-        progress?.Report(new AlbumDeletionProgress("Saving deletion request", 0, 4));
+        var lastProgress = new AlbumDeletionProgress("Saving deletion request", 0, 4);
+        void Report(AlbumDeletionProgress value)
+        {
+            lastProgress = value;
+            progress?.Report(value);
+        }
+
+        void ReportRetryWarning(string warning)
+        {
+            progress?.Report(lastProgress with { Warning = warning });
+        }
+
+        Report(lastProgress);
         await SavePendingDeletionAsync(manifest, requestedBy, cancellationToken);
 
-        progress?.Report(new AlbumDeletionProgress("Writing deletion marker", 1, 4));
-        var existingMarker = await feedbackBackend.LoadAlbumDeletionMarkerAsync(cancellationToken);
+        Report(new AlbumDeletionProgress("Writing deletion marker", 1, 4));
+        var existingMarker = await TransientRetryPolicy.ExecuteAsync(
+            feedbackBackend.LoadAlbumDeletionMarkerAsync,
+            ReportRetryWarning,
+            cancellationToken);
         if (existingMarker is null)
         {
-            await feedbackBackend.SaveAlbumDeletionMarkerAsync(new AlbumDeletionMarker
+            var marker = new AlbumDeletionMarker
             {
                 AlbumId = manifest.AlbumId,
                 RequestedAt = DateTimeOffset.UtcNow,
                 RequestedBy = requestedBy
-            }, cancellationToken);
+            };
+            await TransientRetryPolicy.ExecuteAsync(
+                token => feedbackBackend.SaveAlbumDeletionMarkerAsync(marker, token),
+                ReportRetryWarning,
+                cancellationToken);
         }
 
-        progress?.Report(new AlbumDeletionProgress("Deleting album storage", 2, 4));
-        await DeleteRemoteStorageAsync(manifest, getGoogleAccessTokenAsync, maximumParallelism, cancellationToken);
-        progress?.Report(new AlbumDeletionProgress("Deleting local state", 3, 4));
+        Report(new AlbumDeletionProgress("Deleting album storage", 2, 4));
+        await TransientRetryPolicy.ExecuteAsync(
+            token => DeleteRemoteStorageAsync(manifest, getGoogleAccessTokenAsync, maximumParallelism, token),
+            ReportRetryWarning,
+            cancellationToken);
+        Report(new AlbumDeletionProgress("Deleting local state", 3, 4));
         await DeleteLocalStateAsync(manifest.AlbumId);
         DeletePendingDeletion(manifest.AlbumId);
-        progress?.Report(new AlbumDeletionProgress("Album deleted", 4, 4));
+        Report(new AlbumDeletionProgress("Album deleted", 4, 4));
     }
 
     public async Task<IReadOnlyList<PendingAlbumDeletion>> LoadPendingDeletionsAsync(CancellationToken cancellationToken)
@@ -182,4 +204,4 @@ public sealed record PendingAlbumDeletion
     public required DateTimeOffset UpdatedAt { get; init; }
 }
 
-public sealed record AlbumDeletionProgress(string Message, int Value, int Maximum);
+public sealed record AlbumDeletionProgress(string Message, int Value, int Maximum, string Warning = "");

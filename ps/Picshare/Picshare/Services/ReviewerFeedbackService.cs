@@ -142,6 +142,22 @@ public sealed class ReviewerFeedbackService
         session.State = state;
     }
 
+    public async Task SaveLocalBookmarkAsync(
+        ReviewerFeedbackSession session,
+        ReviewerFeedbackDatabase database,
+        string photoId,
+        CancellationToken cancellationToken)
+    {
+        database.BookmarkPhotoId = photoId;
+        database.UpdatedAt = DateTimeOffset.UtcNow;
+        var state = session.State;
+        state.LocalDirty = true;
+
+        await SaveLocalDatabaseAsync(session.LocalFolderPath, database, cancellationToken);
+        await SaveLocalStateAsync(session.LocalFolderPath, state, cancellationToken);
+        session.State = state;
+    }
+
     public async Task SaveLocalDuplicateGroupAsync(
         ReviewerFeedbackSession session,
         ReviewerFeedbackDatabase database,
@@ -215,6 +231,20 @@ public sealed class ReviewerFeedbackService
         }
 
         group.BestPhotoId = isBest ? photoId : "";
+        database.UpdatedAt = DateTimeOffset.UtcNow;
+        var state = session.State;
+        state.LocalDirty = true;
+
+        await SaveLocalDatabaseAsync(session.LocalFolderPath, database, cancellationToken);
+        await SaveLocalStateAsync(session.LocalFolderPath, state, cancellationToken);
+        session.State = state;
+    }
+
+    public async Task RestoreLocalDatabaseAsync(
+        ReviewerFeedbackSession session,
+        ReviewerFeedbackDatabase database,
+        CancellationToken cancellationToken)
+    {
         database.UpdatedAt = DateTimeOffset.UtcNow;
         var state = session.State;
         state.LocalDirty = true;
@@ -344,11 +374,34 @@ public sealed class ReviewerFeedbackService
             }
         }
 
+        var history = await LoadWorkflowHistoryAsync(backend, "", cancellationToken);
+
         return new ReviewerFeedbackFlowSnapshot(
             SortFlowItems(committed),
             SortFlowItems(passed),
             SortFlowItems(left),
-            SortFlowItems(inProgress));
+            SortFlowItems(inProgress),
+            history.Entries
+                .OrderByDescending(entry => entry.CreatedAt)
+                .ThenByDescending(entry => entry.Id, StringComparer.Ordinal)
+                .ToList());
+    }
+
+    public async Task EnsureInitialWorkflowHistoryAsync(
+        AlbumManifest manifest,
+        IReviewerFeedbackBackend backend,
+        CancellationToken cancellationToken)
+    {
+        await AppendWorkflowHistoryEntryAsync(
+            backend,
+            manifest.AlbumId,
+            new WorkflowHistoryEntry
+            {
+                Id = "round-started:1",
+                Kind = "round-started",
+                CreatedAt = manifest.CreatedAt
+            },
+            cancellationToken);
     }
 
     public async Task<ReviewerFeedbackCollectResult> CollectFeedbackAsync(
@@ -391,10 +444,16 @@ public sealed class ReviewerFeedbackService
         }
 
         var previousSharedDatabase = (await backend.LoadSharedFeedbackAsync(cancellationToken))?.Value;
+        if (previousSharedDatabase?.HasCollectedFeedback == true)
+        {
+            throw new InvalidOperationException("Feedback for the current round has already been collected.");
+        }
+
         var shouldAddRoundScores = previousSharedDatabase?.HasCollectedFeedback != true;
         var previousCategories = previousSharedDatabase?.PhotoCategories ?? new Dictionary<string, string>(StringComparer.Ordinal);
         var previousScores = previousSharedDatabase?.PhotoScores ?? new Dictionary<string, int>(StringComparer.Ordinal);
         var previousFrozenPhotoIds = previousSharedDatabase?.FrozenPhotoIds ?? new HashSet<string>(StringComparer.Ordinal);
+        var uncategorizedBefore = CountRoundUncategorizedPhotos(manifest, previousSharedDatabase);
 
         var mergedCategories = new Dictionary<string, string>(StringComparer.Ordinal);
         var photoScores = new Dictionary<string, int>(StringComparer.Ordinal);
@@ -506,6 +565,7 @@ public sealed class ReviewerFeedbackService
         {
             AlbumId = manifest.AlbumId,
             UpdatedAt = DateTimeOffset.UtcNow,
+            RoundNumber = Math.Max(1, previousSharedDatabase?.RoundNumber ?? 1),
             HasCollectedFeedback = true,
             IsFinalized = previousSharedDatabase?.IsFinalized == true,
             PhotoCategories = mergedCategories,
@@ -520,10 +580,26 @@ public sealed class ReviewerFeedbackService
             UpdatedAt = sharedDatabase.UpdatedAt
         };
 
+        var unfrozenCount = manifest.Photos.Count(photo => !frozenPhotoIds.Contains(photo.Id));
+        sharedDatabase.RoundUncategorizedBefore = uncategorizedBefore;
+        sharedDatabase.RoundUncategorizedAfter = unfrozenCount;
         await backend.SaveSharedFeedbackAsync(sharedDatabase, cancellationToken);
         await backend.SaveSharedFeedbackVersionAsync(sharedVersion, cancellationToken);
 
-        var unfrozenCount = manifest.Photos.Count(photo => !frozenPhotoIds.Contains(photo.Id));
+        await AppendWorkflowHistoryEntryAsync(
+            backend,
+            manifest.AlbumId,
+            new WorkflowHistoryEntry
+            {
+                Id = $"feedback-collected:{databaseVersion}",
+                Kind = "feedback-collected",
+                CreatedAt = sharedDatabase.UpdatedAt,
+                FeedbackCount = committedDatabases.Count,
+                UncategorizedBefore = uncategorizedBefore,
+                UncategorizedAfter = unfrozenCount
+            },
+            cancellationToken);
+
         return new ReviewerFeedbackCollectResult(committedDatabases.Count, mergedCategories.Count, unfrozenCount, databaseVersion);
     }
 
@@ -566,19 +642,137 @@ public sealed class ReviewerFeedbackService
 
             sharedDatabase.HasCollectedFeedback = false;
             sharedDatabase.IsFinalized = false;
+            sharedDatabase.RoundNumber = Math.Max(1, sharedDatabase.RoundNumber) + 1;
+            sharedDatabase.RoundUncategorizedBefore = null;
+            sharedDatabase.RoundUncategorizedAfter = null;
             sharedDatabase.UpdatedAt = DateTimeOffset.UtcNow;
+            var databaseVersion = Guid.NewGuid().ToString("N");
             var sharedVersion = new SharedFeedbackVersion
             {
                 AlbumId = manifest.AlbumId,
-                DatabaseVersion = Guid.NewGuid().ToString("N"),
+                DatabaseVersion = databaseVersion,
                 UpdatedAt = sharedDatabase.UpdatedAt
             };
 
             await backend.SaveSharedFeedbackAsync(sharedDatabase, cancellationToken);
             await backend.SaveSharedFeedbackVersionAsync(sharedVersion, cancellationToken);
+            await AppendWorkflowHistoryEntryAsync(
+                backend,
+                manifest.AlbumId,
+                new WorkflowHistoryEntry
+                {
+                    Id = $"round-started:{databaseVersion}",
+                    Kind = "round-started",
+                    CreatedAt = sharedDatabase.UpdatedAt
+                },
+                cancellationToken);
         }
 
         return updated;
+    }
+
+    public async Task<ReviewerFeedbackRandomVerdictResult> ApplyRandomVerdictAsync(
+        AlbumManifest manifest,
+        IReviewerFeedbackBackend backend,
+        CancellationToken cancellationToken)
+    {
+        var previousSharedDatabase = (await backend.LoadSharedFeedbackAsync(cancellationToken))?.Value ??
+            throw new InvalidOperationException("Collect feedback before applying a random verdict.");
+        if (!previousSharedDatabase.HasCollectedFeedback)
+        {
+            throw new InvalidOperationException("Collect feedback before applying a random verdict.");
+        }
+
+        if (previousSharedDatabase.IsFinalized)
+        {
+            throw new InvalidOperationException("The album is already finalized.");
+        }
+
+        var categories = new Dictionary<string, string>(previousSharedDatabase.PhotoCategories, StringComparer.Ordinal);
+        var scores = new Dictionary<string, int>(previousSharedDatabase.PhotoScores, StringComparer.Ordinal);
+        var frozenPhotoIds = new HashSet<string>(previousSharedDatabase.FrozenPhotoIds, StringComparer.Ordinal);
+        var committedNiceCount = manifest.Photos.Count(photo =>
+            frozenPhotoIds.Contains(photo.Id) &&
+            categories.TryGetValue(photo.Id, out var category) &&
+            string.Equals(category, "nice", StringComparison.Ordinal));
+        var missingNiceCount = Math.Max(0, manifest.TargetNicePhotoCount - committedNiceCount);
+        if (missingNiceCount == 0)
+        {
+            throw new InvalidOperationException("The target nice picture count has already been achieved.");
+        }
+
+        var uncommittedPhotoIds = manifest.Photos
+            .Select(photo => photo.Id)
+            .Where(photoId => !frozenPhotoIds.Contains(photoId))
+            .ToList();
+        if (uncommittedPhotoIds.Count < missingNiceCount)
+        {
+            throw new InvalidOperationException("There are not enough uncommitted pictures to achieve the target nice picture count.");
+        }
+
+        var randomNicePhotoIds = uncommittedPhotoIds
+            .OrderBy(_ => Random.Shared.Next())
+            .Take(missingNiceCount)
+            .ToHashSet(StringComparer.Ordinal);
+
+        foreach (var photoId in manifest.Photos.Select(photo => photo.Id))
+        {
+            if (!scores.ContainsKey(photoId))
+            {
+                scores[photoId] = 0;
+            }
+
+            if (!frozenPhotoIds.Contains(photoId))
+            {
+                categories[photoId] = randomNicePhotoIds.Contains(photoId) ? "nice" : "ok";
+            }
+
+            frozenPhotoIds.Add(photoId);
+        }
+
+        var databaseVersion = Guid.NewGuid().ToString("N");
+        var sharedDatabase = new SharedFeedbackDatabase
+        {
+            AlbumId = manifest.AlbumId,
+            UpdatedAt = DateTimeOffset.UtcNow,
+            RoundNumber = Math.Max(1, previousSharedDatabase.RoundNumber),
+            HasCollectedFeedback = true,
+            IsFinalized = false,
+            RoundUncategorizedBefore = previousSharedDatabase.RoundUncategorizedBefore,
+            RoundUncategorizedAfter = previousSharedDatabase.RoundUncategorizedAfter,
+            PhotoCategories = categories,
+            PhotoScores = scores,
+            FrozenPhotoIds = frozenPhotoIds
+        };
+
+        var sharedVersion = new SharedFeedbackVersion
+        {
+            AlbumId = manifest.AlbumId,
+            DatabaseVersion = databaseVersion,
+            UpdatedAt = sharedDatabase.UpdatedAt
+        };
+
+        await backend.SaveSharedFeedbackAsync(sharedDatabase, cancellationToken);
+        await backend.SaveSharedFeedbackVersionAsync(sharedVersion, cancellationToken);
+        await AppendWorkflowHistoryEntryAsync(
+            backend,
+            manifest.AlbumId,
+            new WorkflowHistoryEntry
+            {
+                Id = $"random-verdict:{databaseVersion}",
+                Kind = "random-verdict",
+                CreatedAt = sharedDatabase.UpdatedAt,
+                FeedbackCount = missingNiceCount,
+                UncategorizedBefore = uncommittedPhotoIds.Count,
+                UncategorizedAfter = 0
+            },
+            cancellationToken);
+
+        return new ReviewerFeedbackRandomVerdictResult(
+            missingNiceCount,
+            uncommittedPhotoIds.Count - missingNiceCount,
+            manifest.Photos.Count,
+            databaseVersion);
     }
 
     public async Task<ReviewerFeedbackFinalizeResult> FinalizeAsync(
@@ -634,8 +828,11 @@ public sealed class ReviewerFeedbackService
         {
             AlbumId = manifest.AlbumId,
             UpdatedAt = DateTimeOffset.UtcNow,
+            RoundNumber = Math.Max(1, previousSharedDatabase?.RoundNumber ?? 1),
             HasCollectedFeedback = true,
             IsFinalized = true,
+            RoundUncategorizedBefore = previousSharedDatabase?.RoundUncategorizedBefore,
+            RoundUncategorizedAfter = previousSharedDatabase?.RoundUncategorizedAfter,
             PhotoCategories = categories,
             PhotoScores = scores,
             FrozenPhotoIds = frozenPhotoIds
@@ -650,6 +847,16 @@ public sealed class ReviewerFeedbackService
 
         await backend.SaveSharedFeedbackAsync(sharedDatabase, cancellationToken);
         await backend.SaveSharedFeedbackVersionAsync(sharedVersion, cancellationToken);
+        await AppendWorkflowHistoryEntryAsync(
+            backend,
+            manifest.AlbumId,
+            new WorkflowHistoryEntry
+            {
+                Id = $"finalization-started:{databaseVersion}",
+                Kind = "finalization-started",
+                CreatedAt = sharedDatabase.UpdatedAt
+            },
+            cancellationToken);
 
         return new ReviewerFeedbackFinalizeResult(updatedReviewers, manifest.Photos.Count, databaseVersion);
     }
@@ -663,6 +870,59 @@ public sealed class ReviewerFeedbackService
         }
 
         return Task.CompletedTask;
+    }
+
+    private static async Task AppendWorkflowHistoryEntryAsync(
+        IReviewerFeedbackBackend backend,
+        string albumId,
+        WorkflowHistoryEntry entry,
+        CancellationToken cancellationToken)
+    {
+        var history = await LoadWorkflowHistoryAsync(backend, albumId, cancellationToken);
+        var existingIndex = history.Entries.FindIndex(candidate =>
+            string.Equals(candidate.Id, entry.Id, StringComparison.Ordinal));
+        if (existingIndex >= 0)
+        {
+            history.Entries[existingIndex] = entry;
+        }
+        else
+        {
+            history.Entries.Add(entry);
+        }
+
+        history.UpdatedAt = DateTimeOffset.UtcNow;
+        await backend.SaveWorkflowHistoryAsync(history, cancellationToken);
+    }
+
+    private static async Task<WorkflowHistoryDatabase> LoadWorkflowHistoryAsync(
+        IReviewerFeedbackBackend backend,
+        string albumId,
+        CancellationToken cancellationToken)
+    {
+        var history = (await backend.LoadWorkflowHistoryAsync(cancellationToken))?.Value;
+        if (history is not null)
+        {
+            history.Entries ??= new List<WorkflowHistoryEntry>();
+            return history;
+        }
+
+        return new WorkflowHistoryDatabase
+        {
+            AlbumId = albumId
+        };
+    }
+
+    private static int CountRoundUncategorizedPhotos(AlbumManifest manifest, SharedFeedbackDatabase? sharedDatabase)
+    {
+        if (sharedDatabase is null)
+        {
+            return manifest.Photos.Count;
+        }
+
+        return manifest.Photos.Count(photo =>
+            !sharedDatabase.FrozenPhotoIds.Contains(photo.Id) &&
+            (!sharedDatabase.PhotoCategories.TryGetValue(photo.Id, out var category) ||
+                string.IsNullOrWhiteSpace(category)));
     }
 
     private static async Task<(
@@ -801,12 +1061,16 @@ public sealed class ReviewerFeedbackService
             AlbumId = albumId,
             ReviewerUserId = reviewerUserId,
             UpdatedAt = sharedDatabase.UpdatedAt,
+            RoundNumber = Math.Max(1, sharedDatabase.RoundNumber),
             HasCollectedFeedback = sharedDatabase.HasCollectedFeedback,
             IsFinalized = sharedDatabase.IsFinalized,
+            RoundUncategorizedBefore = sharedDatabase.RoundUncategorizedBefore,
+            RoundUncategorizedAfter = sharedDatabase.RoundUncategorizedAfter,
             PhotoCategories = new Dictionary<string, string>(sharedDatabase.PhotoCategories, StringComparer.Ordinal),
             PhotoScores = new Dictionary<string, int>(sharedDatabase.PhotoScores, StringComparer.Ordinal),
             FrozenPhotoIds = new HashSet<string>(sharedDatabase.FrozenPhotoIds, StringComparer.Ordinal),
-            PhotoRotations = new Dictionary<string, int>(currentDatabase.PhotoRotations, StringComparer.Ordinal)
+            PhotoRotations = new Dictionary<string, int>(currentDatabase.PhotoRotations, StringComparer.Ordinal),
+            BookmarkPhotoId = currentDatabase.BookmarkPhotoId
         };
 
         await SaveLocalDatabaseAsync(localFolderPath, reviewerDatabase, cancellationToken);

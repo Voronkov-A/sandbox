@@ -10,9 +10,15 @@ public sealed class ReviewerFeedbackDatabase
 
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 
+    public int RoundNumber { get; set; } = 1;
+
     public bool HasCollectedFeedback { get; set; }
 
     public bool IsFinalized { get; set; }
+
+    public int? RoundUncategorizedBefore { get; set; }
+
+    public int? RoundUncategorizedAfter { get; set; }
 
     public Dictionary<string, string> PhotoCategories { get; set; } = new(StringComparer.Ordinal);
 
@@ -21,6 +27,8 @@ public sealed class ReviewerFeedbackDatabase
     public HashSet<string> FrozenPhotoIds { get; set; } = new(StringComparer.Ordinal);
 
     public Dictionary<string, int> PhotoRotations { get; set; } = new(StringComparer.Ordinal);
+
+    public string BookmarkPhotoId { get; set; } = "";
 
     public List<DuplicatePhotoGroup> DuplicateGroups { get; set; } = new();
 }
@@ -108,9 +116,15 @@ public sealed class SharedFeedbackDatabase
 
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 
+    public int RoundNumber { get; set; } = 1;
+
     public bool HasCollectedFeedback { get; set; }
 
     public bool IsFinalized { get; set; }
+
+    public int? RoundUncategorizedBefore { get; set; }
+
+    public int? RoundUncategorizedAfter { get; set; }
 
     public Dictionary<string, string> PhotoCategories { get; set; } = new(StringComparer.Ordinal);
 
@@ -130,6 +144,32 @@ public sealed class SharedFeedbackVersion
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 
+public sealed class WorkflowHistoryDatabase
+{
+    public int Version { get; set; } = 1;
+
+    public required string AlbumId { get; set; }
+
+    public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+
+    public List<WorkflowHistoryEntry> Entries { get; set; } = new();
+}
+
+public sealed class WorkflowHistoryEntry
+{
+    public required string Id { get; set; }
+
+    public required string Kind { get; set; }
+
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+
+    public int FeedbackCount { get; set; }
+
+    public int UncategorizedBefore { get; set; }
+
+    public int UncategorizedAfter { get; set; }
+}
+
 public sealed record ReviewerFeedbackCollectResult(
     int ReviewerCount,
     int PhotoCount,
@@ -141,6 +181,12 @@ public sealed record ReviewerFeedbackFinalizeResult(
     int PhotoCount,
     string DatabaseVersion);
 
+public sealed record ReviewerFeedbackRandomVerdictResult(
+    int NicePhotoCount,
+    int OkPhotoCount,
+    int PhotoCount,
+    string DatabaseVersion);
+
 public sealed record ReviewerFeedbackFlowItem(
     FeedbackReviewerIdentity Reviewer,
     DateTimeOffset UpdatedAt);
@@ -149,7 +195,8 @@ public sealed record ReviewerFeedbackFlowSnapshot(
     IReadOnlyList<ReviewerFeedbackFlowItem> Committed,
     IReadOnlyList<ReviewerFeedbackFlowItem> Passed,
     IReadOnlyList<ReviewerFeedbackFlowItem> Left,
-    IReadOnlyList<ReviewerFeedbackFlowItem> InProgress);
+    IReadOnlyList<ReviewerFeedbackFlowItem> InProgress,
+    IReadOnlyList<WorkflowHistoryEntry> History);
 
 public sealed class ReviewerFeedbackSession
 {

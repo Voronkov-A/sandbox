@@ -37,13 +37,29 @@ public sealed class ImageCacheService
         var tempPath = Path.Combine(albumPath, $".{Guid.NewGuid():N}.tmp");
         try
         {
-            await using (var remoteStream = await OpenSourceStreamAsync(downloadUrl, httpClient, cancellationToken))
-            await using (var fileStream = new FileStream(tempPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
-            {
-                await remoteStream.CopyToAsync(fileStream, cancellationToken);
-            }
+            await TransientRetryPolicy.ExecuteAsync(
+                async token =>
+                {
+                    if (File.Exists(cachePath))
+                    {
+                        return;
+                    }
 
-            File.Move(tempPath, cachePath, overwrite: true);
+                    if (File.Exists(tempPath))
+                    {
+                        File.Delete(tempPath);
+                    }
+
+                    await using (var remoteStream = await OpenSourceStreamAsync(downloadUrl, httpClient, token))
+                    await using (var fileStream = new FileStream(tempPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                    {
+                        await remoteStream.CopyToAsync(fileStream, token);
+                    }
+
+                    File.Move(tempPath, cachePath, overwrite: true);
+                },
+                null,
+                cancellationToken);
             return cachePath;
         }
         finally
@@ -146,10 +162,10 @@ public sealed class ImageCacheService
     {
         if (!CacheOriginalImages)
         {
+            await using var stream = await OpenSeekableSourceStreamAsync(downloadUrl, httpClient, cancellationToken);
             await DecodeGate.WaitAsync(cancellationToken);
             try
             {
-                await using var stream = await OpenSeekableSourceStreamAsync(downloadUrl, httpClient, cancellationToken);
                 return new Bitmap(stream);
             }
             finally
@@ -207,27 +223,35 @@ public sealed class ImageCacheService
         var tempPath = Path.Combine(albumPath, $".{Guid.NewGuid():N}.display.tmp");
         try
         {
-            await DecodeGate.WaitAsync(cancellationToken);
-            try
+            if (isOriginalSource && !CacheOriginalImages)
             {
-                if (isOriginalSource && !CacheOriginalImages)
+                await using var source = await OpenSeekableSourceStreamAsync(downloadUrl, httpClient, cancellationToken);
+                await DecodeGate.WaitAsync(cancellationToken);
+                try
                 {
-                    await using var source = await OpenSeekableSourceStreamAsync(downloadUrl, httpClient, cancellationToken);
                     await Task.Run(
                         () => CreateDisplayImageFile(source, tempPath, maxPixelWidth, maxPixelHeight, cancellationToken),
                         cancellationToken);
                 }
-                else
+                finally
                 {
-                    var sourcePath = await GetOrDownloadAsync(albumId, cacheFileName, downloadUrl, httpClient, cancellationToken);
+                    DecodeGate.Release();
+                }
+            }
+            else
+            {
+                var sourcePath = await GetOrDownloadAsync(albumId, cacheFileName, downloadUrl, httpClient, cancellationToken);
+                await DecodeGate.WaitAsync(cancellationToken);
+                try
+                {
                     await Task.Run(
                         () => CreateDisplayImageFile(sourcePath, tempPath, maxPixelWidth, maxPixelHeight, cancellationToken),
                         cancellationToken);
                 }
-            }
-            finally
-            {
-                DecodeGate.Release();
+                finally
+                {
+                    DecodeGate.Release();
+                }
             }
 
             try
@@ -279,10 +303,10 @@ public sealed class ImageCacheService
             }
         }
 
+        await using var source = await OpenSeekableSourceStreamAsync(downloadUrl, httpClient, cancellationToken);
         await DecodeGate.WaitAsync(cancellationToken);
         try
         {
-            await using var source = await OpenSeekableSourceStreamAsync(downloadUrl, httpClient, cancellationToken);
             await using var resizedStream = await Task.Run(
                 () => CreateDisplayImageStream(source, maxPixelWidth, maxPixelHeight, cancellationToken),
                 cancellationToken);
@@ -339,19 +363,25 @@ public sealed class ImageCacheService
         HttpClient httpClient,
         CancellationToken cancellationToken)
     {
-        var stream = await OpenSourceStreamAsync(downloadUrl, httpClient, cancellationToken);
-        if (stream.CanSeek)
-        {
-            return stream;
-        }
+        return await TransientRetryPolicy.ExecuteAsync(
+            async token =>
+            {
+                var stream = await OpenSourceStreamAsync(downloadUrl, httpClient, token);
+                if (stream.CanSeek)
+                {
+                    return stream;
+                }
 
-        await using (stream)
-        {
-            var memory = new MemoryStream();
-            await stream.CopyToAsync(memory, cancellationToken);
-            memory.Position = 0;
-            return memory;
-        }
+                await using (stream)
+                {
+                    var memory = new MemoryStream();
+                    await stream.CopyToAsync(memory, token);
+                    memory.Position = 0;
+                    return memory;
+                }
+            },
+            null,
+            cancellationToken);
     }
 
     private static void CreateDisplayImageFile(

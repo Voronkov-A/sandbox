@@ -99,10 +99,38 @@ public sealed class PersistentAlbumCreationService
         int maximumParallelism,
         CancellationToken cancellationToken)
     {
-        progress?.Report(new AlbumCreationProgress("Preparing album", 0, pending.Photos.Count + 3));
+        var lastProgress = new AlbumCreationProgress("Preparing album", 0, pending.Photos.Count + 3);
+        void Report(AlbumCreationProgress value)
+        {
+            lastProgress = value;
+            progress?.Report(value);
+        }
+
+        void ReportRetryWarning(string warning)
+        {
+            progress?.Report(lastProgress with { Warning = warning });
+        }
+
+        var trackedProgress = new Progress<AlbumCreationProgress>(Report);
+        Report(lastProgress);
         AlbumCreationResumeResult result = string.Equals(pending.AlbumTypeId, "local-file-system", StringComparison.Ordinal)
-            ? await ResumeLocalAsync(pending, progress, maximumParallelism, cancellationToken)
-            : await ResumeGoogleAsync(pending, getGoogleAccessTokenAsync, progress, maximumParallelism, cancellationToken);
+            ? await ResumeLocalAsync(pending, trackedProgress, maximumParallelism, cancellationToken)
+            : await TransientRetryPolicy.ExecuteAsync(
+                token => ResumeGoogleAsync(pending, getGoogleAccessTokenAsync, trackedProgress, maximumParallelism, token),
+                ReportRetryWarning,
+                cancellationToken);
+
+        if (result.Manifest.GoogleDrive is not null)
+        {
+            await TransientRetryPolicy.ExecuteAsync(
+                token => EnsureInitialWorkflowHistoryAsync(result.Manifest, getGoogleAccessTokenAsync, token),
+                ReportRetryWarning,
+                cancellationToken);
+        }
+        else
+        {
+            await EnsureInitialWorkflowHistoryAsync(result.Manifest, getGoogleAccessTokenAsync, cancellationToken);
+        }
 
         DeletePendingCreation(pending.AlbumId);
         return result;
@@ -546,6 +574,33 @@ public sealed class PersistentAlbumCreationService
             : await client.GetFileMetadataAsync(item.Id, cancellationToken);
     }
 
+    private static async Task EnsureInitialWorkflowHistoryAsync(
+        AlbumManifest manifest,
+        Func<CancellationToken, Task<string>> getGoogleAccessTokenAsync,
+        CancellationToken cancellationToken)
+    {
+        IReviewerFeedbackBackend backend;
+        if (manifest.LocalFileSystem is not null)
+        {
+            backend = new LocalFileSystemReviewerFeedbackBackend(manifest.LocalFileSystem.FeedbackFolderPath);
+        }
+        else if (manifest.GoogleDrive is not null)
+        {
+            backend = new GoogleDriveReviewerFeedbackBackend(
+                manifest.GoogleDrive.FeedbackFolderId,
+                await getGoogleAccessTokenAsync(cancellationToken));
+        }
+        else
+        {
+            return;
+        }
+
+        await new ReviewerFeedbackService().EnsureInitialWorkflowHistoryAsync(
+            manifest,
+            backend,
+            cancellationToken);
+    }
+
     private static async Task<DriveFileInfo?> FindGoogleFolderByNameAsync(
         GoogleDriveRestClient client,
         string? parentFolderId,
@@ -660,7 +715,7 @@ public sealed class PendingAlbumCreationPhoto
     public PhotoReference? Reference { get; set; }
 }
 
-public sealed record AlbumCreationProgress(string Message, int Value, int Maximum);
+public sealed record AlbumCreationProgress(string Message, int Value, int Maximum, string Warning = "");
 
 public sealed record AlbumCreationResumeResult(AlbumManifest Manifest, string AlbumLocation, string PicshareLink);
 

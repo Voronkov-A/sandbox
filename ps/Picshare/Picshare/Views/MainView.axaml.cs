@@ -641,6 +641,17 @@ public partial class MainView : UserControl
         }
     }
 
+    private async void RecentPhoto_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is MainViewModel viewModel &&
+            sender is Control { DataContext: RecentPhotoViewModel recentPhoto })
+        {
+            await viewModel.OpenRecentPhotoAsync(recentPhoto);
+            await Dispatcher.UIThread.InvokeAsync(ResetPhotoViewerZoom, DispatcherPriority.Render);
+            e.Handled = true;
+        }
+    }
+
     private void AlbumReviewTabs_SelectionChanged(object? sender, SelectionChangedEventArgs e)
     {
         if (DataContext is MainViewModel viewModel &&

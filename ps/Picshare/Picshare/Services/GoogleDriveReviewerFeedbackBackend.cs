@@ -9,6 +9,7 @@ public sealed class GoogleDriveReviewerFeedbackBackend : IReviewerFeedbackBacken
     private const string StatusFileName = "status.json";
     private const string SharedFeedbackFileName = "shared-feedback.json";
     private const string SharedFeedbackVersionFileName = "shared-feedback-version.json";
+    private const string WorkflowHistoryFileName = "workflow-history.json";
     private const string AlbumDeletionMarkerFileName = "album-deletion.json";
     private const string FolderMimeType = "application/vnd.google-apps.folder";
 
@@ -113,6 +114,18 @@ public sealed class GoogleDriveReviewerFeedbackBackend : IReviewerFeedbackBacken
         CancellationToken cancellationToken)
     {
         return await SaveJsonAsync(_feedbackFolderId, SharedFeedbackVersionFileName, version, cancellationToken);
+    }
+
+    public async Task<StoredDocument<WorkflowHistoryDatabase>?> LoadWorkflowHistoryAsync(CancellationToken cancellationToken)
+    {
+        return await LoadJsonAsync<WorkflowHistoryDatabase>(_feedbackFolderId, WorkflowHistoryFileName, cancellationToken);
+    }
+
+    public async Task<StoredDocument<WorkflowHistoryDatabase>> SaveWorkflowHistoryAsync(
+        WorkflowHistoryDatabase database,
+        CancellationToken cancellationToken)
+    {
+        return await SaveJsonAsync(_feedbackFolderId, WorkflowHistoryFileName, database, cancellationToken);
     }
 
     public async Task<StoredDocument<AlbumDeletionMarker>?> LoadAlbumDeletionMarkerAsync(CancellationToken cancellationToken)
