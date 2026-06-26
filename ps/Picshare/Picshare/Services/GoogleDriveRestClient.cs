@@ -77,6 +77,34 @@ public sealed class GoogleDriveRestClient
             permission);
 
         using var response = await _httpClient.SendAsync(request, cancellationToken);
+        if (response.StatusCode == System.Net.HttpStatusCode.Conflict)
+        {
+            return;
+        }
+
+        await EnsureSuccessAsync(response, cancellationToken);
+    }
+
+    public async Task ShareWithUserAsync(string fileId, string emailAddress, string role, CancellationToken cancellationToken)
+    {
+        var permission = new
+        {
+            type = "user",
+            role,
+            emailAddress
+        };
+
+        using var request = CreateJsonRequest(
+            HttpMethod.Post,
+            $"https://www.googleapis.com/drive/v3/files/{Uri.EscapeDataString(fileId)}/permissions?sendNotificationEmail=false",
+            permission);
+
+        using var response = await _httpClient.SendAsync(request, cancellationToken);
+        if (response.StatusCode == System.Net.HttpStatusCode.Conflict)
+        {
+            return;
+        }
+
         await EnsureSuccessAsync(response, cancellationToken);
     }
 

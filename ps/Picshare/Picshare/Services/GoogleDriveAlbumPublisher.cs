@@ -37,7 +37,7 @@ public sealed class GoogleDriveAlbumPublisher
         var photosFolder = await client.CreateFolderAsync("photos", albumFolder.Id, cancellationToken);
         var feedbackFolder = await client.CreateFolderAsync("feedback", albumFolder.Id, cancellationToken);
 
-        await client.ShareWithAnyoneAsync(albumFolder.Id, "writer", cancellationToken);
+        await ApplyShareSettingsAsync(client, albumFolder.Id, request.ShareSettings, cancellationToken);
 
         var photoReferences = await AlbumPublishingWorkflow.PublishPhotosAsync(
             request.Photos,
@@ -106,5 +106,34 @@ public sealed class GoogleDriveAlbumPublisher
             AlbumFolderUrl = manifest.GoogleDrive!.AlbumFolderUrl,
             PicshareLink = AlbumLinkParser.CreatePicshareLink(manifest.GoogleDrive.ManifestFileId, albumFolder.Id)
         };
+    }
+
+    private static async Task ApplyShareSettingsAsync(
+        GoogleDriveRestClient client,
+        string folderId,
+        GoogleDriveAlbumShareSettings shareSettings,
+        CancellationToken cancellationToken)
+    {
+        if (shareSettings.IsPublic)
+        {
+            await client.ShareWithAnyoneAsync(folderId, "writer", cancellationToken);
+            return;
+        }
+
+        var emailAddresses = shareSettings.UserEmailAddresses
+            .Select(email => email.Trim())
+            .Where(email => !string.IsNullOrWhiteSpace(email))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (emailAddresses.Count == 0)
+        {
+            throw new InvalidOperationException("Add at least one Google account for a restricted Google Drive album.");
+        }
+
+        foreach (var emailAddress in emailAddresses)
+        {
+            await client.ShareWithUserAsync(folderId, emailAddress, "writer", cancellationToken);
+        }
     }
 }

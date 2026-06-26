@@ -1,5 +1,13 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android" android:installLocation="auto">
 	<uses-permission android:name="android.permission.INTERNET" />
-	<application android:label="Picshare" android:icon="@drawable/Icon" />
+	<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+	<uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+	<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+	<application android:label="Picshare" android:icon="@drawable/Icon">
+		<service
+			android:name="com.CompanyName.Picshare.PicshareForegroundService"
+			android:exported="false"
+			android:foregroundServiceType="dataSync" />
+	</application>
 </manifest>

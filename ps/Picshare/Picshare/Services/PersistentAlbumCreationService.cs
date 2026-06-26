@@ -47,6 +47,7 @@ public sealed class PersistentAlbumCreationService
         int targetNicePhotoCount,
         string? parentDriveFolderId,
         string? parentFolderPath,
+        GoogleDriveAlbumShareSettings shareSettings,
         FeedbackReviewerIdentity author,
         IReadOnlyList<PhotoUploadSource> photos,
         CancellationToken cancellationToken)
@@ -69,6 +70,7 @@ public sealed class PersistentAlbumCreationService
             TargetNicePhotoCount = targetNicePhotoCount,
             ParentDriveFolderId = parentDriveFolderId,
             ParentFolderPath = parentFolderPath,
+            GoogleShareSettings = shareSettings,
             Author = author,
             Photos = photos.Select((photo, index) =>
             {
@@ -377,7 +379,7 @@ public sealed class PersistentAlbumCreationService
 
         if (!pending.GoogleShared)
         {
-            await client.ShareWithAnyoneAsync(pending.GoogleAlbumFolderId, "writer", cancellationToken);
+            await ApplyGoogleShareSettingsAsync(client, pending.GoogleAlbumFolderId, pending.GoogleShareSettings, cancellationToken);
             pending.GoogleShared = true;
             await SavePendingCreationAsync(pending, cancellationToken);
         }
@@ -622,6 +624,36 @@ public sealed class PersistentAlbumCreationService
             : await client.GetFileMetadataAsync(item.Id, cancellationToken);
     }
 
+    private static async Task ApplyGoogleShareSettingsAsync(
+        GoogleDriveRestClient client,
+        string folderId,
+        GoogleDriveAlbumShareSettings? shareSettings,
+        CancellationToken cancellationToken)
+    {
+        shareSettings ??= GoogleDriveAlbumShareSettings.Public;
+        if (shareSettings.IsPublic)
+        {
+            await client.ShareWithAnyoneAsync(folderId, "writer", cancellationToken);
+            return;
+        }
+
+        var emailAddresses = shareSettings.UserEmailAddresses
+            .Select(email => email.Trim())
+            .Where(email => !string.IsNullOrWhiteSpace(email))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (emailAddresses.Count == 0)
+        {
+            throw new InvalidOperationException("Add at least one Google account for a restricted Google Drive album.");
+        }
+
+        foreach (var emailAddress in emailAddresses)
+        {
+            await client.ShareWithUserAsync(folderId, emailAddress, "writer", cancellationToken);
+        }
+    }
+
     private async Task SavePendingCreationAsync(PendingAlbumCreation pending, CancellationToken cancellationToken)
     {
         Directory.CreateDirectory(_pendingCreationFolderPath);
@@ -689,6 +721,7 @@ public sealed class PendingAlbumCreation
     public required int TargetNicePhotoCount { get; set; }
     public string? ParentDriveFolderId { get; set; }
     public string? ParentFolderPath { get; set; }
+    public GoogleDriveAlbumShareSettings GoogleShareSettings { get; set; } = GoogleDriveAlbumShareSettings.Public;
     public required FeedbackReviewerIdentity Author { get; set; }
     public List<PendingAlbumCreationPhoto> Photos { get; set; } = new();
     public string? LocalAlbumFolderPath { get; set; }

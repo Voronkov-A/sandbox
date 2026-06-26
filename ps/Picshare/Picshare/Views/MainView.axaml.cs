@@ -107,6 +107,24 @@ public partial class MainView : UserControl
         }
     }
 
+    private void AddGoogleContactSuggestion_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is MainViewModel viewModel &&
+            sender is Control { DataContext: GoogleContactSuggestionViewModel suggestion })
+        {
+            viewModel.AddGoogleAlbumShareSuggestion(suggestion);
+        }
+    }
+
+    private void RemoveSharedGoogleAccount_Click(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is MainViewModel viewModel &&
+            sender is Control { DataContext: SharedGoogleAccountViewModel account })
+        {
+            viewModel.RemoveSharedGoogleAccount(account);
+        }
+    }
+
     private async void ChoosePictureDefaultDownloadDirectory_Click(object? sender, RoutedEventArgs e)
     {
         await ChooseSettingsDownloadDirectoryAsync(

@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Net.Mail;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
@@ -73,6 +74,18 @@ public partial class MainViewModel : ViewModelBase
     private bool _isDriveFolderSelected;
 
     [ObservableProperty]
+    private bool _isGoogleAlbumPublic = true;
+
+    [ObservableProperty]
+    private string _googleAlbumShareEmail = "";
+
+    [ObservableProperty]
+    private string _googleContactSearchText = "";
+
+    [ObservableProperty]
+    private string _googleContactSearchStatus = "";
+
+    [ObservableProperty]
     private bool _isDriveFolderPickerVisible;
 
     [ObservableProperty]
@@ -113,6 +126,9 @@ public partial class MainViewModel : ViewModelBase
 
     [ObservableProperty]
     private bool _isBusy;
+
+    [ObservableProperty]
+    private int _mainTabIndex;
 
     [ObservableProperty]
     private bool _isSettingsPanelVisible;
@@ -334,6 +350,12 @@ public partial class MainViewModel : ViewModelBase
     private string _clearAlbumDestinationConfirmationMessage = "";
 
     [ObservableProperty]
+    private bool _isPublicGoogleAlbumConfirmationVisible;
+
+    [ObservableProperty]
+    private string _publicGoogleAlbumConfirmationMessage = "";
+
+    [ObservableProperty]
     private bool _isInfrastructureErrorVisible;
 
     [ObservableProperty]
@@ -474,6 +496,16 @@ public partial class MainViewModel : ViewModelBase
 
     public bool IsLocalAlbumSettingsVisible => SelectedAlbumType?.Id == LocalAlbumTypeId;
 
+    public bool IsGoogleAlbumRestricted
+    {
+        get => !IsGoogleAlbumPublic;
+        set => IsGoogleAlbumPublic = !value;
+    }
+
+    public bool IsGoogleAlbumRestrictedSharingVisible => IsGoogleDriveAlbumSettingsVisible && !IsGoogleAlbumPublic;
+
+    public bool HasGoogleContactSuggestions => GoogleContactSuggestions.Count > 0;
+
     public bool IsCreateResultVisible => !string.IsNullOrWhiteSpace(ShareLink);
 
     public bool IsGoogleSignInInstructionVisible => !string.IsNullOrWhiteSpace(GoogleSignInUrl) && IsGoogleSignInPending;
@@ -499,6 +531,10 @@ public partial class MainViewModel : ViewModelBase
     public ObservableCollection<AlbumPhotoSourceRowViewModel> ImportCandidateRows { get; } = new();
 
     public ObservableCollection<DriveItemViewModel> DriveItems { get; } = new();
+
+    public ObservableCollection<SharedGoogleAccountViewModel> SharedGoogleAccounts { get; } = new();
+
+    public ObservableCollection<GoogleContactSuggestionViewModel> GoogleContactSuggestions { get; } = new();
 
     public ObservableCollection<AlbumPhotoViewModel> Photos { get; } = new();
 
@@ -605,6 +641,11 @@ public partial class MainViewModel : ViewModelBase
     private bool _isBulkPhotoActionPanelPinned;
     private bool _isBulkPhotoActionPanelCollapsed;
     private int _lastBulkSelectedPhotoCount;
+    private bool _isLoadingLocalUserSettings;
+    private bool _googleContactSearchWarmedUp;
+    private Guid? _albumCreationLongRunningOperationId;
+    private Guid? _albumDeletionLongRunningOperationId;
+    private Guid? _albumDownloadLongRunningOperationId;
 
     public bool HasMoreDriveItems => !string.IsNullOrWhiteSpace(_driveNextPageToken);
 
@@ -652,18 +693,27 @@ public partial class MainViewModel : ViewModelBase
             _settingsProvider.LocalStorageRootPath);
         var localSettings = _localUserSettingsStore.Load();
         var albumOpenHistory = _albumOpenHistoryStore.Load();
-        AnonymousReviewerName = localSettings.AnonymousReviewerName;
-        MaximumParallelism = NormalizeMaximumParallelism(localSettings.MaximumParallelism);
-        CacheThumbnails = localSettings.CacheThumbnails;
-        CacheOriginalImages = localSettings.CacheOriginalImages;
+        _isLoadingLocalUserSettings = true;
+        try
+        {
+            AnonymousReviewerName = localSettings.AnonymousReviewerName;
+            MaximumParallelism = NormalizeMaximumParallelism(localSettings.MaximumParallelism);
+            CacheThumbnails = localSettings.CacheThumbnails;
+            CacheOriginalImages = localSettings.CacheOriginalImages;
+            PictureDefaultDownloadDirectoryPath = GetConfiguredOrDefaultDownloadDirectoryPath(localSettings.PictureDefaultDownloadDirectoryPath);
+            UncategorizedDefaultDownloadDirectoryPath = GetConfiguredOrDefaultDownloadDirectoryPath(localSettings.UncategorizedDefaultDownloadDirectoryPath);
+            NiceDefaultDownloadDirectoryPath = GetConfiguredOrDefaultDownloadDirectoryPath(localSettings.NiceDefaultDownloadDirectoryPath);
+            OkDefaultDownloadDirectoryPath = GetConfiguredOrDefaultDownloadDirectoryPath(localSettings.OkDefaultDownloadDirectoryPath);
+            TrashDefaultDownloadDirectoryPath = GetConfiguredOrDefaultDownloadDirectoryPath(localSettings.TrashDefaultDownloadDirectoryPath);
+        }
+        finally
+        {
+            _isLoadingLocalUserSettings = false;
+        }
+
         ApplyImageCacheSettings();
         _lastOpenAlbumLink = albumOpenHistory.LastOpenAlbumLink;
         OpenAlbumLink = albumOpenHistory.LastOpenAlbumLink;
-        PictureDefaultDownloadDirectoryPath = GetConfiguredOrDefaultDownloadDirectoryPath(localSettings.PictureDefaultDownloadDirectoryPath);
-        UncategorizedDefaultDownloadDirectoryPath = GetConfiguredOrDefaultDownloadDirectoryPath(localSettings.UncategorizedDefaultDownloadDirectoryPath);
-        NiceDefaultDownloadDirectoryPath = GetConfiguredOrDefaultDownloadDirectoryPath(localSettings.NiceDefaultDownloadDirectoryPath);
-        OkDefaultDownloadDirectoryPath = GetConfiguredOrDefaultDownloadDirectoryPath(localSettings.OkDefaultDownloadDirectoryPath);
-        TrashDefaultDownloadDirectoryPath = GetConfiguredOrDefaultDownloadDirectoryPath(localSettings.TrashDefaultDownloadDirectoryPath);
         LoadRecentAlbums(albumOpenHistory.RecentAlbums);
         _googleTokenSet = _tokenStore.Load();
         IsGoogleSignedIn = _googleTokenSet is not null;
@@ -1011,6 +1061,13 @@ public partial class MainViewModel : ViewModelBase
         AlbumDownloadProgressMaximum = Math.Max(1, categories.Sum(category => GetPhotosForCategory(category.CategoryKey).Count()));
         AlbumDownloadProgressMessage = "Preparing album download...";
         AlbumDownloadProgressWarning = "";
+        await using var longRunningOperation = await BeginLongRunningOperationAsync(
+            LongRunningOperationKind.Download,
+            "Picshare download",
+            AlbumDownloadProgressMessage,
+            AlbumDownloadProgressValue,
+            AlbumDownloadProgressMaximum,
+            cancellation.Token);
 
         try
         {
@@ -1052,6 +1109,7 @@ public partial class MainViewModel : ViewModelBase
         finally
         {
             IsAlbumDownloadProgressVisible = false;
+            ClearLongRunningOperation(LongRunningOperationKind.Download);
             if (ReferenceEquals(_albumDownloadCancellation, cancellation))
             {
                 _albumDownloadCancellation.Dispose();
@@ -1063,6 +1121,13 @@ public partial class MainViewModel : ViewModelBase
     [RelayCommand]
     private void CancelAlbumDownloadProgress()
     {
+        UpdateLongRunningOperation(
+            _albumDownloadLongRunningOperationId,
+            LongRunningOperationKind.Download,
+            "Cancelling Picshare download",
+            "Stopping download...",
+            AlbumDownloadProgressValue,
+            AlbumDownloadProgressMaximum);
         _albumDownloadCancellation?.Cancel();
     }
 
@@ -1418,9 +1483,17 @@ public partial class MainViewModel : ViewModelBase
         var manifest = _activeDeletingAlbumManifest;
         IsCancelAlbumDeletionConfirmationVisible = false;
         CancelAlbumDeletionConfirmationMessage = "";
+        UpdateLongRunningOperation(
+            _albumDeletionLongRunningOperationId,
+            LongRunningOperationKind.AlbumDeletionCancellation,
+            "Stopping album deletion",
+            "Picshare will forget the deletion locally...",
+            AlbumDeletionProgressValue,
+            AlbumDeletionProgressMaximum);
         _albumDeletionCancellation?.Cancel();
         await ApplyAlbumDeletionStoppedAsync(manifest);
         IsAlbumDeletionProgressVisible = false;
+        ClearLongRunningOperation(LongRunningOperationKind.AlbumDeletionCancellation);
         _activeDeletingAlbumManifest = null;
     }
 
@@ -1658,6 +1731,7 @@ public partial class MainViewModel : ViewModelBase
         _googleSignInCancellation?.Cancel();
         _tokenStore.Clear();
         _googleTokenSet = null;
+        _googleContactSearchWarmedUp = false;
         IsGoogleSignedIn = false;
         Status = "Google authorization cleared.";
     }
@@ -1665,7 +1739,8 @@ public partial class MainViewModel : ViewModelBase
     [RelayCommand]
     private void ShowSettingsPanel()
     {
-        IsSettingsPanelVisible = true;
+        MainTabIndex = 2;
+        IsSettingsPanelVisible = false;
     }
 
     [RelayCommand]
@@ -1702,9 +1777,94 @@ public partial class MainViewModel : ViewModelBase
     }
 
     [RelayCommand]
+    private void AddGoogleAlbumShareEmail()
+    {
+        AddSharedGoogleAccount(GoogleAlbumShareEmail);
+        GoogleAlbumShareEmail = "";
+    }
+
+    public void AddGoogleAlbumShareSuggestion(GoogleContactSuggestionViewModel suggestion)
+    {
+        AddSharedGoogleAccount(suggestion.EmailAddress);
+    }
+
+    public void RemoveSharedGoogleAccount(SharedGoogleAccountViewModel account)
+    {
+        SharedGoogleAccounts.Remove(account);
+    }
+
+    [RelayCommand]
+    private async Task SearchGoogleContactsAsync()
+    {
+        GoogleContactSuggestions.Clear();
+        OnPropertyChanged(nameof(HasGoogleContactSuggestions));
+
+        if (string.IsNullOrWhiteSpace(GoogleContactSearchText))
+        {
+            GoogleContactSearchStatus = "Enter a name or email prefix.";
+            return;
+        }
+
+        if (_googleTokenSet is null)
+        {
+            GoogleContactSearchStatus = "Sign in with Google before searching contacts.";
+            return;
+        }
+
+        if (!HasGoogleScope(_googleTokenSet, "https://www.googleapis.com/auth/contacts.readonly"))
+        {
+            GoogleContactSearchStatus = "Contact search needs Google contacts permission. Sign in again and allow contacts access.";
+            return;
+        }
+
+        try
+        {
+            GoogleContactSearchStatus = "Searching contacts...";
+            var accessToken = await GetGoogleAccessTokenAsync(CancellationToken.None);
+            var client = new GooglePeopleRestClient(accessToken);
+            if (!_googleContactSearchWarmedUp)
+            {
+                await client.WarmupContactSearchAsync(CancellationToken.None);
+                _googleContactSearchWarmedUp = true;
+            }
+
+            var results = await client.SearchContactsAsync(GoogleContactSearchText, 10, CancellationToken.None);
+            foreach (var result in results)
+            {
+                GoogleContactSuggestions.Add(new GoogleContactSuggestionViewModel(result.DisplayName, result.EmailAddress));
+            }
+
+            OnPropertyChanged(nameof(HasGoogleContactSuggestions));
+            GoogleContactSearchStatus = GoogleContactSuggestions.Count == 0
+                ? "No matching contacts found."
+                : "";
+        }
+        catch (Exception ex)
+        {
+            GoogleContactSearchStatus = ex.Message;
+        }
+    }
+
+    [RelayCommand]
     private async Task CreateAlbumAsync()
     {
-        await CreateAlbumCoreAsync(clearExistingDestination: false);
+        await CreateAlbumCoreAsync(clearExistingDestination: false, requirePublicGoogleAlbumConfirmation: true);
+    }
+
+    [RelayCommand]
+    private void CancelPublicGoogleAlbum()
+    {
+        IsPublicGoogleAlbumConfirmationVisible = false;
+        PublicGoogleAlbumConfirmationMessage = "";
+        Status = "Album creation cancelled.";
+    }
+
+    [RelayCommand]
+    private async Task ConfirmPublicGoogleAlbumAsync()
+    {
+        IsPublicGoogleAlbumConfirmationVisible = false;
+        PublicGoogleAlbumConfirmationMessage = "";
+        await CreateAlbumCoreAsync(clearExistingDestination: false, requirePublicGoogleAlbumConfirmation: false);
     }
 
     [RelayCommand]
@@ -1720,10 +1880,10 @@ public partial class MainViewModel : ViewModelBase
     {
         IsClearAlbumDestinationConfirmationVisible = false;
         ClearAlbumDestinationConfirmationMessage = "";
-        await CreateAlbumCoreAsync(clearExistingDestination: true);
+        await CreateAlbumCoreAsync(clearExistingDestination: true, requirePublicGoogleAlbumConfirmation: false);
     }
 
-    private async Task CreateAlbumCoreAsync(bool clearExistingDestination)
+    private async Task CreateAlbumCoreAsync(bool clearExistingDestination, bool requirePublicGoogleAlbumConfirmation)
     {
         if (IsBusy)
         {
@@ -1748,6 +1908,24 @@ public partial class MainViewModel : ViewModelBase
             return;
         }
 
+        if (SelectedAlbumType.Id == LocalToGoogleDriveAlbumTypeId &&
+            !IsGoogleAlbumPublic &&
+            SharedGoogleAccounts.Count == 0)
+        {
+            Status = "Add at least one Google account or make the album public.";
+            return;
+        }
+
+        if (requirePublicGoogleAlbumConfirmation &&
+            SelectedAlbumType.Id == LocalToGoogleDriveAlbumTypeId &&
+            IsGoogleAlbumPublic)
+        {
+            PublicGoogleAlbumConfirmationMessage =
+                "This will make the album directory accessible to any Google user who has the Picshare link. Continue?";
+            IsPublicGoogleAlbumConfirmationVisible = true;
+            return;
+        }
+
         if (SelectedAlbumType.Id == LocalAlbumTypeId && !IsLocalAlbumDestinationSelected)
         {
             Status = "Select a local destination folder before creating the album.";
@@ -1757,7 +1935,7 @@ public partial class MainViewModel : ViewModelBase
         if (SelectedAlbumType.Id == LocalAlbumTypeId && CreateLocalReviewerIdentity() is null)
         {
             Status = "Set an anonymous reviewer name in settings before creating a local album.";
-            IsSettingsPanelVisible = true;
+            MainTabIndex = 2;
             return;
         }
 
@@ -1810,6 +1988,7 @@ public partial class MainViewModel : ViewModelBase
                 Math.Max(0, TargetNicePhotoCount),
                 string.IsNullOrWhiteSpace(ParentDriveFolderId) ? null : ParentDriveFolderId.Trim(),
                 LocalAlbumDestinationPath,
+                CreateGoogleAlbumShareSettings(),
                 SelectedAlbumType.Id == LocalAlbumTypeId
                     ? CreateLocalReviewerIdentity()!
                     : CreateGoogleReviewerIdentity(_googleTokenSet!),
@@ -1823,6 +2002,13 @@ public partial class MainViewModel : ViewModelBase
             Status = SelectedAlbumType.Id == LocalAlbumTypeId
                 ? "Creating local album..."
                 : "Uploading selected local photos to Google Drive...";
+            await using var longRunningOperation = await BeginLongRunningOperationAsync(
+                LongRunningOperationKind.AlbumCreation,
+                "Creating Picshare album",
+                Status,
+                AlbumCreationProgressValue,
+                AlbumCreationProgressMaximum,
+                cancellation.Token);
             var result = await ResumePendingAlbumCreationCoreAsync(_activePendingAlbumCreation, cancellation.Token);
             await CompleteAlbumCreationAsync(result);
         }
@@ -1831,6 +2017,13 @@ public partial class MainViewModel : ViewModelBase
             Status = "Album creation cancellation requested.";
             if (_activePendingAlbumCreation is not null)
             {
+                await using var cancellationOperation = await BeginLongRunningOperationAsync(
+                    LongRunningOperationKind.AlbumCreationCancellation,
+                    "Cancelling album creation",
+                    "Cleaning up uploaded album data...",
+                    AlbumCreationProgressValue,
+                    AlbumCreationProgressMaximum,
+                    CancellationToken.None);
                 await CancelPendingAlbumCreationAsync(_activePendingAlbumCreation);
             }
         }
@@ -1851,6 +2044,7 @@ public partial class MainViewModel : ViewModelBase
             _activePendingAlbumCreation = null;
             IsAlbumCreationProgressVisible = false;
             AlbumCreationProgressWarning = "";
+            ClearLongRunningOperation(LongRunningOperationKind.AlbumCreation);
             IsBusy = false;
         }
     }
@@ -1858,6 +2052,13 @@ public partial class MainViewModel : ViewModelBase
     [RelayCommand]
     private void CancelAlbumCreationProgress()
     {
+        UpdateLongRunningOperation(
+            _albumCreationLongRunningOperationId,
+            LongRunningOperationKind.AlbumCreationCancellation,
+            "Cancelling album creation",
+            "Cleaning up uploaded album data...",
+            AlbumCreationProgressValue,
+            AlbumCreationProgressMaximum);
         _albumCreationCancellation?.Cancel();
     }
 
@@ -1879,6 +2080,13 @@ public partial class MainViewModel : ViewModelBase
             _albumCreationCancellation?.Dispose();
             _albumCreationCancellation = new CancellationTokenSource();
             Status = "Resuming album creation...";
+            await using var longRunningOperation = await BeginLongRunningOperationAsync(
+                LongRunningOperationKind.AlbumCreation,
+                "Creating Picshare album",
+                Status,
+                AlbumCreationProgressValue,
+                AlbumCreationProgressMaximum,
+                _albumCreationCancellation.Token);
             var result = await ResumePendingAlbumCreationCoreAsync(pendingCreation, _albumCreationCancellation.Token);
             await CompleteAlbumCreationAsync(result);
         }
@@ -1886,6 +2094,13 @@ public partial class MainViewModel : ViewModelBase
         {
             if (_activePendingAlbumCreation is not null)
             {
+                await using var cancellationOperation = await BeginLongRunningOperationAsync(
+                    LongRunningOperationKind.AlbumCreationCancellation,
+                    "Cancelling album creation",
+                    "Cleaning up uploaded album data...",
+                    AlbumCreationProgressValue,
+                    AlbumCreationProgressMaximum,
+                    CancellationToken.None);
                 await CancelPendingAlbumCreationAsync(_activePendingAlbumCreation);
             }
         }
@@ -1906,6 +2121,7 @@ public partial class MainViewModel : ViewModelBase
             _activePendingAlbumCreation = null;
             IsAlbumCreationProgressVisible = false;
             AlbumCreationProgressWarning = "";
+            ClearLongRunningOperation(LongRunningOperationKind.AlbumCreation);
             IsBusy = false;
         }
     }
@@ -2590,7 +2806,7 @@ public partial class MainViewModel : ViewModelBase
                 ClearCategoryRows();
                 SelectViewedPhoto(null);
                 ClosePhotoViewer();
-                IsSettingsPanelVisible = true;
+                MainTabIndex = 2;
                 Status = "Set an anonymous reviewer name in settings before opening this local album.";
                 return;
             }
@@ -2864,6 +3080,13 @@ public partial class MainViewModel : ViewModelBase
             ? "Preparing selected photo archive..."
             : "Preparing selected photo download...";
         AlbumDownloadProgressWarning = "";
+        await using var longRunningOperation = await BeginLongRunningOperationAsync(
+            LongRunningOperationKind.Download,
+            "Picshare download",
+            AlbumDownloadProgressMessage,
+            AlbumDownloadProgressValue,
+            AlbumDownloadProgressMaximum,
+            cancellation.Token);
 
         try
         {
@@ -2905,6 +3128,7 @@ public partial class MainViewModel : ViewModelBase
         finally
         {
             IsAlbumDownloadProgressVisible = false;
+            ClearLongRunningOperation(LongRunningOperationKind.Download);
             if (ReferenceEquals(_albumDownloadCancellation, cancellation))
             {
                 _albumDownloadCancellation.Dispose();
@@ -3517,6 +3741,13 @@ public partial class MainViewModel : ViewModelBase
             AlbumDownloadProgressMaximum = 1;
             AlbumDownloadProgressMessage = $"Downloading {photo.FileName}";
             AlbumDownloadProgressWarning = "";
+            await using var longRunningOperation = await BeginLongRunningOperationAsync(
+                LongRunningOperationKind.Download,
+                "Picshare download",
+                AlbumDownloadProgressMessage,
+                AlbumDownloadProgressValue,
+                AlbumDownloadProgressMaximum,
+                cancellation.Token);
             var destinationPath = Path.GetFullPath(destinationFilePath.Trim());
             var destinationDirectoryPath = Path.GetDirectoryName(destinationPath);
             if (string.IsNullOrWhiteSpace(destinationDirectoryPath))
@@ -3576,6 +3807,7 @@ public partial class MainViewModel : ViewModelBase
         finally
         {
             IsAlbumDownloadProgressVisible = false;
+            ClearLongRunningOperation(LongRunningOperationKind.Download);
             _albumDownloadCancellation?.Dispose();
             _albumDownloadCancellation = null;
             IsBusy = false;
@@ -4004,7 +4236,7 @@ public partial class MainViewModel : ViewModelBase
             if (UsesLocalFileSystemBackend(manifest))
             {
                 Status = "Set an anonymous reviewer name in settings before opening this local album.";
-                IsSettingsPanelVisible = true;
+                MainTabIndex = 2;
             }
 
             return;
@@ -4085,6 +4317,15 @@ public partial class MainViewModel : ViewModelBase
             AlbumDeletionProgressMessage = "Deleting album...";
             AlbumDeletionProgressWarning = "";
         }
+        await using var longRunningOperation = showProgress
+            ? await BeginLongRunningOperationAsync(
+                LongRunningOperationKind.AlbumDeletion,
+                "Deleting Picshare album",
+                AlbumDeletionProgressMessage,
+                AlbumDeletionProgressValue,
+                AlbumDeletionProgressMaximum,
+                cancellationToken)
+            : null;
 
         var progress = new Progress<AlbumDeletionProgress>(progress =>
         {
@@ -4115,6 +4356,7 @@ public partial class MainViewModel : ViewModelBase
             {
                 IsAlbumDeletionProgressVisible = false;
                 AlbumDeletionProgressWarning = "";
+                ClearLongRunningOperation(LongRunningOperationKind.AlbumDeletion);
                 _activeDeletingAlbumManifest = null;
                 _albumDeletionCancellation?.Dispose();
                 _albumDeletionCancellation = null;
@@ -4715,6 +4957,80 @@ public partial class MainViewModel : ViewModelBase
     {
         IsPhotoViewerDuplicateStripVisible = IsPhotoViewerActionsVisible && CanRemoveCurrentPhotoFromDuplicates;
         NotifyCurrentPhotoScoreStateChanged();
+    }
+
+    private async ValueTask<ILongRunningOperationScope> BeginLongRunningOperationAsync(
+        LongRunningOperationKind kind,
+        string title,
+        string message,
+        int value,
+        int maximum,
+        CancellationToken cancellationToken)
+    {
+        var scope = await LongRunningOperationHost.Current.BeginAsync(
+            kind,
+            title,
+            message,
+            value,
+            maximum,
+            cancellationToken);
+
+        switch (kind)
+        {
+            case LongRunningOperationKind.AlbumCreation:
+            case LongRunningOperationKind.AlbumCreationCancellation:
+                _albumCreationLongRunningOperationId = scope.OperationId;
+                break;
+            case LongRunningOperationKind.AlbumDeletion:
+            case LongRunningOperationKind.AlbumDeletionCancellation:
+                _albumDeletionLongRunningOperationId = scope.OperationId;
+                break;
+            case LongRunningOperationKind.Download:
+                _albumDownloadLongRunningOperationId = scope.OperationId;
+                break;
+        }
+
+        return scope;
+    }
+
+    private void UpdateLongRunningOperation(
+        Guid? operationId,
+        LongRunningOperationKind kind,
+        string title,
+        string message,
+        int value,
+        int maximum)
+    {
+        if (operationId is not { } id)
+        {
+            return;
+        }
+
+        LongRunningOperationHost.Current.Update(new LongRunningOperationInfo(
+            id,
+            kind,
+            title,
+            message,
+            value,
+            Math.Max(1, maximum)));
+    }
+
+    private void ClearLongRunningOperation(LongRunningOperationKind kind)
+    {
+        switch (kind)
+        {
+            case LongRunningOperationKind.AlbumCreation:
+            case LongRunningOperationKind.AlbumCreationCancellation:
+                _albumCreationLongRunningOperationId = null;
+                break;
+            case LongRunningOperationKind.AlbumDeletion:
+            case LongRunningOperationKind.AlbumDeletionCancellation:
+                _albumDeletionLongRunningOperationId = null;
+                break;
+            case LongRunningOperationKind.Download:
+                _albumDownloadLongRunningOperationId = null;
+                break;
+        }
     }
 
     private void NotifyCurrentPhotoScoreStateChanged()
@@ -5351,6 +5667,67 @@ public partial class MainViewModel : ViewModelBase
         };
     }
 
+    private GoogleDriveAlbumShareSettings CreateGoogleAlbumShareSettings()
+    {
+        if (IsGoogleAlbumPublic)
+        {
+            return GoogleDriveAlbumShareSettings.Public;
+        }
+
+        return new GoogleDriveAlbumShareSettings
+        {
+            IsPublic = false,
+            UserEmailAddresses = SharedGoogleAccounts
+                .Select(account => account.EmailAddress)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList()
+        };
+    }
+
+    private void AddSharedGoogleAccount(string emailAddress)
+    {
+        if (!TryNormalizeEmailAddress(emailAddress, out var normalizedEmail))
+        {
+            Status = "Enter a valid Google account email address.";
+            return;
+        }
+
+        if (SharedGoogleAccounts.Any(account => string.Equals(account.EmailAddress, normalizedEmail, StringComparison.OrdinalIgnoreCase)))
+        {
+            Status = $"{normalizedEmail} is already in the album access list.";
+            return;
+        }
+
+        SharedGoogleAccounts.Add(new SharedGoogleAccountViewModel(normalizedEmail));
+        Status = $"Added {normalizedEmail} to the album access list.";
+    }
+
+    private static bool TryNormalizeEmailAddress(string value, out string emailAddress)
+    {
+        emailAddress = "";
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        try
+        {
+            var trimmed = value.Trim();
+            var address = new MailAddress(trimmed);
+            if (!string.Equals(address.Address, trimmed, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            emailAddress = address.Address;
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     private FeedbackReviewerIdentity? CreateLocalReviewerIdentity()
     {
         var name = AnonymousReviewerName.Trim();
@@ -5392,6 +5769,16 @@ public partial class MainViewModel : ViewModelBase
         _imageCache.CacheOriginalImages = CacheOriginalImages;
     }
 
+    private void PersistLocalUserSettingsIfReady()
+    {
+        if (_isLoadingLocalUserSettings)
+        {
+            return;
+        }
+
+        SaveLocalUserSettings();
+    }
+
     private void SaveAlbumOpenHistory()
     {
         _albumOpenHistoryStore.Save(new AlbumOpenHistory
@@ -5430,6 +5817,58 @@ public partial class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(IsAlbumSettingsVisible));
         OnPropertyChanged(nameof(IsGoogleDriveAlbumSettingsVisible));
         OnPropertyChanged(nameof(IsLocalAlbumSettingsVisible));
+        OnPropertyChanged(nameof(IsGoogleAlbumRestrictedSharingVisible));
+    }
+
+    partial void OnIsGoogleAlbumPublicChanged(bool value)
+    {
+        OnPropertyChanged(nameof(IsGoogleAlbumRestricted));
+        OnPropertyChanged(nameof(IsGoogleAlbumRestrictedSharingVisible));
+    }
+
+    partial void OnAnonymousReviewerNameChanged(string value)
+    {
+        PersistLocalUserSettingsIfReady();
+    }
+
+    partial void OnMaximumParallelismChanged(int value)
+    {
+        PersistLocalUserSettingsIfReady();
+    }
+
+    partial void OnCacheThumbnailsChanged(bool value)
+    {
+        PersistLocalUserSettingsIfReady();
+    }
+
+    partial void OnCacheOriginalImagesChanged(bool value)
+    {
+        PersistLocalUserSettingsIfReady();
+    }
+
+    partial void OnPictureDefaultDownloadDirectoryPathChanged(string value)
+    {
+        PersistLocalUserSettingsIfReady();
+    }
+
+    partial void OnUncategorizedDefaultDownloadDirectoryPathChanged(string value)
+    {
+        PersistLocalUserSettingsIfReady();
+    }
+
+    partial void OnNiceDefaultDownloadDirectoryPathChanged(string value)
+    {
+        PersistLocalUserSettingsIfReady();
+    }
+
+    partial void OnOkDefaultDownloadDirectoryPathChanged(string value)
+    {
+        PersistLocalUserSettingsIfReady();
+    }
+
+    partial void OnTrashDefaultDownloadDirectoryPathChanged(string value)
+    {
+        PersistLocalUserSettingsIfReady();
     }
 
     partial void OnIsAuthorFlowVisibleChanged(bool value)
@@ -5471,14 +5910,113 @@ public partial class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(IsAlbumDownloadProgressWarningVisible));
     }
 
+    partial void OnAlbumDownloadProgressMessageChanged(string value)
+    {
+        UpdateLongRunningOperation(
+            _albumDownloadLongRunningOperationId,
+            LongRunningOperationKind.Download,
+            "Picshare download",
+            value,
+            AlbumDownloadProgressValue,
+            AlbumDownloadProgressMaximum);
+    }
+
+    partial void OnAlbumDownloadProgressValueChanged(int value)
+    {
+        UpdateLongRunningOperation(
+            _albumDownloadLongRunningOperationId,
+            LongRunningOperationKind.Download,
+            "Picshare download",
+            AlbumDownloadProgressMessage,
+            value,
+            AlbumDownloadProgressMaximum);
+    }
+
+    partial void OnAlbumDownloadProgressMaximumChanged(int value)
+    {
+        UpdateLongRunningOperation(
+            _albumDownloadLongRunningOperationId,
+            LongRunningOperationKind.Download,
+            "Picshare download",
+            AlbumDownloadProgressMessage,
+            AlbumDownloadProgressValue,
+            value);
+    }
+
     partial void OnAlbumCreationProgressWarningChanged(string value)
     {
         OnPropertyChanged(nameof(IsAlbumCreationProgressWarningVisible));
     }
 
+    partial void OnAlbumCreationProgressMessageChanged(string value)
+    {
+        UpdateLongRunningOperation(
+            _albumCreationLongRunningOperationId,
+            LongRunningOperationKind.AlbumCreation,
+            "Creating Picshare album",
+            value,
+            AlbumCreationProgressValue,
+            AlbumCreationProgressMaximum);
+    }
+
+    partial void OnAlbumCreationProgressValueChanged(int value)
+    {
+        UpdateLongRunningOperation(
+            _albumCreationLongRunningOperationId,
+            LongRunningOperationKind.AlbumCreation,
+            "Creating Picshare album",
+            AlbumCreationProgressMessage,
+            value,
+            AlbumCreationProgressMaximum);
+    }
+
+    partial void OnAlbumCreationProgressMaximumChanged(int value)
+    {
+        UpdateLongRunningOperation(
+            _albumCreationLongRunningOperationId,
+            LongRunningOperationKind.AlbumCreation,
+            "Creating Picshare album",
+            AlbumCreationProgressMessage,
+            AlbumCreationProgressValue,
+            value);
+    }
+
     partial void OnAlbumDeletionProgressWarningChanged(string value)
     {
         OnPropertyChanged(nameof(IsAlbumDeletionProgressWarningVisible));
+    }
+
+    partial void OnAlbumDeletionProgressMessageChanged(string value)
+    {
+        UpdateLongRunningOperation(
+            _albumDeletionLongRunningOperationId,
+            LongRunningOperationKind.AlbumDeletion,
+            "Deleting Picshare album",
+            value,
+            AlbumDeletionProgressValue,
+            AlbumDeletionProgressMaximum);
+    }
+
+    partial void OnAlbumDeletionProgressValueChanged(int value)
+    {
+        UpdateLongRunningOperation(
+            _albumDeletionLongRunningOperationId,
+            LongRunningOperationKind.AlbumDeletion,
+            "Deleting Picshare album",
+            AlbumDeletionProgressMessage,
+            value,
+            AlbumDeletionProgressMaximum);
+    }
+
+    partial void OnAlbumDeletionProgressMaximumChanged(int value)
+    {
+        UpdateLongRunningOperation(
+            _albumDeletionLongRunningOperationId,
+            LongRunningOperationKind.AlbumDeletion,
+            "Deleting Picshare album",
+            AlbumDeletionProgressMessage,
+            AlbumDeletionProgressValue,
+            value);
     }
 
     partial void OnGoogleSignInUrlChanged(string value)
@@ -5532,6 +6070,13 @@ public partial class MainViewModel : ViewModelBase
         ParentDriveFolderId = "";
         SelectedDriveFolderName = "Please select a folder";
         IsDriveFolderSelected = false;
+        IsGoogleAlbumPublic = true;
+        GoogleAlbumShareEmail = "";
+        GoogleContactSearchText = "";
+        GoogleContactSearchStatus = "";
+        SharedGoogleAccounts.Clear();
+        GoogleContactSuggestions.Clear();
+        OnPropertyChanged(nameof(HasGoogleContactSuggestions));
         SelectedLocalAlbumDestinationName = "Please select a folder";
         LocalAlbumDestinationPath = "";
         IsLocalAlbumDestinationSelected = false;
@@ -5696,5 +6241,13 @@ public partial class MainViewModel : ViewModelBase
         {
             throw new InvalidOperationException("Google identity permission was not granted. Sign in again and allow profile access.");
         }
+    }
+
+    private static bool HasGoogleScope(GoogleOAuthTokenSet tokenSet, string scope)
+    {
+        return !string.IsNullOrWhiteSpace(tokenSet.Scope) &&
+            tokenSet.Scope
+                .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Contains(scope, StringComparer.Ordinal);
     }
 }

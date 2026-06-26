@@ -250,30 +250,8 @@
     </Style>
   </UserControl.Styles>
 
-  <Grid RowDefinitions="Auto,*,Auto" Background="#F7F7F4">
-    <Border Grid.Row="0" Background="#27343B" Padding="20,16">
-      <Grid ColumnDefinitions="*,Auto,Auto">
-        <StackPanel Spacing="3">
-          <TextBlock Text="Picshare" FontSize="24" FontWeight="SemiBold" Foreground="White"/>
-          <TextBlock Text="Serverless photo albums on Google Drive" Foreground="#D9E5E8"/>
-        </StackPanel>
-        <TextBlock Grid.Column="1"
-                   Text="{Binding Status}"
-                   Foreground="#D9E5E8"
-                   VerticalAlignment="Center"
-                   TextWrapping="Wrap"
-                   MaxWidth="420"
-                   Margin="0,0,12,0"/>
-        <Button Grid.Column="2"
-                Command="{Binding ShowSettingsPanelCommand}"
-                Padding="12,8"
-                VerticalAlignment="Center">
-          Settings
-        </Button>
-      </Grid>
-    </Border>
-
-    <TabControl Grid.Row="1" Margin="20">
+  <Grid RowDefinitions="*,Auto" Background="#F7F7F4">
+    <TabControl Grid.Row="0" Margin="20" SelectedIndex="{Binding MainTabIndex}">
       <TabItem Header="Create">
         <Grid>
           <ScrollViewer>
@@ -472,6 +450,100 @@
                           Select
                         </Button>
                       </Grid>
+                    </StackPanel>
+
+                    <StackPanel Spacing="8">
+                      <TextBlock Text="Album access"/>
+                      <StackPanel Orientation="Horizontal" Spacing="12">
+                        <RadioButton GroupName="GoogleAlbumAccess"
+                                     IsChecked="{Binding IsGoogleAlbumPublic}">
+                          Public link
+                        </RadioButton>
+                        <RadioButton GroupName="GoogleAlbumAccess"
+                                     IsChecked="{Binding IsGoogleAlbumRestricted}">
+                          Selected Google accounts
+                        </RadioButton>
+                      </StackPanel>
+
+                      <StackPanel Spacing="8" IsVisible="{Binding IsGoogleAlbumRestrictedSharingVisible}">
+                        <TextBlock Text="People with access can open the Picshare link and write feedback."
+                                   Foreground="#6C756F"
+                                   FontSize="12"
+                                   TextWrapping="Wrap"/>
+
+                        <ItemsControl ItemsSource="{Binding SharedGoogleAccounts}">
+                          <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                              <WrapPanel/>
+                            </ItemsPanelTemplate>
+                          </ItemsControl.ItemsPanel>
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="vm:SharedGoogleAccountViewModel">
+                              <Border Background="#E8EEF0"
+                                      BorderBrush="#C8D2D6"
+                                      BorderThickness="1"
+                                      CornerRadius="4"
+                                      Padding="8,4"
+                                      Margin="0,0,6,6">
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                  <TextBlock Text="{Binding EmailAddress}" VerticalAlignment="Center"/>
+                                  <Button Click="RemoveSharedGoogleAccount_Click"
+                                          Padding="4,0"
+                                          MinWidth="24"
+                                          Height="24">
+                                    X
+                                  </Button>
+                                </StackPanel>
+                              </Border>
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+
+                        <Grid ColumnDefinitions="*,Auto">
+                          <TextBox Text="{Binding GoogleAlbumShareEmail, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                   Watermark="Google account email"
+                                   Margin="0,0,8,0"/>
+                          <Button Grid.Column="1"
+                                  Command="{Binding AddGoogleAlbumShareEmailCommand}"
+                                  Padding="12,8">
+                            Add
+                          </Button>
+                        </Grid>
+
+                        <Grid ColumnDefinitions="*,Auto">
+                          <TextBox Text="{Binding GoogleContactSearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                   Watermark="Search your Google contacts"
+                                   Margin="0,0,8,0"/>
+                          <Button Grid.Column="1"
+                                  Command="{Binding SearchGoogleContactsCommand}"
+                                  Padding="12,8">
+                            Search
+                          </Button>
+                        </Grid>
+                        <TextBlock Text="{Binding GoogleContactSearchStatus}"
+                                   Foreground="#6C756F"
+                                   FontSize="12"
+                                   TextWrapping="Wrap"/>
+                        <ListBox ItemsSource="{Binding GoogleContactSuggestions}"
+                                 IsVisible="{Binding HasGoogleContactSuggestions}"
+                                 MaxHeight="140">
+                          <ListBox.ItemTemplate>
+                            <DataTemplate x:DataType="vm:GoogleContactSuggestionViewModel">
+                              <Grid ColumnDefinitions="*,Auto" Margin="0,2">
+                                <StackPanel Spacing="1">
+                                  <TextBlock Text="{Binding DisplayName}" FontWeight="SemiBold"/>
+                                  <TextBlock Text="{Binding EmailAddress}" FontSize="12" Foreground="#6C756F"/>
+                                </StackPanel>
+                                <Button Grid.Column="1"
+                                        Click="AddGoogleContactSuggestion_Click"
+                                        Padding="10,6">
+                                  Add
+                                </Button>
+                              </Grid>
+                            </DataTemplate>
+                          </ListBox.ItemTemplate>
+                        </ListBox>
+                      </StackPanel>
                     </StackPanel>
                   </StackPanel>
 
@@ -1271,121 +1343,111 @@
           </Grid>
         </Grid>
       </TabItem>
+      <TabItem Header="Settings">
+        <ScrollViewer>
+          <Border Background="White"
+                  BorderBrush="#D6D8D1"
+                  BorderThickness="1"
+                  CornerRadius="6"
+                  Padding="18"
+                  MaxWidth="760"
+                  HorizontalAlignment="Stretch">
+            <StackPanel Spacing="12">
+              <TextBlock Text="Settings" FontSize="18" FontWeight="SemiBold"/>
+              <StackPanel Spacing="5">
+                <TextBlock Text="Anonymous reviewer name" FontWeight="SemiBold"/>
+                <TextBox Text="{Binding AnonymousReviewerName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                         Watermark="Name shown in local album flow lists"/>
+              </StackPanel>
+              <StackPanel Spacing="5">
+                <TextBlock Text="Maximum parallel operations" FontWeight="SemiBold"/>
+                <NumericUpDown Value="{Binding MaximumParallelism}"
+                               Minimum="1"
+                               Maximum="64"
+                               Increment="1"/>
+              </StackPanel>
+              <StackPanel Spacing="6">
+                <TextBlock Text="Image cache" FontWeight="SemiBold"/>
+                <CheckBox IsChecked="{Binding CacheThumbnails}">
+                  Cache thumbnails
+                </CheckBox>
+                <CheckBox IsChecked="{Binding CacheOriginalImages}">
+                  Cache original images
+                </CheckBox>
+              </StackPanel>
+              <StackPanel Spacing="5">
+                <TextBlock Text="Default download directories" FontWeight="SemiBold"/>
+                <Grid ColumnDefinitions="150,*,Auto,Auto" RowDefinitions="Auto,Auto,Auto,Auto,Auto">
+                  <TextBlock Text="Picture" VerticalAlignment="Center" Margin="0,0,8,8"/>
+                  <TextBox Grid.Column="1" Text="{Binding PictureDefaultDownloadDirectoryPath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,8,8"/>
+                  <Button Grid.Column="2" Click="ChoosePictureDefaultDownloadDirectory_Click" Padding="12,8" Margin="0,0,8,8">Select</Button>
+                  <Button Grid.Column="3" Command="{Binding SetPictureDefaultDownloadDirectoryToDefaultCommand}" Padding="12,8" Margin="0,0,0,8">Set to default</Button>
+
+                  <TextBlock Grid.Row="1" Text="Uncategorized" VerticalAlignment="Center" Margin="0,0,8,8"/>
+                  <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding UncategorizedDefaultDownloadDirectoryPath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,8,8"/>
+                  <Button Grid.Row="1" Grid.Column="2" Click="ChooseUncategorizedDefaultDownloadDirectory_Click" Padding="12,8" Margin="0,0,8,8">Select</Button>
+                  <Button Grid.Row="1" Grid.Column="3" Command="{Binding SetUncategorizedDefaultDownloadDirectoryToDefaultCommand}" Padding="12,8" Margin="0,0,0,8">Set to default</Button>
+
+                  <TextBlock Grid.Row="2" Text="Nice" VerticalAlignment="Center" Margin="0,0,8,8"/>
+                  <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding NiceDefaultDownloadDirectoryPath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,8,8"/>
+                  <Button Grid.Row="2" Grid.Column="2" Click="ChooseNiceDefaultDownloadDirectory_Click" Padding="12,8" Margin="0,0,8,8">Select</Button>
+                  <Button Grid.Row="2" Grid.Column="3" Command="{Binding SetNiceDefaultDownloadDirectoryToDefaultCommand}" Padding="12,8" Margin="0,0,0,8">Set to default</Button>
+
+                  <TextBlock Grid.Row="3" Text="Ok" VerticalAlignment="Center" Margin="0,0,8,8"/>
+                  <TextBox Grid.Row="3" Grid.Column="1" Text="{Binding OkDefaultDownloadDirectoryPath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,8,8"/>
+                  <Button Grid.Row="3" Grid.Column="2" Click="ChooseOkDefaultDownloadDirectory_Click" Padding="12,8" Margin="0,0,8,8">Select</Button>
+                  <Button Grid.Row="3" Grid.Column="3" Command="{Binding SetOkDefaultDownloadDirectoryToDefaultCommand}" Padding="12,8" Margin="0,0,0,8">Set to default</Button>
+
+                  <TextBlock Grid.Row="4" Text="Trash" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                  <TextBox Grid.Row="4" Grid.Column="1" Text="{Binding TrashDefaultDownloadDirectoryPath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,8,0"/>
+                  <Button Grid.Row="4" Grid.Column="2" Click="ChooseTrashDefaultDownloadDirectory_Click" Padding="12,8" Margin="0,0,8,0">Select</Button>
+                  <Button Grid.Row="4" Grid.Column="3" Command="{Binding SetTrashDefaultDownloadDirectoryToDefaultCommand}" Padding="12,8">Set to default</Button>
+                </Grid>
+              </StackPanel>
+              <Border Height="1" Background="#D6D8D1"/>
+              <Grid ColumnDefinitions="*,Auto">
+                <TextBlock Text="Downloaded thumbnails and full images"
+                           VerticalAlignment="Center"
+                           TextWrapping="Wrap"
+                           Foreground="#6C756F"/>
+                <Button Grid.Column="1"
+                        Command="{Binding ClearImageCacheCommand}"
+                        Padding="12,8">
+                  Clear cache
+                </Button>
+              </Grid>
+              <Border Height="1" Background="#D6D8D1"/>
+              <Grid ColumnDefinitions="*,Auto,Auto">
+                <StackPanel Spacing="2" VerticalAlignment="Center">
+                  <TextBlock Text="Google authorization" FontWeight="SemiBold"/>
+                  <TextBlock Text="{Binding GoogleConnectionStatus}"
+                             Foreground="#6C756F"
+                             FontSize="12"/>
+                </StackPanel>
+                <Button Grid.Column="1"
+                        Click="SettingsSignInGoogle_Click"
+                        Padding="12,8"
+                        Margin="0,0,8,0">
+                  Sign in
+                </Button>
+                <Button Grid.Column="2"
+                        Command="{Binding ClearGoogleAuthorizationCommand}"
+                        Padding="12,8">
+                  Sign out
+                </Button>
+              </Grid>
+            </StackPanel>
+          </Border>
+        </ScrollViewer>
+      </TabItem>
     </TabControl>
 
-    <ProgressBar Grid.Row="2"
+    <ProgressBar Grid.Row="1"
                  IsIndeterminate="{Binding IsBusy}"
                  Height="3"
                  Minimum="0"
                  Maximum="1"
                  Value="0"/>
-
-    <Grid Grid.RowSpan="3"
-          Background="#80000000"
-          IsVisible="{Binding IsSettingsPanelVisible}">
-      <Border Background="White"
-              BorderBrush="#D6D8D1"
-              BorderThickness="1"
-              CornerRadius="6"
-              Padding="18"
-              Margin="20"
-              MaxWidth="680"
-              HorizontalAlignment="Stretch"
-              VerticalAlignment="Center">
-        <StackPanel Spacing="12">
-          <TextBlock Text="Settings" FontSize="18" FontWeight="SemiBold"/>
-          <StackPanel Spacing="5">
-            <TextBlock Text="Anonymous reviewer name" FontWeight="SemiBold"/>
-            <TextBox Text="{Binding AnonymousReviewerName}"
-                     Watermark="Name shown in local album flow lists"/>
-          </StackPanel>
-          <StackPanel Spacing="5">
-            <TextBlock Text="Maximum parallel operations" FontWeight="SemiBold"/>
-            <NumericUpDown Value="{Binding MaximumParallelism}"
-                           Minimum="1"
-                           Maximum="64"
-                           Increment="1"/>
-          </StackPanel>
-          <StackPanel Spacing="6">
-            <TextBlock Text="Image cache" FontWeight="SemiBold"/>
-            <CheckBox IsChecked="{Binding CacheThumbnails}">
-              Cache thumbnails
-            </CheckBox>
-            <CheckBox IsChecked="{Binding CacheOriginalImages}">
-              Cache original images
-            </CheckBox>
-          </StackPanel>
-          <StackPanel Spacing="5">
-            <TextBlock Text="Default download directories" FontWeight="SemiBold"/>
-            <Grid ColumnDefinitions="150,*,Auto,Auto" RowDefinitions="Auto,Auto,Auto,Auto,Auto">
-              <TextBlock Text="Picture" VerticalAlignment="Center" Margin="0,0,8,8"/>
-              <TextBox Grid.Column="1" Text="{Binding PictureDefaultDownloadDirectoryPath}" Margin="0,0,8,8"/>
-              <Button Grid.Column="2" Click="ChoosePictureDefaultDownloadDirectory_Click" Padding="12,8" Margin="0,0,8,8">Select</Button>
-              <Button Grid.Column="3" Command="{Binding SetPictureDefaultDownloadDirectoryToDefaultCommand}" Padding="12,8" Margin="0,0,0,8">Set to default</Button>
-
-              <TextBlock Grid.Row="1" Text="Uncategorized" VerticalAlignment="Center" Margin="0,0,8,8"/>
-              <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding UncategorizedDefaultDownloadDirectoryPath}" Margin="0,0,8,8"/>
-              <Button Grid.Row="1" Grid.Column="2" Click="ChooseUncategorizedDefaultDownloadDirectory_Click" Padding="12,8" Margin="0,0,8,8">Select</Button>
-              <Button Grid.Row="1" Grid.Column="3" Command="{Binding SetUncategorizedDefaultDownloadDirectoryToDefaultCommand}" Padding="12,8" Margin="0,0,0,8">Set to default</Button>
-
-              <TextBlock Grid.Row="2" Text="Nice" VerticalAlignment="Center" Margin="0,0,8,8"/>
-              <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding NiceDefaultDownloadDirectoryPath}" Margin="0,0,8,8"/>
-              <Button Grid.Row="2" Grid.Column="2" Click="ChooseNiceDefaultDownloadDirectory_Click" Padding="12,8" Margin="0,0,8,8">Select</Button>
-              <Button Grid.Row="2" Grid.Column="3" Command="{Binding SetNiceDefaultDownloadDirectoryToDefaultCommand}" Padding="12,8" Margin="0,0,0,8">Set to default</Button>
-
-              <TextBlock Grid.Row="3" Text="Ok" VerticalAlignment="Center" Margin="0,0,8,8"/>
-              <TextBox Grid.Row="3" Grid.Column="1" Text="{Binding OkDefaultDownloadDirectoryPath}" Margin="0,0,8,8"/>
-              <Button Grid.Row="3" Grid.Column="2" Click="ChooseOkDefaultDownloadDirectory_Click" Padding="12,8" Margin="0,0,8,8">Select</Button>
-              <Button Grid.Row="3" Grid.Column="3" Command="{Binding SetOkDefaultDownloadDirectoryToDefaultCommand}" Padding="12,8" Margin="0,0,0,8">Set to default</Button>
-
-              <TextBlock Grid.Row="4" Text="Trash" VerticalAlignment="Center" Margin="0,0,8,0"/>
-              <TextBox Grid.Row="4" Grid.Column="1" Text="{Binding TrashDefaultDownloadDirectoryPath}" Margin="0,0,8,0"/>
-              <Button Grid.Row="4" Grid.Column="2" Click="ChooseTrashDefaultDownloadDirectory_Click" Padding="12,8" Margin="0,0,8,0">Select</Button>
-              <Button Grid.Row="4" Grid.Column="3" Command="{Binding SetTrashDefaultDownloadDirectoryToDefaultCommand}" Padding="12,8">Set to default</Button>
-            </Grid>
-          </StackPanel>
-          <Border Height="1" Background="#D6D8D1"/>
-          <Grid ColumnDefinitions="*,Auto">
-            <TextBlock Text="Downloaded thumbnails and full images"
-                       VerticalAlignment="Center"
-                       TextWrapping="Wrap"
-                       Foreground="#6C756F"/>
-            <Button Grid.Column="1"
-                    Command="{Binding ClearImageCacheCommand}"
-                    Padding="12,8">
-              Clear cache
-            </Button>
-          </Grid>
-          <Border Height="1" Background="#D6D8D1"/>
-          <Grid ColumnDefinitions="*,Auto,Auto">
-            <StackPanel Spacing="2" VerticalAlignment="Center">
-              <TextBlock Text="Google authorization" FontWeight="SemiBold"/>
-              <TextBlock Text="{Binding GoogleConnectionStatus}"
-                         Foreground="#6C756F"
-                         FontSize="12"/>
-            </StackPanel>
-            <Button Grid.Column="1"
-                    Click="SettingsSignInGoogle_Click"
-                    Padding="12,8"
-                    Margin="0,0,8,0">
-              Sign in
-            </Button>
-            <Button Grid.Column="2"
-                    Command="{Binding ClearGoogleAuthorizationCommand}"
-                    Padding="12,8">
-              Sign out
-            </Button>
-          </Grid>
-          <Grid ColumnDefinitions="*,Auto">
-            <Button Grid.Column="1"
-                    Command="{Binding CloseSettingsPanelCommand}"
-                    Padding="12,8">
-              Close
-            </Button>
-          </Grid>
-        </StackPanel>
-      </Border>
-    </Grid>
 
     <Grid Grid.RowSpan="3"
           Background="#80000000"
@@ -1675,6 +1737,63 @@
                     BorderBrush="#7A271A"
                     Padding="12,8">
               OK
+            </Button>
+          </Grid>
+        </Grid>
+      </Border>
+    </Grid>
+
+    <Grid Grid.RowSpan="3"
+          Background="#99000000"
+          IsVisible="{Binding IsPublicGoogleAlbumConfirmationVisible}">
+      <Border Background="White"
+              BorderBrush="#B42318"
+              BorderThickness="2"
+              CornerRadius="6"
+              Padding="18"
+              Margin="20"
+              MaxWidth="520"
+              HorizontalAlignment="Center"
+              VerticalAlignment="Center">
+        <Grid ColumnDefinitions="44,*" RowDefinitions="Auto,Auto,Auto">
+          <Border Width="34"
+                  Height="34"
+                  Background="#FEE4E2"
+                  BorderBrush="#B42318"
+                  BorderThickness="1"
+                  CornerRadius="17"
+                  VerticalAlignment="Top">
+            <TextBlock Text="!"
+                       Foreground="#B42318"
+                       FontSize="22"
+                       FontWeight="Bold"
+                       HorizontalAlignment="Center"
+                       VerticalAlignment="Center"/>
+          </Border>
+          <TextBlock Grid.Column="1"
+                     Text="Public album access"
+                     FontSize="18"
+                     FontWeight="SemiBold"
+                     Foreground="#7A271A"/>
+          <TextBlock Grid.Row="1"
+                     Grid.Column="1"
+                     Text="{Binding PublicGoogleAlbumConfirmationMessage}"
+                     TextWrapping="Wrap"
+                     Margin="0,8,0,14"/>
+          <Grid Grid.Row="2" Grid.Column="1" ColumnDefinitions="*,Auto,Auto">
+            <Button Grid.Column="1"
+                    Command="{Binding CancelPublicGoogleAlbumCommand}"
+                    Padding="12,8"
+                    Margin="0,0,8,0">
+              No
+            </Button>
+            <Button Grid.Column="2"
+                    Command="{Binding ConfirmPublicGoogleAlbumCommand}"
+                    Background="#B42318"
+                    Foreground="White"
+                    BorderBrush="#7A271A"
+                    Padding="12,8">
+              Yes, create public album
             </Button>
           </Grid>
         </Grid>

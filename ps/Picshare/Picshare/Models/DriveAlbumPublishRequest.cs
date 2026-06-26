@@ -10,9 +10,24 @@ public sealed record DriveAlbumPublishRequest
 
     public string? ParentDriveFolderId { get; init; }
 
+    public GoogleDriveAlbumShareSettings ShareSettings { get; init; } = GoogleDriveAlbumShareSettings.Public;
+
     public required string AccessToken { get; init; }
 
     public required FeedbackReviewerIdentity Author { get; init; }
+}
+
+public sealed record GoogleDriveAlbumShareSettings
+{
+    public static GoogleDriveAlbumShareSettings Public { get; } = new()
+    {
+        IsPublic = true,
+        UserEmailAddresses = Array.Empty<string>()
+    };
+
+    public bool IsPublic { get; init; } = true;
+
+    public IReadOnlyList<string> UserEmailAddresses { get; init; } = Array.Empty<string>();
 }
 
 public sealed record DriveAlbumPublishResult
