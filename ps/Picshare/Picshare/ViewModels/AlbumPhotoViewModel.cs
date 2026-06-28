@@ -102,6 +102,8 @@ public partial class AlbumPhotoViewModel : ObservableObject
     [ObservableProperty]
     private bool _isImageLoading;
 
+    private int _imageLoadStatusBits;
+
     public bool HasDuplicateGroup => IsDuplicateGroupMain && DuplicateGroupCount > 1;
 
     public string DuplicateGroupCountText => DuplicateGroupCount > 1 ? DuplicateGroupCount.ToString() : "";
@@ -134,6 +136,207 @@ public partial class AlbumPhotoViewModel : ObservableObject
     private CancellationTokenSource? _imageReleaseCancellation;
     private int _thumbnailPriorityRank = int.MaxValue;
     private int _displayImagePriorityRank = int.MaxValue;
+
+    public AlbumImageItemStatus FastThumbnailStatus => GetImageItemStatus(ImageLoadStatusField.FastThumbnail);
+
+    public AlbumImageItemStatus OriginalImageStatus => GetImageItemStatus(ImageLoadStatusField.OriginalImage);
+
+    public AlbumImageItemStatus DetailedThumbnailStatus => GetImageItemStatus(ImageLoadStatusField.DetailedThumbnail);
+
+    public bool HasAnyThumbnailLoadedAtomic()
+    {
+        var bits = Volatile.Read(ref _imageLoadStatusBits);
+        return GetImageItemStatus(bits, ImageLoadStatusField.FastThumbnail) == AlbumImageItemStatus.Loaded ||
+            GetImageItemStatus(bits, ImageLoadStatusField.DetailedThumbnail) == AlbumImageItemStatus.Loaded;
+    }
+
+    public bool TryBeginFastThumbnailLoad()
+    {
+        return TrySetStatus(ImageLoadStatusField.FastThumbnail, AlbumImageItemStatus.Unloaded, AlbumImageItemStatus.Loading);
+    }
+
+    public bool TryBeginFastThumbnailControlLoad()
+    {
+        return TrySetStatus(ImageLoadStatusField.FastThumbnail, AlbumImageItemStatus.Unloaded, AlbumImageItemStatus.Loading) ||
+            TrySetStatus(ImageLoadStatusField.FastThumbnail, AlbumImageItemStatus.Loaded, AlbumImageItemStatus.Loading);
+    }
+
+    public bool TryBeginOriginalImageLoad()
+    {
+        return TrySetStatus(ImageLoadStatusField.OriginalImage, AlbumImageItemStatus.Unloaded, AlbumImageItemStatus.Loading);
+    }
+
+    public bool TryBeginDetailedThumbnailLoad(out bool ownsOriginalLoad)
+    {
+        ownsOriginalLoad = false;
+        while (true)
+        {
+            var current = Volatile.Read(ref _imageLoadStatusBits);
+            if (GetImageItemStatus(current, ImageLoadStatusField.DetailedThumbnail) != AlbumImageItemStatus.Unloaded)
+            {
+                return false;
+            }
+
+            var originalStatus = GetImageItemStatus(current, ImageLoadStatusField.OriginalImage);
+            if (originalStatus == AlbumImageItemStatus.Loading)
+            {
+                return false;
+            }
+
+            var next = SetImageItemStatus(current, ImageLoadStatusField.DetailedThumbnail, AlbumImageItemStatus.Loading);
+            if (originalStatus == AlbumImageItemStatus.Unloaded)
+            {
+                next = SetImageItemStatus(next, ImageLoadStatusField.OriginalImage, AlbumImageItemStatus.Loading);
+            }
+
+            if (Interlocked.CompareExchange(ref _imageLoadStatusBits, next, current) == current)
+            {
+                ownsOriginalLoad = originalStatus == AlbumImageItemStatus.Unloaded;
+                return true;
+            }
+        }
+    }
+
+    public bool TryBeginDetailedThumbnailControlLoad(out bool ownsOriginalLoad)
+    {
+        ownsOriginalLoad = false;
+        while (true)
+        {
+            var current = Volatile.Read(ref _imageLoadStatusBits);
+            var detailedStatus = GetImageItemStatus(current, ImageLoadStatusField.DetailedThumbnail);
+            if (detailedStatus is not (AlbumImageItemStatus.Unloaded or AlbumImageItemStatus.Loaded))
+            {
+                return false;
+            }
+
+            var originalStatus = GetImageItemStatus(current, ImageLoadStatusField.OriginalImage);
+            if (detailedStatus == AlbumImageItemStatus.Unloaded &&
+                originalStatus == AlbumImageItemStatus.Loading)
+            {
+                return false;
+            }
+
+            var next = SetImageItemStatus(current, ImageLoadStatusField.DetailedThumbnail, AlbumImageItemStatus.Loading);
+            if (detailedStatus == AlbumImageItemStatus.Unloaded &&
+                originalStatus == AlbumImageItemStatus.Unloaded)
+            {
+                next = SetImageItemStatus(next, ImageLoadStatusField.OriginalImage, AlbumImageItemStatus.Loading);
+            }
+
+            if (Interlocked.CompareExchange(ref _imageLoadStatusBits, next, current) == current)
+            {
+                ownsOriginalLoad = detailedStatus == AlbumImageItemStatus.Unloaded &&
+                    originalStatus == AlbumImageItemStatus.Unloaded;
+                return true;
+            }
+        }
+    }
+
+    public void CompleteFastThumbnailLoad(bool loaded)
+    {
+        SetStatus(ImageLoadStatusField.FastThumbnail, loaded ? AlbumImageItemStatus.Loaded : AlbumImageItemStatus.Unloaded);
+    }
+
+    public void CompleteOriginalImageLoad(bool loaded)
+    {
+        SetStatus(ImageLoadStatusField.OriginalImage, loaded ? AlbumImageItemStatus.Loaded : AlbumImageItemStatus.Unloaded);
+    }
+
+    public void CompleteDetailedThumbnailLoad(bool loaded, bool originalLoaded, bool ownsOriginalLoad)
+    {
+        while (true)
+        {
+            var current = Volatile.Read(ref _imageLoadStatusBits);
+            var next = SetImageItemStatus(
+                current,
+                ImageLoadStatusField.DetailedThumbnail,
+                loaded ? AlbumImageItemStatus.Loaded : AlbumImageItemStatus.Unloaded);
+            if (ownsOriginalLoad)
+            {
+                next = SetImageItemStatus(
+                    next,
+                    ImageLoadStatusField.OriginalImage,
+                    originalLoaded ? AlbumImageItemStatus.Loaded : AlbumImageItemStatus.Unloaded);
+            }
+
+            if (Interlocked.CompareExchange(ref _imageLoadStatusBits, next, current) == current)
+            {
+                return;
+            }
+        }
+    }
+
+    public void ResetImageLoadStatuses()
+    {
+        Volatile.Write(ref _imageLoadStatusBits, 0);
+        IsFullImageLoaded = false;
+    }
+
+    public void SetLoadedImage(Bitmap bitmap, bool isDetailedThumbnail, string status)
+    {
+        Image = bitmap;
+        IsFullImageLoaded = isDetailedThumbnail;
+        Status = status;
+    }
+
+    private AlbumImageItemStatus GetImageItemStatus(ImageLoadStatusField field)
+    {
+        return GetImageItemStatus(Volatile.Read(ref _imageLoadStatusBits), field);
+    }
+
+    private bool TrySetStatus(ImageLoadStatusField field, AlbumImageItemStatus expected, AlbumImageItemStatus replacement)
+    {
+        while (true)
+        {
+            var current = Volatile.Read(ref _imageLoadStatusBits);
+            if (GetImageItemStatus(current, field) != expected)
+            {
+                return false;
+            }
+
+            var next = SetImageItemStatus(current, field, replacement);
+            if (Interlocked.CompareExchange(ref _imageLoadStatusBits, next, current) == current)
+            {
+                return true;
+            }
+        }
+    }
+
+    private void SetStatus(ImageLoadStatusField field, AlbumImageItemStatus status)
+    {
+        while (true)
+        {
+            var current = Volatile.Read(ref _imageLoadStatusBits);
+            var next = SetImageItemStatus(current, field, status);
+            if (Interlocked.CompareExchange(ref _imageLoadStatusBits, next, current) == current)
+            {
+                return;
+            }
+        }
+    }
+
+    private static AlbumImageItemStatus GetImageItemStatus(int bits, ImageLoadStatusField field)
+    {
+        return (AlbumImageItemStatus)((bits >> GetImageLoadStatusOffset(field)) & 0b11);
+    }
+
+    private static int SetImageItemStatus(int bits, ImageLoadStatusField field, AlbumImageItemStatus status)
+    {
+        var offset = GetImageLoadStatusOffset(field);
+        var mask = 0b11 << offset;
+        return (bits & ~mask) | (((int)status & 0b11) << offset);
+    }
+
+    private static int GetImageLoadStatusOffset(ImageLoadStatusField field)
+    {
+        return field switch
+        {
+            ImageLoadStatusField.FastThumbnail => 0,
+            ImageLoadStatusField.OriginalImage => 2,
+            ImageLoadStatusField.DetailedThumbnail => 4,
+            _ => 0
+        };
+    }
 
     private sealed class ThumbnailLoadRequest
     {
@@ -255,7 +458,7 @@ public partial class AlbumPhotoViewModel : ObservableObject
         CancelPendingThumbnailLoad(this);
         CancelPendingDisplayImageLoad(this);
         IsImageLoading = false;
-        ScheduleDeferredImageRelease();
+        ReleaseCachedImage();
     }
 
     private async Task LoadThumbnailAsync(ImageCacheService imageCache, HttpClient httpClient, CancellationToken cancellationToken)
@@ -610,7 +813,7 @@ public partial class AlbumPhotoViewModel : ObservableObject
     {
         CancelDeferredImageRelease();
         Image = null;
-        IsFullImageLoaded = false;
+        ResetImageLoadStatuses();
         Status = "Loading";
     }
 
@@ -692,4 +895,18 @@ public partial class AlbumPhotoViewModel : ObservableObject
         OnPropertyChanged(nameof(IsScoreVisible));
         OnPropertyChanged(nameof(ScoreText));
     }
+}
+
+public enum AlbumImageItemStatus
+{
+    Unloaded = 0,
+    Loading = 1,
+    Loaded = 2
+}
+
+internal enum ImageLoadStatusField
+{
+    FastThumbnail,
+    OriginalImage,
+    DetailedThumbnail
 }

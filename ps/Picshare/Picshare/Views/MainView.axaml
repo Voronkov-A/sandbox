@@ -251,7 +251,10 @@
   </UserControl.Styles>
 
   <Grid RowDefinitions="*,Auto" Background="#F7F7F4">
-    <TabControl Grid.Row="0" Margin="20" SelectedIndex="{Binding MainTabIndex}">
+    <TabControl Grid.Row="0"
+                Margin="20"
+                SelectedIndex="{Binding MainTabIndex}"
+                SelectionChanged="MainTabs_SelectionChanged">
       <TabItem Header="Create">
         <Grid>
           <ScrollViewer>
@@ -1374,6 +1377,22 @@
                 <CheckBox IsChecked="{Binding CacheOriginalImages}">
                   Cache original images
                 </CheckBox>
+                <Grid ColumnDefinitions="220,*,*" RowDefinitions="Auto,Auto,Auto,Auto" Margin="0,4,0,0">
+                  <TextBlock Grid.Column="1" Text="Memory MB" FontSize="12" Foreground="#6C756F" Margin="0,0,8,4"/>
+                  <TextBlock Grid.Column="2" Text="Disk MB" FontSize="12" Foreground="#6C756F" Margin="0,0,0,4"/>
+
+                  <TextBlock Grid.Row="1" Text="Fast thumbnails" VerticalAlignment="Center" Margin="0,0,8,6"/>
+                  <NumericUpDown Grid.Row="1" Grid.Column="1" Value="{Binding AlbumFastThumbnailMemoryCacheSizeMb}" Minimum="0" Maximum="65536" Increment="64" Margin="0,0,8,6"/>
+                  <NumericUpDown Grid.Row="1" Grid.Column="2" Value="{Binding AlbumFastThumbnailDiskCacheSizeMb}" Minimum="0" Maximum="65536" Increment="64" Margin="0,0,0,6"/>
+
+                  <TextBlock Grid.Row="2" Text="Detailed thumbnails" VerticalAlignment="Center" Margin="0,0,8,6"/>
+                  <NumericUpDown Grid.Row="2" Grid.Column="1" Value="{Binding AlbumDetailedThumbnailMemoryCacheSizeMb}" Minimum="0" Maximum="65536" Increment="64" Margin="0,0,8,6"/>
+                  <NumericUpDown Grid.Row="2" Grid.Column="2" Value="{Binding AlbumDetailedThumbnailDiskCacheSizeMb}" Minimum="0" Maximum="65536" Increment="64" Margin="0,0,0,6"/>
+
+                  <TextBlock Grid.Row="3" Text="Original images" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                  <NumericUpDown Grid.Row="3" Grid.Column="1" Value="{Binding AlbumOriginalImageMemoryCacheSizeMb}" Minimum="0" Maximum="65536" Increment="64" Margin="0,0,8,0"/>
+                  <NumericUpDown Grid.Row="3" Grid.Column="2" Value="{Binding AlbumOriginalImageDiskCacheSizeMb}" Minimum="0" Maximum="65536" Increment="64"/>
+                </Grid>
               </StackPanel>
               <StackPanel Spacing="5">
                 <TextBlock Text="Default download directories" FontWeight="SemiBold"/>

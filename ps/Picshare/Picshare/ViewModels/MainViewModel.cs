@@ -146,6 +146,24 @@ public partial class MainViewModel : ViewModelBase
     private bool _cacheOriginalImages = true;
 
     [ObservableProperty]
+    private int _albumFastThumbnailMemoryCacheSizeMb = 256;
+
+    [ObservableProperty]
+    private int _albumDetailedThumbnailMemoryCacheSizeMb = 512;
+
+    [ObservableProperty]
+    private int _albumOriginalImageMemoryCacheSizeMb = 256;
+
+    [ObservableProperty]
+    private int _albumFastThumbnailDiskCacheSizeMb = 512;
+
+    [ObservableProperty]
+    private int _albumDetailedThumbnailDiskCacheSizeMb = 2048;
+
+    [ObservableProperty]
+    private int _albumOriginalImageDiskCacheSizeMb = 2048;
+
+    [ObservableProperty]
     private string _pictureDefaultDownloadDirectoryPath = "";
 
     [ObservableProperty]
@@ -603,6 +621,7 @@ public partial class MainViewModel : ViewModelBase
     private readonly GoogleOAuthTokenStore _tokenStore;
     private readonly ReviewerFeedbackService _reviewerFeedbackService;
     private readonly ImageCacheService _imageCache;
+    private readonly AlbumImageListLoader _albumImageListLoader;
     private readonly AlbumDeletionService _albumDeletionService;
     private readonly HttpClient _imageHttpClient = new();
     private readonly List<IStorageFolder> _folderDateImportFolders = new();
@@ -641,6 +660,7 @@ public partial class MainViewModel : ViewModelBase
     private bool _isBulkPhotoActionPanelPinned;
     private bool _isBulkPhotoActionPanelCollapsed;
     private int _lastBulkSelectedPhotoCount;
+    private readonly HashSet<AlbumPhotoViewModel> _visibleAlbumPhotoViewport = new();
     private bool _isLoadingLocalUserSettings;
     private bool _googleContactSearchWarmedUp;
     private Guid? _albumCreationLongRunningOperationId;
@@ -687,6 +707,7 @@ public partial class MainViewModel : ViewModelBase
         _tokenStore = new GoogleOAuthTokenStore(_settingsProvider.LocalStorageRootPath);
         _reviewerFeedbackService = new ReviewerFeedbackService(_settingsProvider.LocalStorageRootPath);
         _imageCache = new ImageCacheService(_settingsProvider.LocalStorageRootPath);
+        _albumImageListLoader = new AlbumImageListLoader(_imageCache, _imageHttpClient);
         _albumDeletionService = new AlbumDeletionService(
             _reviewerFeedbackService,
             _imageCache,
@@ -700,6 +721,12 @@ public partial class MainViewModel : ViewModelBase
             MaximumParallelism = NormalizeMaximumParallelism(localSettings.MaximumParallelism);
             CacheThumbnails = localSettings.CacheThumbnails;
             CacheOriginalImages = localSettings.CacheOriginalImages;
+            AlbumFastThumbnailMemoryCacheSizeMb = NormalizeCacheSizeMb(localSettings.AlbumFastThumbnailMemoryCacheSizeMb, 256);
+            AlbumDetailedThumbnailMemoryCacheSizeMb = NormalizeCacheSizeMb(localSettings.AlbumDetailedThumbnailMemoryCacheSizeMb, 512);
+            AlbumOriginalImageMemoryCacheSizeMb = NormalizeCacheSizeMb(localSettings.AlbumOriginalImageMemoryCacheSizeMb, 256);
+            AlbumFastThumbnailDiskCacheSizeMb = NormalizeCacheSizeMb(localSettings.AlbumFastThumbnailDiskCacheSizeMb, 512);
+            AlbumDetailedThumbnailDiskCacheSizeMb = NormalizeCacheSizeMb(localSettings.AlbumDetailedThumbnailDiskCacheSizeMb, 2048);
+            AlbumOriginalImageDiskCacheSizeMb = NormalizeCacheSizeMb(localSettings.AlbumOriginalImageDiskCacheSizeMb, 2048);
             PictureDefaultDownloadDirectoryPath = GetConfiguredOrDefaultDownloadDirectoryPath(localSettings.PictureDefaultDownloadDirectoryPath);
             UncategorizedDefaultDownloadDirectoryPath = GetConfiguredOrDefaultDownloadDirectoryPath(localSettings.UncategorizedDefaultDownloadDirectoryPath);
             NiceDefaultDownloadDirectoryPath = GetConfiguredOrDefaultDownloadDirectoryPath(localSettings.NiceDefaultDownloadDirectoryPath);
@@ -1764,6 +1791,7 @@ public partial class MainViewModel : ViewModelBase
 
             ClosePhotoViewer();
             await _imageCache.ClearAsync();
+            _albumImageListLoader.UpdateSettings(GetMaximumParallelism());
             Status = "Image cache cleared.";
         }
         catch (Exception ex)
@@ -1974,6 +2002,8 @@ public partial class MainViewModel : ViewModelBase
                     CancellationToken.None);
             }
 
+            _albumImageListLoader.Clear();
+            _visibleAlbumPhotoViewport.Clear();
             Photos.Clear();
             ShareLink = "";
             DriveFolderLink = "";
@@ -2802,6 +2832,8 @@ public partial class MainViewModel : ViewModelBase
                 _feedbackStatus = null;
                 _currentReviewerIdentity = null;
                 CurrentAlbumTitle = manifest.Title;
+                _albumImageListLoader.Clear();
+                _visibleAlbumPhotoViewport.Clear();
                 Photos.Clear();
                 ClearCategoryRows();
                 SelectViewedPhoto(null);
@@ -2877,6 +2909,8 @@ public partial class MainViewModel : ViewModelBase
         ClearFlowReviewers();
         _pendingGoogleAuthorizationManifest = manifest;
         CurrentAlbumTitle = manifest.Title;
+        _albumImageListLoader.Clear();
+        _visibleAlbumPhotoViewport.Clear();
         Photos.Clear();
         ClearCategoryRows();
         SelectViewedPhoto(null);
@@ -2928,6 +2962,8 @@ public partial class MainViewModel : ViewModelBase
         UpdateFeedbackControlState();
 
         CurrentAlbumTitle = manifest.Title;
+        _albumImageListLoader.Clear();
+        _visibleAlbumPhotoViewport.Clear();
         Photos.Clear();
         ClearCategoryRows();
         SelectViewedPhoto(null);
@@ -2944,6 +2980,8 @@ public partial class MainViewModel : ViewModelBase
                 photo.ThumbnailDownloadUrl));
         }
 
+        _albumImageListLoader.SetPhotos(Photos.ToList(), GetMaximumParallelism());
+
         if (UsesReviewerFeedbackBackend(manifest))
         {
             await LoadReviewerFeedbackAsync(manifest);
@@ -2954,28 +2992,36 @@ public partial class MainViewModel : ViewModelBase
 
     public async Task StartPhotoViewportLoadAsync(AlbumPhotoViewModel photo)
     {
-        await photo.StartViewportLoadAsync(_imageCache, _imageHttpClient);
-        if (photo.DuplicateStackPhoto is not null && !ReferenceEquals(photo.DuplicateStackPhoto, photo))
-        {
-            await photo.DuplicateStackPhoto.StartViewportLoadAsync(_imageCache, _imageHttpClient);
-        }
+        await Task.CompletedTask;
+        _albumImageListLoader.AddViewportPhoto(photo);
     }
 
     public void StopPhotoViewportLoad(AlbumPhotoViewModel photo)
     {
-        photo.StopViewportLoad();
+        _albumImageListLoader.RemoveViewportPhoto(photo);
+        photo.ReleaseCachedImage();
     }
 
     public void PrioritizePhotoViewportLoads(IReadOnlyList<AlbumPhotoViewModel> photos)
     {
-        var priorityPhotos = photos
+        var expandedPhotos = photos
             .SelectMany(photo => photo.DuplicateStackPhoto is not null && !ReferenceEquals(photo.DuplicateStackPhoto, photo)
                 ? new[] { photo, photo.DuplicateStackPhoto }
                 : new[] { photo })
-            .Where(photo => !photo.IsFullImageLoaded)
-            .ToList();
+            .ToHashSet();
 
-        AlbumPhotoViewModel.PrioritizeViewportLoads(priorityPhotos);
+        foreach (var photo in _visibleAlbumPhotoViewport.Except(expandedPhotos).ToList())
+        {
+            photo.ReleaseCachedImage();
+        }
+
+        _visibleAlbumPhotoViewport.Clear();
+        foreach (var photo in expandedPhotos)
+        {
+            _visibleAlbumPhotoViewport.Add(photo);
+        }
+
+        _albumImageListLoader.UpdateViewport(photos);
     }
 
     public void TogglePhotoSelection(AlbumPhotoViewModel photo)
@@ -3037,7 +3083,8 @@ public partial class MainViewModel : ViewModelBase
 
         foreach (var photo in photos)
         {
-            await photo.StartViewportLoadAsync(_imageCache, _imageHttpClient);
+            _albumImageListLoader.UpdateViewport([photo]);
+            await Task.Yield();
         }
     }
 
@@ -3045,7 +3092,8 @@ public partial class MainViewModel : ViewModelBase
     {
         try
         {
-            await photo.StartViewportLoadAsync(_imageCache, _imageHttpClient);
+            _albumImageListLoader.UpdateViewport([photo]);
+            await Task.CompletedTask;
         }
         catch
         {
@@ -4379,6 +4427,7 @@ public partial class MainViewModel : ViewModelBase
             photo.ReleaseCachedImage();
         }
 
+        _albumImageListLoader.UpdateViewport([]);
         ClosePhotoViewer();
     }
 
@@ -4411,6 +4460,8 @@ public partial class MainViewModel : ViewModelBase
         CurrentAlbumTitle = "";
         FlowStatus = "";
         ClearBulkPhotoSelection();
+        _albumImageListLoader.Clear();
+        _visibleAlbumPhotoViewport.Clear();
         Photos.Clear();
         ClearCategoryRows();
         NotifyReviewTabHeadersChanged();
@@ -5754,6 +5805,12 @@ public partial class MainViewModel : ViewModelBase
             MaximumParallelism = GetMaximumParallelism(),
             CacheThumbnails = CacheThumbnails,
             CacheOriginalImages = CacheOriginalImages,
+            AlbumFastThumbnailMemoryCacheSizeMb = GetCacheSizeMb(AlbumFastThumbnailMemoryCacheSizeMb, 256),
+            AlbumDetailedThumbnailMemoryCacheSizeMb = GetCacheSizeMb(AlbumDetailedThumbnailMemoryCacheSizeMb, 512),
+            AlbumOriginalImageMemoryCacheSizeMb = GetCacheSizeMb(AlbumOriginalImageMemoryCacheSizeMb, 256),
+            AlbumFastThumbnailDiskCacheSizeMb = GetCacheSizeMb(AlbumFastThumbnailDiskCacheSizeMb, 512),
+            AlbumDetailedThumbnailDiskCacheSizeMb = GetCacheSizeMb(AlbumDetailedThumbnailDiskCacheSizeMb, 2048),
+            AlbumOriginalImageDiskCacheSizeMb = GetCacheSizeMb(AlbumOriginalImageDiskCacheSizeMb, 2048),
             PictureDefaultDownloadDirectoryPath = PictureDefaultDownloadDirectoryPath.Trim(),
             UncategorizedDefaultDownloadDirectoryPath = UncategorizedDefaultDownloadDirectoryPath.Trim(),
             NiceDefaultDownloadDirectoryPath = NiceDefaultDownloadDirectoryPath.Trim(),
@@ -5767,6 +5824,14 @@ public partial class MainViewModel : ViewModelBase
     {
         _imageCache.CacheThumbnails = CacheThumbnails;
         _imageCache.CacheOriginalImages = CacheOriginalImages;
+        _imageCache.Limits = new AlbumImageCacheLimits(
+            AlbumImageCacheLimits.Megabytes(GetCacheSizeMb(AlbumFastThumbnailMemoryCacheSizeMb, 256)),
+            AlbumImageCacheLimits.Megabytes(GetCacheSizeMb(AlbumDetailedThumbnailMemoryCacheSizeMb, 512)),
+            AlbumImageCacheLimits.Megabytes(GetCacheSizeMb(AlbumOriginalImageMemoryCacheSizeMb, 256)),
+            AlbumImageCacheLimits.Megabytes(GetCacheSizeMb(AlbumFastThumbnailDiskCacheSizeMb, 512)),
+            AlbumImageCacheLimits.Megabytes(GetCacheSizeMb(AlbumDetailedThumbnailDiskCacheSizeMb, 2048)),
+            AlbumImageCacheLimits.Megabytes(GetCacheSizeMb(AlbumOriginalImageDiskCacheSizeMb, 2048)));
+        _albumImageListLoader.UpdateSettings(GetMaximumParallelism());
     }
 
     private void PersistLocalUserSettingsIfReady()
@@ -5812,6 +5877,16 @@ public partial class MainViewModel : ViewModelBase
         return Math.Clamp(value <= 0 ? LocalUserSettings.DefaultMaximumParallelism : value, 1, 64);
     }
 
+    private static int NormalizeCacheSizeMb(int value, int defaultValue)
+    {
+        return Math.Clamp(value < 0 ? defaultValue : value, 0, 1024 * 64);
+    }
+
+    private static int GetCacheSizeMb(int value, int defaultValue)
+    {
+        return NormalizeCacheSizeMb(value, defaultValue);
+    }
+
     partial void OnSelectedAlbumTypeChanged(AlbumTypeOptionViewModel? value)
     {
         OnPropertyChanged(nameof(IsAlbumSettingsVisible));
@@ -5842,6 +5917,36 @@ public partial class MainViewModel : ViewModelBase
     }
 
     partial void OnCacheOriginalImagesChanged(bool value)
+    {
+        PersistLocalUserSettingsIfReady();
+    }
+
+    partial void OnAlbumFastThumbnailMemoryCacheSizeMbChanged(int value)
+    {
+        PersistLocalUserSettingsIfReady();
+    }
+
+    partial void OnAlbumDetailedThumbnailMemoryCacheSizeMbChanged(int value)
+    {
+        PersistLocalUserSettingsIfReady();
+    }
+
+    partial void OnAlbumOriginalImageMemoryCacheSizeMbChanged(int value)
+    {
+        PersistLocalUserSettingsIfReady();
+    }
+
+    partial void OnAlbumFastThumbnailDiskCacheSizeMbChanged(int value)
+    {
+        PersistLocalUserSettingsIfReady();
+    }
+
+    partial void OnAlbumDetailedThumbnailDiskCacheSizeMbChanged(int value)
+    {
+        PersistLocalUserSettingsIfReady();
+    }
+
+    partial void OnAlbumOriginalImageDiskCacheSizeMbChanged(int value)
     {
         PersistLocalUserSettingsIfReady();
     }

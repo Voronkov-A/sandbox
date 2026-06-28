@@ -537,6 +537,16 @@ public partial class MainView : UserControl
         UpdateVisibleAlbumPhotoPriorities();
     }
 
+    private void MainTabs_SelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (sender is not TabControl)
+        {
+            return;
+        }
+
+        _ = Dispatcher.UIThread.InvokeAsync(UpdateVisibleAlbumPhotoPriorities, DispatcherPriority.Render);
+    }
+
     private void AlbumPhotoList_SelectionChanged(object? sender, SelectionChangedEventArgs e)
     {
         if (sender is ListBox { SelectedItem: not null } listBox)
@@ -566,9 +576,11 @@ public partial class MainView : UserControl
             .Select(item => new
             {
                 item.Photo,
-                Bounds = TransformBounds(item.Control, this)
+                Bounds = TransformBounds(item.Control, this),
+                IsFullyInViewport = IsControlFullyInViewport(item.Control)
             })
-            .OrderBy(item => item.Bounds.Y)
+            .OrderByDescending(item => item.IsFullyInViewport)
+            .ThenBy(item => item.Bounds.Y)
             .ThenBy(item => item.Bounds.X)
             .Select(item => item.Photo)
             .ToList();
@@ -595,6 +607,21 @@ public partial class MainView : UserControl
             bounds.Bottom >= 0 &&
             bounds.Left <= scrollViewer.Bounds.Width &&
             bounds.Top <= scrollViewer.Bounds.Height;
+    }
+
+    private static bool IsControlFullyInViewport(Control control)
+    {
+        var scrollViewer = control.GetVisualAncestors().OfType<ScrollViewer>().FirstOrDefault();
+        if (scrollViewer is null || control.TransformToVisual(scrollViewer) is null)
+        {
+            return false;
+        }
+
+        var bounds = TransformBounds(control, scrollViewer);
+        return bounds.Left >= 0 &&
+            bounds.Top >= 0 &&
+            bounds.Right <= scrollViewer.Bounds.Width &&
+            bounds.Bottom <= scrollViewer.Bounds.Height;
     }
 
     private static Rect TransformBounds(Control control, Visual target)

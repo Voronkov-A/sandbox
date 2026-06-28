@@ -66,6 +66,18 @@ public sealed class LocalUserSettings
 
     public bool CacheOriginalImages { get; set; } = true;
 
+    public int AlbumFastThumbnailMemoryCacheSizeMb { get; set; } = 256;
+
+    public int AlbumDetailedThumbnailMemoryCacheSizeMb { get; set; } = 512;
+
+    public int AlbumOriginalImageMemoryCacheSizeMb { get; set; } = 256;
+
+    public int AlbumFastThumbnailDiskCacheSizeMb { get; set; } = 512;
+
+    public int AlbumDetailedThumbnailDiskCacheSizeMb { get; set; } = 2048;
+
+    public int AlbumOriginalImageDiskCacheSizeMb { get; set; } = 2048;
+
     public string PictureDefaultDownloadDirectoryPath { get; set; } = "";
 
     public string UncategorizedDefaultDownloadDirectoryPath { get; set; } = "";
