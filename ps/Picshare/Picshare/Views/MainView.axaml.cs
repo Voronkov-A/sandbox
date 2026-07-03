@@ -527,7 +527,7 @@ public partial class MainView : UserControl
         if (DataContext is MainViewModel viewModel &&
             sender is Control { DataContext: AlbumPhotoViewModel photo } control)
         {
-            if (IsInSelectedAlbumPhotoList(control) && IsControlInViewport(control))
+            if (IsInSelectedAlbumPhotoList(control))
             {
                 await viewModel.StartPhotoViewportLoadAsync(photo);
             }
@@ -574,7 +574,7 @@ public partial class MainView : UserControl
                 }, DispatcherPriority.Render);
             }
 
-            UpdateVisibleAlbumPhotoPriorities();
+            QueueVisibleAlbumPhotoPriorityUpdate();
         }, DispatcherPriority.Loaded);
     }
 
@@ -736,7 +736,7 @@ public partial class MainView : UserControl
         }
 
         var tabItem = listBox.GetVisualAncestors().OfType<TabItem>().FirstOrDefault();
-        return tabItem?.IsSelected == true;
+        return tabItem?.IsSelected ?? listBox.IsVisible;
     }
 
     private static bool IsControlInViewport(Control control)
