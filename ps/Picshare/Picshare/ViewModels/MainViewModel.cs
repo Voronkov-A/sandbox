@@ -1117,28 +1117,37 @@ public partial class MainViewModel : ViewModelBase
                 }
             }
 
-            AlbumDownloadProgressMessage = "Album download complete.";
-            AlbumDownloadProgressWarning = "";
-            Status = "Album download complete.";
+            if (ReferenceEquals(_albumDownloadCancellation, cancellation))
+            {
+                AlbumDownloadProgressMessage = "Album download complete.";
+                AlbumDownloadProgressWarning = "";
+                Status = "Album download complete.";
+            }
         }
         catch (OperationCanceledException)
         {
-            AlbumDownloadProgressMessage = "Album download cancelled.";
-            AlbumDownloadProgressWarning = "";
-            Status = "Album download cancelled.";
+            if (ReferenceEquals(_albumDownloadCancellation, cancellation))
+            {
+                AlbumDownloadProgressMessage = "Album download cancelled.";
+                AlbumDownloadProgressWarning = "";
+                Status = "Album download cancelled.";
+            }
         }
         catch (Exception ex)
         {
-            AlbumDownloadProgressMessage = ex.Message;
-            AlbumDownloadProgressWarning = "";
-            Status = ex.Message;
+            if (ReferenceEquals(_albumDownloadCancellation, cancellation))
+            {
+                AlbumDownloadProgressMessage = ex.Message;
+                AlbumDownloadProgressWarning = "";
+                Status = ex.Message;
+            }
         }
         finally
         {
-            IsAlbumDownloadProgressVisible = false;
-            ClearLongRunningOperation(LongRunningOperationKind.Download);
             if (ReferenceEquals(_albumDownloadCancellation, cancellation))
             {
+                IsAlbumDownloadProgressVisible = false;
+                ClearLongRunningOperation(LongRunningOperationKind.Download);
                 _albumDownloadCancellation.Dispose();
                 _albumDownloadCancellation = null;
             }
@@ -1593,9 +1602,9 @@ public partial class MainViewModel : ViewModelBase
     [RelayCommand]
     private void ClosePhotoViewer()
     {
-        _photoViewerCancellation?.Cancel();
-        _photoViewerCancellation?.Dispose();
-        _photoViewerCancellation = null;
+        CancelPhotoViewerLoad();
+        _albumImageListLoader.ClearPriorityPhotos();
+        ReleasePhotoViewerPriorityImages();
         PhotoViewerImage = null;
         PhotoViewerRotationDegrees = 0;
         PhotoViewerTitle = "";
@@ -1611,18 +1620,36 @@ public partial class MainViewModel : ViewModelBase
         UpdatePhotoViewerDuplicateStripVisibility();
     }
 
+    private void CancelPhotoViewerLoad()
+    {
+        var cancellation = _photoViewerCancellation;
+        _photoViewerCancellation = null;
+        try
+        {
+            cancellation?.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+        finally
+        {
+            cancellation?.Dispose();
+        }
+    }
+
     public async Task OpenPhotoViewerAsync(AlbumPhotoViewModel photo)
     {
-        _photoViewerCancellation?.Cancel();
-        _photoViewerCancellation?.Dispose();
+        CancelPhotoViewerLoad();
+        _albumImageListLoader.ClearPriorityPhotos();
+        ReleasePhotoViewerPriorityImages();
         _photoViewerCancellation = new CancellationTokenSource();
         var cancellation = _photoViewerCancellation;
 
         try
         {
+            IsPhotoViewerVisible = true;
             SelectViewedPhoto(photo);
             AddRecentPhoto(photo);
-            IsPhotoViewerVisible = true;
             IsPhotoViewerActionsVisible = true;
             UpdatePhotoViewerDuplicateStripVisibility();
             PhotoViewerTitle = photo.FileName;
@@ -1641,8 +1668,8 @@ public partial class MainViewModel : ViewModelBase
             {
                 PhotoViewerImage = viewerImage;
                 PhotoViewerStatus = "";
-                _ = LoadViewedPhotoDisplayImageAsync(photo);
-                _ = PreloadPhotoViewerDuplicatePhotosAsync();
+                _ = LoadViewedPhotoDisplayImageAsync(photo, cancellation);
+                _ = PreloadPhotoViewerDuplicatePhotosAsync(cancellation);
             }
             else
             {
@@ -1780,18 +1807,21 @@ public partial class MainViewModel : ViewModelBase
     [RelayCommand]
     private async Task ClearImageCacheAsync()
     {
+        var photos = Photos.ToList();
+        var visiblePhotoIndices = _albumImageListLoader.GetListViewportIndicesSnapshot();
+        var albumId = _currentManifest?.AlbumId;
         try
         {
             IsBusy = true;
-            foreach (var photo in Photos)
+            _visibleAlbumPhotoViewport.Clear();
+            await _albumImageListLoader.ClearAndWaitAsync();
+            foreach (var photo in photos)
             {
                 photo.StopViewportLoad();
-                photo.ReleaseCachedImage();
             }
 
             ClosePhotoViewer();
             await _imageCache.ClearAsync();
-            _albumImageListLoader.UpdateSettings(GetMaximumParallelism());
             Status = "Image cache cleared.";
         }
         catch (Exception ex)
@@ -1800,6 +1830,19 @@ public partial class MainViewModel : ViewModelBase
         }
         finally
         {
+            if (photos.Count > 0 &&
+                string.Equals(_currentManifest?.AlbumId, albumId, StringComparison.Ordinal) &&
+                Photos.SequenceEqual(photos))
+            {
+                _albumImageListLoader.SetPhotos(photos, GetMaximumParallelism());
+                _albumImageListLoader.RestoreViewportIndices(visiblePhotoIndices);
+                var visiblePhotos = _albumImageListLoader.GetListViewportPhotosSnapshot();
+                foreach (var photo in visiblePhotos)
+                {
+                    _visibleAlbumPhotoViewport.Add(photo);
+                }
+            }
+
             IsBusy = false;
         }
     }
@@ -2004,6 +2047,7 @@ public partial class MainViewModel : ViewModelBase
 
             _albumImageListLoader.Clear();
             _visibleAlbumPhotoViewport.Clear();
+            ReleaseAlbumPhotoImages();
             Photos.Clear();
             ShareLink = "";
             DriveFolderLink = "";
@@ -2834,6 +2878,7 @@ public partial class MainViewModel : ViewModelBase
                 CurrentAlbumTitle = manifest.Title;
                 _albumImageListLoader.Clear();
                 _visibleAlbumPhotoViewport.Clear();
+                ReleaseAlbumPhotoImages();
                 Photos.Clear();
                 ClearCategoryRows();
                 SelectViewedPhoto(null);
@@ -2911,6 +2956,7 @@ public partial class MainViewModel : ViewModelBase
         CurrentAlbumTitle = manifest.Title;
         _albumImageListLoader.Clear();
         _visibleAlbumPhotoViewport.Clear();
+        ReleaseAlbumPhotoImages();
         Photos.Clear();
         ClearCategoryRows();
         SelectViewedPhoto(null);
@@ -2964,6 +3010,7 @@ public partial class MainViewModel : ViewModelBase
         CurrentAlbumTitle = manifest.Title;
         _albumImageListLoader.Clear();
         _visibleAlbumPhotoViewport.Clear();
+        ReleaseAlbumPhotoImages();
         Photos.Clear();
         ClearCategoryRows();
         SelectViewedPhoto(null);
@@ -2993,35 +3040,109 @@ public partial class MainViewModel : ViewModelBase
     public async Task StartPhotoViewportLoadAsync(AlbumPhotoViewModel photo)
     {
         await Task.CompletedTask;
+        photo.KeepCachedImage();
+        if (photo.DuplicateStackPhoto is not null && !ReferenceEquals(photo.DuplicateStackPhoto, photo))
+        {
+            photo.DuplicateStackPhoto.KeepCachedImage();
+        }
+
         _albumImageListLoader.AddViewportPhoto(photo);
     }
 
     public void StopPhotoViewportLoad(AlbumPhotoViewModel photo)
     {
-        _albumImageListLoader.RemoveViewportPhoto(photo);
-        photo.ReleaseCachedImage();
+        var registrationPhotos = _albumImageListLoader.RemoveLoadedViewportPhoto(photo);
+        var currentPhotos = photo.DuplicateStackPhoto is not null && !ReferenceEquals(photo.DuplicateStackPhoto, photo)
+            ? new[] { photo, photo.DuplicateStackPhoto }
+            : new[] { photo };
+        var removedPhotos = (registrationPhotos.Count > 0 ? registrationPhotos : currentPhotos)
+            .Distinct()
+            .ToList();
+        var remainingViewportPhotos = _albumImageListLoader.GetListViewportPhotosSnapshot().ToHashSet();
+        foreach (var removedPhoto in removedPhotos)
+        {
+            if (!remainingViewportPhotos.Contains(removedPhoto) && !IsPhotoViewerPriorityPhoto(removedPhoto))
+            {
+                removedPhoto.ScheduleDeferredImageRelease();
+            }
+        }
     }
 
     public void PrioritizePhotoViewportLoads(IReadOnlyList<AlbumPhotoViewModel> photos)
     {
-        var expandedPhotos = photos
-            .SelectMany(photo => photo.DuplicateStackPhoto is not null && !ReferenceEquals(photo.DuplicateStackPhoto, photo)
-                ? new[] { photo, photo.DuplicateStackPhoto }
-                : new[] { photo })
-            .ToHashSet();
-
-        foreach (var photo in _visibleAlbumPhotoViewport.Except(expandedPhotos).ToList())
+        _albumImageListLoader.UpdateViewport(photos);
+        foreach (var photo in photos)
         {
-            photo.ReleaseCachedImage();
+            photo.KeepCachedImage();
+            if (photo.DuplicateStackPhoto is not null && !ReferenceEquals(photo.DuplicateStackPhoto, photo))
+            {
+                photo.DuplicateStackPhoto.KeepCachedImage();
+            }
         }
 
+        var remainingViewportPhotos = _albumImageListLoader.GetListViewportPhotosSnapshot().ToHashSet();
+        var removedPhotos = _visibleAlbumPhotoViewport.Except(remainingViewportPhotos).ToList();
+
         _visibleAlbumPhotoViewport.Clear();
-        foreach (var photo in expandedPhotos)
+        foreach (var photo in remainingViewportPhotos)
         {
             _visibleAlbumPhotoViewport.Add(photo);
         }
 
-        _albumImageListLoader.UpdateViewport(photos);
+        foreach (var photo in removedPhotos)
+        {
+            if (IsPhotoViewerPriorityPhoto(photo))
+            {
+                continue;
+            }
+
+            photo.ScheduleDeferredImageRelease();
+        }
+    }
+
+    public void ClearPhotoViewportLoads()
+    {
+        var removedPhotos = _visibleAlbumPhotoViewport
+            .Concat(_albumImageListLoader.GetListViewportPhotosSnapshot())
+            .Distinct()
+            .ToList();
+        _albumImageListLoader.ClearViewport();
+        _visibleAlbumPhotoViewport.Clear();
+        foreach (var photo in removedPhotos)
+        {
+            if (IsPhotoViewerPriorityPhoto(photo))
+            {
+                continue;
+            }
+
+            photo.ReleaseCachedImage();
+        }
+    }
+
+    private bool IsPhotoViewerPriorityPhoto(AlbumPhotoViewModel photo)
+    {
+        return IsPhotoViewerVisible &&
+            (ReferenceEquals(_selectedViewedPhoto, photo) || PhotoViewerDuplicatePhotos.Contains(photo));
+    }
+
+    private void ReleasePhotoViewerPriorityImages()
+    {
+        var listViewportPhotos = _albumImageListLoader.GetListViewportPhotosSnapshot().ToHashSet();
+        var photos = GetPhotoViewerPriorityPhotos()
+            .Where(photo => !listViewportPhotos.Contains(photo))
+            .ToList();
+        foreach (var photo in photos)
+        {
+            photo.ReleaseCachedImage();
+        }
+    }
+
+    private IReadOnlyList<AlbumPhotoViewModel> GetPhotoViewerPriorityPhotos()
+    {
+        return PhotoViewerDuplicatePhotos
+            .Concat(_selectedViewedPhoto is null ? [] : new[] { _selectedViewedPhoto })
+            .Distinct()
+            .ToList();
     }
 
     public void TogglePhotoSelection(AlbumPhotoViewModel photo)
@@ -3037,41 +3158,54 @@ public partial class MainViewModel : ViewModelBase
             return;
         }
 
+        CancelPhotoViewerLoad();
+        _albumImageListLoader.ClearPriorityPhotos();
+        _photoViewerCancellation = new CancellationTokenSource();
+        var cancellation = _photoViewerCancellation;
+
+        IsPhotoViewerVisible = true;
         SelectViewedPhoto(photo);
         AddRecentPhoto(photo);
-        IsPhotoViewerVisible = true;
         IsPhotoViewerActionsVisible = true;
         UpdatePhotoViewerDuplicateStripVisibility();
         PhotoViewerTitle = photo.FileName;
         PhotoViewerRotationDegrees = photo.RotationDegrees;
         PhotoViewerStatus = "Loading";
+        PhotoViewerImage = null;
 
         try
         {
-            _photoViewerCancellation?.Cancel();
-            _photoViewerCancellation?.Dispose();
-            _photoViewerCancellation = new CancellationTokenSource();
-            var cancellation = _photoViewerCancellation.Token;
-            PhotoViewerImage = await _imageCache.LoadOriginalBitmapAsync(
+            var viewerImage = await _imageCache.LoadOriginalBitmapAsync(
                 photo.AlbumId,
                 GetFullPhotoCacheFileName(photo),
                 photo.DownloadUrl,
                 _imageHttpClient,
-                cancellation);
-            PhotoViewerStatus = "Original loaded";
-            _ = LoadViewedPhotoDisplayImageAsync(photo);
-            _ = PreloadPhotoViewerDuplicatePhotosAsync();
+                cancellation.Token);
+            if (ReferenceEquals(_photoViewerCancellation, cancellation))
+            {
+                PhotoViewerImage = viewerImage;
+                PhotoViewerStatus = "Original loaded";
+                _ = LoadViewedPhotoDisplayImageAsync(photo, cancellation);
+                _ = PreloadPhotoViewerDuplicatePhotosAsync(cancellation);
+            }
+            else
+            {
+                viewerImage.Dispose();
+            }
         }
         catch (OperationCanceledException)
         {
         }
         catch (Exception ex)
         {
-            PhotoViewerStatus = ex.Message;
+            if (ReferenceEquals(_photoViewerCancellation, cancellation))
+            {
+                PhotoViewerStatus = ex.Message;
+            }
         }
     }
 
-    private async Task PreloadPhotoViewerDuplicatePhotosAsync()
+    private async Task PreloadPhotoViewerDuplicatePhotosAsync(CancellationTokenSource cancellation)
     {
         var photos = PhotoViewerDuplicatePhotos.ToList();
         if (_selectedViewedPhoto is not null)
@@ -3083,21 +3217,54 @@ public partial class MainViewModel : ViewModelBase
 
         foreach (var photo in photos)
         {
-            _albumImageListLoader.UpdateViewport([photo]);
+            if (!IsCurrentPhotoViewerLoad(cancellation))
+            {
+                return;
+            }
+
+            if (ReferenceEquals(_selectedViewedPhoto, photo) || PhotoViewerDuplicatePhotos.Contains(photo))
+            {
+                photo.KeepCachedImage();
+                _albumImageListLoader.AddPriorityPhoto(photo);
+            }
+
             await Task.Yield();
         }
     }
 
-    private async Task LoadViewedPhotoDisplayImageAsync(AlbumPhotoViewModel photo)
+    private async Task LoadViewedPhotoDisplayImageAsync(AlbumPhotoViewModel photo, CancellationTokenSource cancellation)
     {
         try
         {
-            _albumImageListLoader.UpdateViewport([photo]);
+            if (!IsCurrentPhotoViewerLoad(cancellation) || !ReferenceEquals(_selectedViewedPhoto, photo))
+            {
+                return;
+            }
+
+            photo.KeepCachedImage();
+            _albumImageListLoader.AddPriorityPhoto(photo);
             await Task.CompletedTask;
+        }
+        catch (OperationCanceledException)
+        {
         }
         catch
         {
             // The full viewer already reports original-image loading errors.
+        }
+    }
+
+    private bool IsCurrentPhotoViewerLoad(CancellationTokenSource cancellation)
+    {
+        try
+        {
+            return ReferenceEquals(_photoViewerCancellation, cancellation) &&
+                !cancellation.IsCancellationRequested &&
+                IsPhotoViewerVisible;
+        }
+        catch (ObjectDisposedException)
+        {
+            return false;
         }
     }
 
@@ -3155,30 +3322,39 @@ public partial class MainViewModel : ViewModelBase
                     cancellation.Token);
             }
 
-            AlbumDownloadProgressMessage = asArchive
-                ? "Selected photo archive complete."
-                : "Selected photo download complete.";
-            AlbumDownloadProgressWarning = "";
-            Status = AlbumDownloadProgressMessage;
+            if (ReferenceEquals(_albumDownloadCancellation, cancellation))
+            {
+                AlbumDownloadProgressMessage = asArchive
+                    ? "Selected photo archive complete."
+                    : "Selected photo download complete.";
+                AlbumDownloadProgressWarning = "";
+                Status = AlbumDownloadProgressMessage;
+            }
         }
         catch (OperationCanceledException)
         {
-            AlbumDownloadProgressMessage = "Selected photo download cancelled.";
-            AlbumDownloadProgressWarning = "";
-            Status = "Selected photo download cancelled.";
+            if (ReferenceEquals(_albumDownloadCancellation, cancellation))
+            {
+                AlbumDownloadProgressMessage = "Selected photo download cancelled.";
+                AlbumDownloadProgressWarning = "";
+                Status = "Selected photo download cancelled.";
+            }
         }
         catch (Exception ex)
         {
-            AlbumDownloadProgressMessage = ex.Message;
-            AlbumDownloadProgressWarning = "";
-            Status = ex.Message;
+            if (ReferenceEquals(_albumDownloadCancellation, cancellation))
+            {
+                AlbumDownloadProgressMessage = ex.Message;
+                AlbumDownloadProgressWarning = "";
+                Status = ex.Message;
+            }
         }
         finally
         {
-            IsAlbumDownloadProgressVisible = false;
-            ClearLongRunningOperation(LongRunningOperationKind.Download);
             if (ReferenceEquals(_albumDownloadCancellation, cancellation))
             {
+                IsAlbumDownloadProgressVisible = false;
+                ClearLongRunningOperation(LongRunningOperationKind.Download);
                 _albumDownloadCancellation.Dispose();
                 _albumDownloadCancellation = null;
             }
@@ -3777,13 +3953,14 @@ public partial class MainViewModel : ViewModelBase
             return;
         }
 
+        CancellationTokenSource? cancellation = null;
         try
         {
             IsBusy = true;
             _albumDownloadCancellation?.Cancel();
             _albumDownloadCancellation?.Dispose();
-            _albumDownloadCancellation = new CancellationTokenSource();
-            var cancellation = _albumDownloadCancellation;
+            cancellation = new CancellationTokenSource();
+            _albumDownloadCancellation = cancellation;
             IsAlbumDownloadProgressVisible = true;
             AlbumDownloadProgressValue = 0;
             AlbumDownloadProgressMaximum = 1;
@@ -3809,23 +3986,29 @@ public partial class MainViewModel : ViewModelBase
 
             try
             {
-                await using (var destination = new FileStream(
-                    tempPath,
-                    FileMode.CreateNew,
-                    FileAccess.Write,
-                    FileShare.None))
-                {
-                    await TransientRetryPolicy.ExecuteAsync(
-                        token => _imageCache.CopyOriginalToAsync(
+                await TransientRetryPolicy.ExecuteAsync(
+                    async token =>
+                    {
+                        if (File.Exists(tempPath))
+                        {
+                            File.Delete(tempPath);
+                        }
+
+                        await using var destination = new FileStream(
+                            tempPath,
+                            FileMode.CreateNew,
+                            FileAccess.Write,
+                            FileShare.None);
+                        await _imageCache.CopyOriginalToAsync(
                             photo.AlbumId,
                             GetFullPhotoCacheFileName(photo),
                             photo.DownloadUrl,
                             _imageHttpClient,
                             destination,
-                            token),
-                        warning => AlbumDownloadProgressWarning = warning,
-                        cancellation.Token);
-                }
+                            token);
+                    },
+                    warning => AlbumDownloadProgressWarning = warning,
+                    cancellation.Token);
 
                 File.Move(tempPath, destinationPath, overwrite: true);
             }
@@ -3837,28 +4020,40 @@ public partial class MainViewModel : ViewModelBase
                 }
             }
 
-            AlbumDownloadProgressValue = 1;
-            AlbumDownloadProgressWarning = "";
-            Status = $"{successVerb} {photo.FileName} to {destinationPath}.";
+            if (ReferenceEquals(_albumDownloadCancellation, cancellation))
+            {
+                AlbumDownloadProgressValue = 1;
+                AlbumDownloadProgressWarning = "";
+                Status = $"{successVerb} {photo.FileName} to {destinationPath}.";
+            }
         }
         catch (OperationCanceledException)
         {
-            AlbumDownloadProgressMessage = "Download cancelled.";
-            AlbumDownloadProgressWarning = "";
-            Status = "Download cancelled.";
+            if (ReferenceEquals(_albumDownloadCancellation, cancellation))
+            {
+                AlbumDownloadProgressMessage = "Download cancelled.";
+                AlbumDownloadProgressWarning = "";
+                Status = "Download cancelled.";
+            }
         }
         catch (Exception ex)
         {
-            AlbumDownloadProgressWarning = "";
-            Status = ex.Message;
+            if (ReferenceEquals(_albumDownloadCancellation, cancellation))
+            {
+                AlbumDownloadProgressWarning = "";
+                Status = ex.Message;
+            }
         }
         finally
         {
-            IsAlbumDownloadProgressVisible = false;
-            ClearLongRunningOperation(LongRunningOperationKind.Download);
-            _albumDownloadCancellation?.Dispose();
-            _albumDownloadCancellation = null;
-            IsBusy = false;
+            if (cancellation is not null && ReferenceEquals(_albumDownloadCancellation, cancellation))
+            {
+                IsAlbumDownloadProgressVisible = false;
+                ClearLongRunningOperation(LongRunningOperationKind.Download);
+                cancellation.Dispose();
+                _albumDownloadCancellation = null;
+                IsBusy = false;
+            }
         }
     }
 
@@ -4421,14 +4616,19 @@ public partial class MainViewModel : ViewModelBase
         IsAlbumDownloadProgressVisible = false;
         AlbumDownloadProgressWarning = "";
 
+        _albumImageListLoader.Clear();
+        _visibleAlbumPhotoViewport.Clear();
+        ReleaseAlbumPhotoImages();
+        ClosePhotoViewer();
+    }
+
+    private void ReleaseAlbumPhotoImages()
+    {
         foreach (var photo in Photos)
         {
             photo.StopViewportLoad();
             photo.ReleaseCachedImage();
         }
-
-        _albumImageListLoader.UpdateViewport([]);
-        ClosePhotoViewer();
     }
 
     private void ClearOpenedAlbumState()
@@ -4462,6 +4662,7 @@ public partial class MainViewModel : ViewModelBase
         ClearBulkPhotoSelection();
         _albumImageListLoader.Clear();
         _visibleAlbumPhotoViewport.Clear();
+        ReleaseAlbumPhotoImages();
         Photos.Clear();
         ClearCategoryRows();
         NotifyReviewTabHeadersChanged();
@@ -4953,6 +5154,10 @@ public partial class MainViewModel : ViewModelBase
 
     private void SelectViewedPhoto(AlbumPhotoViewModel? photo)
     {
+        var oldPriorityPhotos = IsPhotoViewerVisible
+            ? GetPhotoViewerPriorityPhotos()
+            : [];
+
         if (_selectedViewedPhoto is not null)
         {
             _selectedViewedPhoto.IsSelectedForViewing = false;
@@ -4975,6 +5180,22 @@ public partial class MainViewModel : ViewModelBase
             foreach (var member in members)
             {
                 PhotoViewerDuplicatePhotos.Add(member);
+            }
+        }
+
+        if (IsPhotoViewerVisible)
+        {
+            var newPriorityPhotos = GetPhotoViewerPriorityPhotos();
+            _albumImageListLoader.ClearPriorityPhotos();
+            foreach (var priorityPhoto in newPriorityPhotos)
+            {
+                _albumImageListLoader.AddPriorityPhoto(priorityPhoto);
+            }
+
+            var listViewportPhotos = _albumImageListLoader.GetListViewportPhotosSnapshot().ToHashSet();
+            foreach (var oldPriorityPhoto in oldPriorityPhotos.Except(newPriorityPhotos).Where(photo => !listViewportPhotos.Contains(photo)))
+            {
+                oldPriorityPhoto.ScheduleDeferredImageRelease();
             }
         }
 
@@ -5822,16 +6043,31 @@ public partial class MainViewModel : ViewModelBase
 
     private void ApplyImageCacheSettings()
     {
-        _imageCache.CacheThumbnails = CacheThumbnails;
-        _imageCache.CacheOriginalImages = CacheOriginalImages;
-        _imageCache.Limits = new AlbumImageCacheLimits(
+        var previousCacheThumbnails = _imageCache.CacheThumbnails;
+        var previousCacheOriginalImages = _imageCache.CacheOriginalImages;
+        var previousLimits = _imageCache.Limits;
+        var limits = new AlbumImageCacheLimits(
             AlbumImageCacheLimits.Megabytes(GetCacheSizeMb(AlbumFastThumbnailMemoryCacheSizeMb, 256)),
             AlbumImageCacheLimits.Megabytes(GetCacheSizeMb(AlbumDetailedThumbnailMemoryCacheSizeMb, 512)),
             AlbumImageCacheLimits.Megabytes(GetCacheSizeMb(AlbumOriginalImageMemoryCacheSizeMb, 256)),
             AlbumImageCacheLimits.Megabytes(GetCacheSizeMb(AlbumFastThumbnailDiskCacheSizeMb, 512)),
             AlbumImageCacheLimits.Megabytes(GetCacheSizeMb(AlbumDetailedThumbnailDiskCacheSizeMb, 2048)),
             AlbumImageCacheLimits.Megabytes(GetCacheSizeMb(AlbumOriginalImageDiskCacheSizeMb, 2048)));
-        _albumImageListLoader.UpdateSettings(GetMaximumParallelism());
+        var cacheSettingsChanged = previousCacheThumbnails != CacheThumbnails ||
+            previousCacheOriginalImages != CacheOriginalImages ||
+            previousLimits != limits;
+
+        _imageCache.CacheThumbnails = CacheThumbnails;
+        _imageCache.CacheOriginalImages = CacheOriginalImages;
+        _imageCache.Limits = limits;
+        if (cacheSettingsChanged)
+        {
+            _albumImageListLoader.RestartPreservingState(GetMaximumParallelism());
+        }
+        else
+        {
+            _albumImageListLoader.UpdateSettings(GetMaximumParallelism());
+        }
     }
 
     private void PersistLocalUserSettingsIfReady()

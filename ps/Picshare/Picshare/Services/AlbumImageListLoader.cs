@@ -12,9 +12,21 @@ public sealed class AlbumImageListLoader : IDisposable
     private IReadOnlyList<AlbumPhotoViewModel> _photos = [];
     private Dictionary<AlbumPhotoViewModel, int> _indexByPhoto = new();
     private HashSet<int> _viewportIndices = new();
+    private Dictionary<int, int> _viewportSnapshotIndexCounts = new();
+    private Dictionary<int, int> _viewportLoadedIndexCounts = new();
+    private Dictionary<AlbumPhotoViewModel, List<int[]>> _viewportLoadedRegistrations = new();
+    private List<int> _orderedViewportIndices = new();
+    private HashSet<int> _priorityIndices = new();
+    private List<int> _orderedPriorityIndices = new();
+    private HashSet<AlbumImageWarmupKey> _skippedWarmupKeys = new();
+    private HashSet<AlbumImageWarmupKey> _failedVisibleKeys = new();
     private CancellationTokenSource? _lifetime;
     private readonly List<Task> _workerTasks = new();
+    private Task _stoppedWorkerTasks = Task.CompletedTask;
     private int _maximumParallelism = LocalUserSettings.DefaultMaximumParallelism;
+    private int _workerCount;
+    private int _pendingWorkerSignalCount;
+    private long _generation;
     private bool _disposed;
 
     public AlbumImageListLoader(ImageCacheService imageCache, HttpClient httpClient)
@@ -25,18 +37,29 @@ public sealed class AlbumImageListLoader : IDisposable
 
     public void SetPhotos(IReadOnlyList<AlbumPhotoViewModel> photos, int maximumParallelism)
     {
+        var generation = Interlocked.Increment(ref _generation);
         StopWorkers();
         _maximumParallelism = Math.Clamp(maximumParallelism, 1, 64);
+        foreach (var photo in photos)
+        {
+            photo.ResetImageLoadStatusesForNewGeneration();
+        }
+
         lock (_sync)
         {
             _photos = photos.ToArray();
             _indexByPhoto = _photos
                 .Select((photo, index) => new { photo, index })
                 .ToDictionary(item => item.photo, item => item.index);
-            _viewportIndices = new HashSet<int>();
+            ClearViewportNoLock();
+            _orderedViewportIndices = new List<int>();
+            _priorityIndices = new HashSet<int>();
+            _orderedPriorityIndices = new List<int>();
+            _skippedWarmupKeys = new HashSet<AlbumImageWarmupKey>();
+            _failedVisibleKeys = new HashSet<AlbumImageWarmupKey>();
         }
 
-        StartWorkers();
+        StartWorkers(generation);
         SignalWorkers();
     }
 
@@ -49,32 +72,76 @@ public sealed class AlbumImageListLoader : IDisposable
             return;
         }
 
-        IReadOnlyList<AlbumPhotoViewModel> viewportPhotos;
+        IReadOnlyList<AlbumPhotoViewModel> photos;
+        IReadOnlyList<int> viewportSnapshotIndices;
+        IReadOnlyList<LoadedViewportRegistration> loadedViewportRegistrations;
+        IReadOnlyList<AlbumPhotoViewModel> priorityPhotos;
         lock (_sync)
         {
-            viewportPhotos = _viewportIndices
-                .Order()
+            photos = _photos.ToArray();
+            viewportSnapshotIndices = GetListViewportSnapshotIndicesForRestoreNoLock();
+            loadedViewportRegistrations = GetLoadedViewportRegistrationsForRestoreNoLock();
+            priorityPhotos = _orderedPriorityIndices
                 .Select(index => index >= 0 && index < _photos.Count ? _photos[index] : null)
                 .Where(photo => photo is not null)
                 .Cast<AlbumPhotoViewModel>()
                 .ToList();
         }
 
-        SetPhotos(_photos, maximumParallelism);
-        UpdateViewport(viewportPhotos);
+        SetPhotos(photos, maximumParallelism);
+        RestoreViewportState(viewportSnapshotIndices, loadedViewportRegistrations);
+        foreach (var photo in priorityPhotos)
+        {
+            AddPriorityPhoto(photo);
+        }
+    }
+
+    public void RestartPreservingState(int maximumParallelism)
+    {
+        IReadOnlyList<AlbumPhotoViewModel> photos;
+        IReadOnlyList<int> viewportSnapshotIndices;
+        IReadOnlyList<LoadedViewportRegistration> loadedViewportRegistrations;
+        IReadOnlyList<AlbumPhotoViewModel> priorityPhotos;
+        lock (_sync)
+        {
+            photos = _photos.ToArray();
+            viewportSnapshotIndices = GetListViewportSnapshotIndicesForRestoreNoLock();
+            loadedViewportRegistrations = GetLoadedViewportRegistrationsForRestoreNoLock();
+            priorityPhotos = _orderedPriorityIndices
+                .Select(index => index >= 0 && index < _photos.Count ? _photos[index] : null)
+                .Where(photo => photo is not null)
+                .Cast<AlbumPhotoViewModel>()
+                .ToList();
+        }
+
+        SetPhotos(photos, maximumParallelism);
+        RestoreViewportState(viewportSnapshotIndices, loadedViewportRegistrations);
+        foreach (var photo in priorityPhotos)
+        {
+            AddPriorityPhoto(photo);
+        }
     }
 
     public void UpdateViewport(IReadOnlyList<AlbumPhotoViewModel> visiblePhotos)
     {
         lock (_sync)
         {
-            _viewportIndices = visiblePhotos
+            var viewportIndices = visiblePhotos
                 .SelectMany(photo => photo.DuplicateStackPhoto is not null && !ReferenceEquals(photo.DuplicateStackPhoto, photo)
                     ? new[] { photo, photo.DuplicateStackPhoto }
                     : new[] { photo })
                 .Select(photo => _indexByPhoto.TryGetValue(photo, out var index) ? index : -1)
                 .Where(index => index >= 0)
-                .ToHashSet();
+                .ToList();
+            _orderedViewportIndices = viewportIndices
+                .Distinct()
+                .ToList();
+            _viewportSnapshotIndexCounts = viewportIndices
+                .GroupBy(index => index)
+                .ToDictionary(group => group.Key, group => group.Count());
+            RebuildLoadedViewportCountsNoLock();
+
+            RefreshViewportIndicesNoLock();
         }
 
         SignalWorkers();
@@ -84,11 +151,57 @@ public sealed class AlbumImageListLoader : IDisposable
     {
         lock (_sync)
         {
-            AddViewportPhotoNoLock(photo);
+            var indices = GetLoadedViewportRegistrationIndicesNoLock(photo);
+            if (indices.Length > 0)
+            {
+                if (!_viewportLoadedRegistrations.TryGetValue(photo, out var registrations))
+                {
+                    registrations = new List<int[]>();
+                    _viewportLoadedRegistrations[photo] = registrations;
+                }
+
+                registrations.Add(indices);
+                foreach (var index in indices)
+                {
+                    AddLoadedViewportIndexNoLock(index);
+                }
+            }
+        }
+
+        SignalWorkers();
+    }
+
+    public void AddPriorityPhoto(AlbumPhotoViewModel photo)
+    {
+        lock (_sync)
+        {
+            AddPriorityPhotoNoLock(photo);
             if (photo.DuplicateStackPhoto is not null && !ReferenceEquals(photo.DuplicateStackPhoto, photo))
             {
-                AddViewportPhotoNoLock(photo.DuplicateStackPhoto);
+                AddPriorityPhotoNoLock(photo.DuplicateStackPhoto);
             }
+        }
+
+        SignalWorkers();
+    }
+
+    public void ClearPriorityPhotos()
+    {
+        lock (_sync)
+        {
+            _priorityIndices.Clear();
+            _orderedPriorityIndices.Clear();
+        }
+
+        SignalWorkers();
+    }
+
+    public void ClearViewport()
+    {
+        lock (_sync)
+        {
+            ClearViewportNoLock();
+            _orderedViewportIndices = new List<int>();
         }
 
         SignalWorkers();
@@ -98,31 +211,131 @@ public sealed class AlbumImageListLoader : IDisposable
     {
         lock (_sync)
         {
-            if (_indexByPhoto.TryGetValue(photo, out var index))
-            {
-                _viewportIndices.Remove(index);
-            }
+            var removedLoadedRegistration = RemoveViewportPhotoNoLock(photo);
 
-            if (photo.DuplicateStackPhoto is not null &&
-                !ReferenceEquals(photo.DuplicateStackPhoto, photo) &&
-                _indexByPhoto.TryGetValue(photo.DuplicateStackPhoto, out var duplicateIndex))
+            if (!removedLoadedRegistration &&
+                photo.DuplicateStackPhoto is not null &&
+                !ReferenceEquals(photo.DuplicateStackPhoto, photo))
             {
-                _viewportIndices.Remove(duplicateIndex);
+                RemoveViewportPhotoNoLock(photo.DuplicateStackPhoto);
             }
         }
 
         SignalWorkers();
     }
 
+    public IReadOnlyList<AlbumPhotoViewModel> RemoveLoadedViewportPhoto(AlbumPhotoViewModel photo)
+    {
+        List<AlbumPhotoViewModel> removedPhotos;
+        lock (_sync)
+        {
+            List<int> removedIndices = new();
+            removedIndices.AddRange(RemoveLoadedViewportPhotoNoLock(photo));
+
+            removedPhotos = removedIndices
+                .Distinct()
+                .Select(index => index >= 0 && index < _photos.Count ? _photos[index] : null)
+                .Where(removedPhoto => removedPhoto is not null)
+                .Cast<AlbumPhotoViewModel>()
+                .ToList();
+        }
+
+        SignalWorkers();
+        return removedPhotos;
+    }
+
     public void Clear()
     {
+        Interlocked.Increment(ref _generation);
         StopWorkers();
         lock (_sync)
         {
             _photos = [];
             _indexByPhoto = new Dictionary<AlbumPhotoViewModel, int>();
-            _viewportIndices = new HashSet<int>();
+            ClearViewportNoLock();
+            _orderedViewportIndices = new List<int>();
+            _priorityIndices = new HashSet<int>();
+            _orderedPriorityIndices = new List<int>();
+            _skippedWarmupKeys = new HashSet<AlbumImageWarmupKey>();
+            _failedVisibleKeys = new HashSet<AlbumImageWarmupKey>();
         }
+    }
+
+    public async Task ClearAndWaitAsync()
+    {
+        Clear();
+        await _stoppedWorkerTasks.ConfigureAwait(false);
+    }
+
+    public IReadOnlyList<AlbumPhotoViewModel> GetViewportPhotosSnapshot()
+    {
+        return GetViewportPhotos();
+    }
+
+    public IReadOnlyList<AlbumPhotoViewModel> GetListViewportPhotosSnapshot()
+    {
+        return GetListViewportPhotos();
+    }
+
+    public IReadOnlyList<int> GetListViewportIndicesSnapshot()
+    {
+        lock (_sync)
+        {
+            return GetListViewportIndicesForRestoreNoLock();
+        }
+    }
+
+    public void RestoreViewportIndices(IReadOnlyList<int> viewportIndices)
+    {
+        RestoreViewportState(viewportIndices, []);
+    }
+
+    private void RestoreViewportState(
+        IReadOnlyList<int> viewportSnapshotIndices,
+        IReadOnlyList<LoadedViewportRegistration> loadedViewportRegistrations)
+    {
+        lock (_sync)
+        {
+            var validIndices = viewportSnapshotIndices
+                .Where(index => index >= 0 && index < _photos.Count)
+                .ToList();
+            _orderedViewportIndices = validIndices
+                .Distinct()
+                .ToList();
+            _viewportSnapshotIndexCounts = validIndices
+                .GroupBy(index => index)
+                .ToDictionary(group => group.Key, group => group.Count());
+            _viewportLoadedRegistrations = new Dictionary<AlbumPhotoViewModel, List<int[]>>();
+            foreach (var registration in loadedViewportRegistrations)
+            {
+                if (!_indexByPhoto.ContainsKey(registration.Photo))
+                {
+                    continue;
+                }
+
+                var registrationIndices = registration.Indices
+                    .Where(index => index >= 0 && index < _photos.Count)
+                    .Distinct()
+                    .ToArray();
+                if (registrationIndices.Length == 0)
+                {
+                    continue;
+                }
+
+                if (!_viewportLoadedRegistrations.TryGetValue(registration.Photo, out var registrations))
+                {
+                    registrations = new List<int[]>();
+                    _viewportLoadedRegistrations[registration.Photo] = registrations;
+                }
+
+                registrations.Add(registrationIndices);
+            }
+
+            RebuildLoadedViewportCountsNoLock();
+            RefreshViewportIndicesNoLock();
+        }
+
+        SignalWorkers();
     }
 
     public void Dispose()
@@ -134,41 +347,43 @@ public sealed class AlbumImageListLoader : IDisposable
 
         _disposed = true;
         Clear();
-        _updates.Dispose();
+        _stoppedWorkerTasks.ContinueWith(_ => _updates.Dispose(), TaskScheduler.Default);
     }
 
-    private void StartWorkers()
+    private void StartWorkers(long generation)
     {
         if (_disposed)
         {
             return;
         }
 
+        DrainUpdateSignals();
         var lifetime = new CancellationTokenSource();
         _lifetime = lifetime;
         var heavyWorkerCount = Math.Max(1, _maximumParallelism * 3 / 4);
         var normalWorkerCount = Math.Max(0, _maximumParallelism - heavyWorkerCount - 2);
         var lightWorkerCount = Math.Min(1, _maximumParallelism - 1);
         var emergencyWorkerCount = Math.Min(1, Math.Max(0, _maximumParallelism - 2));
+        Volatile.Write(ref _workerCount, heavyWorkerCount + normalWorkerCount + lightWorkerCount + emergencyWorkerCount);
 
         for (var index = 0; index < emergencyWorkerCount; index++)
         {
-            _workerTasks.Add(Task.Run(() => RunWorkerAsync(AlbumImageWorkerKind.Emergency, lifetime.Token)));
+            _workerTasks.Add(Task.Run(() => RunWorkerAsync(AlbumImageWorkerKind.Emergency, generation, lifetime.Token)));
         }
 
         for (var index = 0; index < heavyWorkerCount; index++)
         {
-            _workerTasks.Add(Task.Run(() => RunWorkerAsync(AlbumImageWorkerKind.Heavy, lifetime.Token)));
+            _workerTasks.Add(Task.Run(() => RunWorkerAsync(AlbumImageWorkerKind.Heavy, generation, lifetime.Token)));
         }
 
         for (var index = 0; index < normalWorkerCount; index++)
         {
-            _workerTasks.Add(Task.Run(() => RunWorkerAsync(AlbumImageWorkerKind.Normal, lifetime.Token)));
+            _workerTasks.Add(Task.Run(() => RunWorkerAsync(AlbumImageWorkerKind.Normal, generation, lifetime.Token)));
         }
 
         for (var index = 0; index < lightWorkerCount; index++)
         {
-            _workerTasks.Add(Task.Run(() => RunWorkerAsync(AlbumImageWorkerKind.Light, lifetime.Token)));
+            _workerTasks.Add(Task.Run(() => RunWorkerAsync(AlbumImageWorkerKind.Light, generation, lifetime.Token)));
         }
     }
 
@@ -180,10 +395,29 @@ public sealed class AlbumImageListLoader : IDisposable
             return;
         }
 
+        var workerTasks = _workerTasks.ToArray();
         _lifetime = null;
-        lifetime.Cancel();
+        try
+        {
+            lifetime.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+
         _workerTasks.Clear();
-        lifetime.Dispose();
+        Volatile.Write(ref _workerCount, 0);
+        if (workerTasks.Length == 0)
+        {
+            lifetime.Dispose();
+        }
+        else
+        {
+            var previousStoppedWorkerTasks = _stoppedWorkerTasks;
+            var currentStoppedWorkerTasks = Task.WhenAll(workerTasks)
+                .ContinueWith(_ => lifetime.Dispose(), TaskScheduler.Default);
+            _stoppedWorkerTasks = Task.WhenAll(previousStoppedWorkerTasks, currentStoppedWorkerTasks);
+        }
     }
 
     private void SignalWorkers()
@@ -193,228 +427,654 @@ public sealed class AlbumImageListLoader : IDisposable
             return;
         }
 
-        for (var index = 0; index < Math.Max(1, _maximumParallelism); index++)
+        var wakeCount = Math.Max(1, Volatile.Read(ref _workerCount));
+        while (true)
         {
-            _updates.Release();
-        }
-    }
+            var currentPending = Math.Max(0, Volatile.Read(ref _pendingWorkerSignalCount));
+            if (currentPending >= wakeCount)
+            {
+                return;
+            }
 
-    private void AddViewportPhotoNoLock(AlbumPhotoViewModel photo)
-    {
-        if (_indexByPhoto.TryGetValue(photo, out var index))
-        {
-            _viewportIndices.Add(index);
-        }
-    }
-
-    private async Task RunWorkerAsync(AlbumImageWorkerKind kind, CancellationToken cancellationToken)
-    {
-        while (!cancellationToken.IsCancellationRequested)
-        {
-            var didWork = await TryRunNextWorkItemAsync(kind, cancellationToken);
-            if (didWork)
+            var additionalSignals = wakeCount - currentPending;
+            if (Interlocked.CompareExchange(ref _pendingWorkerSignalCount, wakeCount, currentPending) != currentPending)
             {
                 continue;
             }
 
+            for (var index = 0; index < additionalSignals; index++)
+            {
+                _updates.Release();
+            }
+
+            return;
+        }
+    }
+
+    private void DrainUpdateSignals()
+    {
+        Interlocked.Exchange(ref _pendingWorkerSignalCount, 0);
+        while (_updates.Wait(0))
+        {
+        }
+    }
+
+    private int[] GetLoadedViewportRegistrationIndicesNoLock(AlbumPhotoViewModel photo)
+    {
+        List<int> indices = new();
+        if (_indexByPhoto.TryGetValue(photo, out var index))
+        {
+            indices.Add(index);
+        }
+
+        if (photo.DuplicateStackPhoto is not null &&
+            !ReferenceEquals(photo.DuplicateStackPhoto, photo) &&
+            _indexByPhoto.TryGetValue(photo.DuplicateStackPhoto, out var duplicateIndex))
+        {
+            indices.Add(duplicateIndex);
+        }
+
+        return indices.Distinct().ToArray();
+    }
+
+    private void AddLoadedViewportIndexNoLock(int index)
+    {
+        _viewportLoadedIndexCounts.TryGetValue(index, out var count);
+        _viewportLoadedIndexCounts[index] = count + 1;
+        if (!_orderedViewportIndices.Contains(index))
+        {
+            _orderedViewportIndices.Add(index);
+        }
+
+        RefreshViewportIndicesNoLock();
+    }
+
+    private void ClearViewportNoLock()
+    {
+        _viewportIndices = new HashSet<int>();
+        _viewportSnapshotIndexCounts = new Dictionary<int, int>();
+        _viewportLoadedIndexCounts = new Dictionary<int, int>();
+        _viewportLoadedRegistrations = new Dictionary<AlbumPhotoViewModel, List<int[]>>();
+    }
+
+    private void RebuildLoadedViewportCountsNoLock()
+    {
+        _viewportLoadedIndexCounts = new Dictionary<int, int>();
+        foreach (var index in _viewportLoadedRegistrations.Values.SelectMany(registrations => registrations).SelectMany(indices => indices))
+        {
+            _viewportLoadedIndexCounts.TryGetValue(index, out var count);
+            _viewportLoadedIndexCounts[index] = count + 1;
+        }
+    }
+
+    private void RefreshViewportIndicesNoLock()
+    {
+        foreach (var index in _viewportLoadedIndexCounts.Keys)
+        {
+            if (index >= 0 && index < _photos.Count && !_orderedViewportIndices.Contains(index))
+            {
+                _orderedViewportIndices.Add(index);
+            }
+        }
+
+        _viewportIndices = _viewportSnapshotIndexCounts.Keys
+            .Concat(_viewportLoadedIndexCounts.Keys)
+            .ToHashSet();
+    }
+
+    private IReadOnlyList<int> RemoveLoadedViewportPhotoNoLock(AlbumPhotoViewModel photo)
+    {
+        if (!_viewportLoadedRegistrations.TryGetValue(photo, out var registrations) ||
+            registrations.Count == 0)
+        {
+            return [];
+        }
+
+        var registration = registrations[^1];
+        registrations.RemoveAt(registrations.Count - 1);
+        if (registrations.Count == 0)
+        {
+            _viewportLoadedRegistrations.Remove(photo);
+        }
+
+        foreach (var index in registration)
+        {
+            if (!_viewportLoadedIndexCounts.TryGetValue(index, out var loadedCount))
+            {
+                continue;
+            }
+
+            if (loadedCount > 1)
+            {
+                _viewportLoadedIndexCounts[index] = loadedCount - 1;
+            }
+            else
+            {
+                _viewportLoadedIndexCounts.Remove(index);
+                if (!_viewportSnapshotIndexCounts.ContainsKey(index))
+                {
+                    _orderedViewportIndices.Remove(index);
+                }
+            }
+        }
+
+        RefreshViewportIndicesNoLock();
+        return registration;
+    }
+
+    private bool RemoveViewportPhotoNoLock(AlbumPhotoViewModel photo)
+    {
+        if (RemoveLoadedViewportPhotoNoLock(photo).Count > 0)
+        {
+            return true;
+        }
+
+        if (!_indexByPhoto.TryGetValue(photo, out var index))
+        {
+            return false;
+        }
+
+        if (_viewportSnapshotIndexCounts.TryGetValue(index, out var snapshotCount))
+        {
+            if (snapshotCount > 1)
+            {
+                _viewportSnapshotIndexCounts[index] = snapshotCount - 1;
+                RefreshViewportIndicesNoLock();
+                return false;
+            }
+
+            _viewportSnapshotIndexCounts.Remove(index);
+        }
+        else
+        {
+            return false;
+        }
+
+        if (!_viewportSnapshotIndexCounts.ContainsKey(index) &&
+            !_viewportLoadedIndexCounts.ContainsKey(index))
+        {
+            _orderedViewportIndices.Remove(index);
+        }
+
+        RefreshViewportIndicesNoLock();
+        return false;
+    }
+
+    private void AddPriorityPhotoNoLock(AlbumPhotoViewModel photo)
+    {
+        if (_indexByPhoto.TryGetValue(photo, out var index))
+        {
+            if (_priorityIndices.Add(index))
+            {
+                _orderedPriorityIndices.Add(index);
+            }
+        }
+    }
+
+    private bool IsCurrentGeneration(long generation)
+    {
+        return Volatile.Read(ref _generation) == generation;
+    }
+
+    private async Task RunWorkerAsync(AlbumImageWorkerKind kind, long generation, CancellationToken cancellationToken)
+    {
+        while (!cancellationToken.IsCancellationRequested && IsCurrentGeneration(generation))
+        {
             try
             {
+                var didWork = await TryRunNextWorkItemAsync(kind, generation, cancellationToken);
+                if (didWork)
+                {
+                    continue;
+                }
+
                 await _updates.WaitAsync(cancellationToken);
+                if (Interlocked.Decrement(ref _pendingWorkerSignalCount) < 0)
+                {
+                    Interlocked.Exchange(ref _pendingWorkerSignalCount, 0);
+                }
             }
             catch (OperationCanceledException)
             {
                 return;
             }
+            catch (ObjectDisposedException)
+            {
+                return;
+            }
+            catch
+            {
+                SignalWorkers();
+                try
+                {
+                    await Task.Delay(TimeSpan.FromMilliseconds(250), cancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    return;
+                }
+            }
         }
     }
 
-    private async Task<bool> TryRunNextWorkItemAsync(AlbumImageWorkerKind kind, CancellationToken cancellationToken)
+    private async Task<bool> TryRunNextWorkItemAsync(AlbumImageWorkerKind kind, long generation, CancellationToken cancellationToken)
     {
+        if (cancellationToken.IsCancellationRequested || !IsCurrentGeneration(generation))
+        {
+            return false;
+        }
+
         return kind switch
         {
-            AlbumImageWorkerKind.Emergency => await TryRunEmergencyWorkAsync(cancellationToken),
-            AlbumImageWorkerKind.Heavy => await TryRunHeavyWorkAsync(cancellationToken),
-            AlbumImageWorkerKind.Normal => await TryRunNormalWorkAsync(cancellationToken),
-            AlbumImageWorkerKind.Light => await TryRunLightWorkAsync(cancellationToken),
+            AlbumImageWorkerKind.Emergency => await TryRunEmergencyWorkAsync(generation, cancellationToken),
+            AlbumImageWorkerKind.Heavy => await TryRunHeavyWorkAsync(generation, cancellationToken),
+            AlbumImageWorkerKind.Normal => await TryRunNormalWorkAsync(generation, cancellationToken),
+            AlbumImageWorkerKind.Light => await TryRunLightWorkAsync(generation, cancellationToken),
             _ => false
         };
     }
 
-    private async Task<bool> TryRunEmergencyWorkAsync(CancellationToken cancellationToken)
+    private async Task<bool> TryRunEmergencyWorkAsync(long generation, CancellationToken cancellationToken)
     {
-        if (TryTakeVisibleFastWork(out var visibleFastPhoto))
+        if (!IsCurrentGeneration(generation))
         {
-            await ExecuteThumbnailWorkAsync(visibleFastPhoto, AlbumImageWork.FastThumbnail, isVisible: true, cancellationToken);
+            return false;
+        }
+
+        if (TryTakeVisibleFastWork(generation, out var visibleFastPhoto, out var visibleFastWasAlreadyLoaded, out var visibleFastWorkToken))
+        {
+            await ExecuteThumbnailWorkAsync(
+                visibleFastPhoto,
+                AlbumImageWork.FastThumbnail,
+                isVisible: true,
+                ownsOriginalLoad: false,
+                visibleFastWasAlreadyLoaded,
+                detailedThumbnailWasAlreadyLoaded: false,
+                visibleFastWorkToken,
+                generation,
+                cancellationToken);
             return true;
         }
 
         return false;
     }
 
-    private async Task<bool> TryRunHeavyWorkAsync(CancellationToken cancellationToken)
+    private async Task<bool> TryRunHeavyWorkAsync(long generation, CancellationToken cancellationToken)
     {
-        if (TryTakeVisibleThumbnailWork(preferDetailed: true, out var visiblePhoto, out var visibleWork))
+        if (!IsCurrentGeneration(generation))
         {
-            await ExecuteThumbnailWorkAsync(visiblePhoto, visibleWork, isVisible: true, cancellationToken);
+            return false;
+        }
+
+        if (TryTakeVisibleThumbnailWork(
+            generation,
+            preferDetailed: true,
+            out var visiblePhoto,
+            out var visibleWork,
+            out var visibleOwnsOriginalLoad,
+            out var visibleThumbnailFastWasAlreadyLoaded,
+            out var visibleThumbnailDetailedWasAlreadyLoaded,
+            out var visibleThumbnailWorkToken))
+        {
+            await ExecuteThumbnailWorkAsync(
+                visiblePhoto,
+                visibleWork,
+                isVisible: true,
+                visibleOwnsOriginalLoad,
+                visibleThumbnailFastWasAlreadyLoaded,
+                visibleThumbnailDetailedWasAlreadyLoaded,
+                visibleThumbnailWorkToken,
+                generation,
+                cancellationToken);
             return true;
         }
 
         if (_imageCache.HasCacheRoom(GetAlbumId(), AlbumImageCacheKind.DetailedThumbnail) &&
-            TryTakeNearestWork(AlbumImageWork.DetailedThumbnail, out var detailedPhoto))
+            TryTakeNearestWork(generation, AlbumImageWork.DetailedThumbnail, out var detailedPhoto, out var detailedOwnsOriginalLoad, out var detailedWorkToken))
         {
-            await ExecuteThumbnailWorkAsync(detailedPhoto, AlbumImageWork.DetailedThumbnail, isVisible: false, cancellationToken);
+            await ExecuteThumbnailWorkAsync(detailedPhoto, AlbumImageWork.DetailedThumbnail, isVisible: false, detailedOwnsOriginalLoad, fastThumbnailWasAlreadyLoaded: false, detailedThumbnailWasAlreadyLoaded: false, detailedWorkToken, generation, cancellationToken);
             return true;
         }
 
         if (_imageCache.HasCacheRoom(GetAlbumId(), AlbumImageCacheKind.FastThumbnail) &&
-            TryTakeNearestWork(AlbumImageWork.FastThumbnail, out var fastPhoto))
+            TryTakeNearestWork(generation, AlbumImageWork.FastThumbnail, out var fastPhoto, out _, out var fastWorkToken))
         {
-            await ExecuteThumbnailWorkAsync(fastPhoto, AlbumImageWork.FastThumbnail, isVisible: false, cancellationToken);
+            await ExecuteThumbnailWorkAsync(fastPhoto, AlbumImageWork.FastThumbnail, isVisible: false, ownsOriginalLoad: false, fastThumbnailWasAlreadyLoaded: false, detailedThumbnailWasAlreadyLoaded: false, fastWorkToken, generation, cancellationToken);
             return true;
         }
 
         if (_imageCache.HasCacheRoom(GetAlbumId(), AlbumImageCacheKind.OriginalImage) &&
-            TryTakeNearestWork(AlbumImageWork.OriginalImage, out var originalPhoto))
+            TryTakeNearestWork(generation, AlbumImageWork.OriginalImage, out var originalPhoto, out _, out var originalWorkToken))
         {
-            await ExecuteOriginalWarmupAsync(originalPhoto, cancellationToken);
+            await ExecuteOriginalWarmupAsync(originalPhoto, originalWorkToken, generation, cancellationToken);
             return true;
         }
 
         return false;
     }
 
-    private async Task<bool> TryRunNormalWorkAsync(CancellationToken cancellationToken)
+    private async Task<bool> TryRunNormalWorkAsync(long generation, CancellationToken cancellationToken)
     {
-        if (TryTakeVisibleFastWork(out var visibleFastPhoto))
+        if (!IsCurrentGeneration(generation))
         {
-            await ExecuteThumbnailWorkAsync(visibleFastPhoto, AlbumImageWork.FastThumbnail, isVisible: true, cancellationToken);
+            return false;
+        }
+
+        if (TryTakeVisibleOrPriorityFastWork(generation, out var visibleFastPhoto, out var visibleFastWasAlreadyLoaded, out var visibleFastWorkToken))
+        {
+            await ExecuteThumbnailWorkAsync(
+                visibleFastPhoto,
+                AlbumImageWork.FastThumbnail,
+                isVisible: true,
+                ownsOriginalLoad: false,
+                visibleFastWasAlreadyLoaded,
+                detailedThumbnailWasAlreadyLoaded: false,
+                visibleFastWorkToken,
+                generation,
+                cancellationToken);
             return true;
         }
 
         if (_imageCache.HasCacheRoom(GetAlbumId(), AlbumImageCacheKind.FastThumbnail) &&
-            TryTakeNearestWork(AlbumImageWork.FastThumbnail, out var fastPhoto))
+            TryTakeNearestWork(generation, AlbumImageWork.FastThumbnail, out var fastPhoto, out _, out var fastWorkToken))
         {
-            await ExecuteThumbnailWorkAsync(fastPhoto, AlbumImageWork.FastThumbnail, isVisible: false, cancellationToken);
+            await ExecuteThumbnailWorkAsync(fastPhoto, AlbumImageWork.FastThumbnail, isVisible: false, ownsOriginalLoad: false, fastThumbnailWasAlreadyLoaded: false, detailedThumbnailWasAlreadyLoaded: false, fastWorkToken, generation, cancellationToken);
             return true;
         }
 
-        if (TryTakeVisibleThumbnailWork(preferDetailed: true, out var visiblePhoto, out var visibleWork))
+        if (TryTakeVisibleThumbnailWork(
+            generation,
+            preferDetailed: true,
+            out var visiblePhoto,
+            out var visibleWork,
+            out var visibleOwnsOriginalLoad,
+            out var visibleThumbnailFastWasAlreadyLoaded,
+            out var visibleThumbnailDetailedWasAlreadyLoaded,
+            out var visibleThumbnailWorkToken))
         {
-            await ExecuteThumbnailWorkAsync(visiblePhoto, visibleWork, isVisible: true, cancellationToken);
+            await ExecuteThumbnailWorkAsync(
+                visiblePhoto,
+                visibleWork,
+                isVisible: true,
+                visibleOwnsOriginalLoad,
+                visibleThumbnailFastWasAlreadyLoaded,
+                visibleThumbnailDetailedWasAlreadyLoaded,
+                visibleThumbnailWorkToken,
+                generation,
+                cancellationToken);
             return true;
         }
 
         if (_imageCache.HasCacheRoom(GetAlbumId(), AlbumImageCacheKind.DetailedThumbnail) &&
-            TryTakeNearestWork(AlbumImageWork.DetailedThumbnail, out var detailedPhoto))
+            TryTakeNearestWork(generation, AlbumImageWork.DetailedThumbnail, out var detailedPhoto, out var detailedOwnsOriginalLoad, out var detailedWorkToken))
         {
-            await ExecuteThumbnailWorkAsync(detailedPhoto, AlbumImageWork.DetailedThumbnail, isVisible: false, cancellationToken);
+            await ExecuteThumbnailWorkAsync(detailedPhoto, AlbumImageWork.DetailedThumbnail, isVisible: false, detailedOwnsOriginalLoad, fastThumbnailWasAlreadyLoaded: false, detailedThumbnailWasAlreadyLoaded: false, detailedWorkToken, generation, cancellationToken);
             return true;
         }
 
         if (_imageCache.HasCacheRoom(GetAlbumId(), AlbumImageCacheKind.OriginalImage) &&
-            TryTakeNearestWork(AlbumImageWork.OriginalImage, out var originalPhoto))
+            TryTakeNearestWork(generation, AlbumImageWork.OriginalImage, out var originalPhoto, out _, out var originalWorkToken))
         {
-            await ExecuteOriginalWarmupAsync(originalPhoto, cancellationToken);
+            await ExecuteOriginalWarmupAsync(originalPhoto, originalWorkToken, generation, cancellationToken);
             return true;
         }
 
         return false;
     }
 
-    private async Task<bool> TryRunLightWorkAsync(CancellationToken cancellationToken)
+    private async Task<bool> TryRunLightWorkAsync(long generation, CancellationToken cancellationToken)
     {
-        if (TryTakeVisibleFastWork(out var visibleFastPhoto))
+        if (!IsCurrentGeneration(generation))
         {
-            await ExecuteThumbnailWorkAsync(visibleFastPhoto, AlbumImageWork.FastThumbnail, isVisible: true, cancellationToken);
+            return false;
+        }
+
+        if (TryTakeVisibleOrPriorityFastWork(generation, out var visibleFastPhoto, out var visibleFastWasAlreadyLoaded, out var visibleFastWorkToken))
+        {
+            await ExecuteThumbnailWorkAsync(
+                visibleFastPhoto,
+                AlbumImageWork.FastThumbnail,
+                isVisible: true,
+                ownsOriginalLoad: false,
+                visibleFastWasAlreadyLoaded,
+                detailedThumbnailWasAlreadyLoaded: false,
+                visibleFastWorkToken,
+                generation,
+                cancellationToken);
             return true;
         }
 
         if (_imageCache.HasCacheRoom(GetAlbumId(), AlbumImageCacheKind.FastThumbnail) &&
-            TryTakeNearestWork(AlbumImageWork.FastThumbnail, out var fastPhoto))
+            TryTakeNearestWork(generation, AlbumImageWork.FastThumbnail, out var fastPhoto, out _, out var fastWorkToken))
         {
-            await ExecuteThumbnailWorkAsync(fastPhoto, AlbumImageWork.FastThumbnail, isVisible: false, cancellationToken);
+            await ExecuteThumbnailWorkAsync(fastPhoto, AlbumImageWork.FastThumbnail, isVisible: false, ownsOriginalLoad: false, fastThumbnailWasAlreadyLoaded: false, detailedThumbnailWasAlreadyLoaded: false, fastWorkToken, generation, cancellationToken);
             return true;
         }
 
         return false;
     }
 
-    private bool TryTakeVisibleFastWork(out AlbumPhotoViewModel photo)
+    private bool TryTakeVisibleFastWork(long generation, out AlbumPhotoViewModel photo, out bool fastThumbnailWasAlreadyLoaded, out int workToken)
     {
-        foreach (var candidate in GetViewportPhotos())
+        return TryTakeFastWorkFromPhotos(
+            GetListViewportPhotos(),
+            generation,
+            requireListViewport: true,
+            out photo,
+            out fastThumbnailWasAlreadyLoaded,
+            out workToken);
+    }
+
+    private bool TryTakeVisibleOrPriorityFastWork(long generation, out AlbumPhotoViewModel photo, out bool fastThumbnailWasAlreadyLoaded, out int workToken)
+    {
+        return TryTakeFastWorkFromPhotos(
+            GetViewportPhotos(),
+            generation,
+            requireListViewport: false,
+            out photo,
+            out fastThumbnailWasAlreadyLoaded,
+            out workToken);
+    }
+
+    private bool TryTakeFastWorkFromPhotos(
+        IReadOnlyList<AlbumPhotoViewModel> photos,
+        long generation,
+        bool requireListViewport,
+        out AlbumPhotoViewModel photo,
+        out bool fastThumbnailWasAlreadyLoaded,
+        out int workToken)
+    {
+        foreach (var candidate in photos)
         {
-            if (candidate.Image is null &&
-                candidate.TryBeginFastThumbnailControlLoad())
+            if (IsCurrentGeneration(generation) &&
+                candidate.Image is null &&
+                !IsVisibleFailureSkipped(candidate, AlbumImageWork.FastThumbnail) &&
+                candidate.TryBeginFastThumbnailControlLoad(out fastThumbnailWasAlreadyLoaded, out workToken))
             {
+                if (!IsCurrentGeneration(generation))
+                {
+                    candidate.CompleteFastThumbnailLoad(fastThumbnailWasAlreadyLoaded, workToken);
+                    continue;
+                }
+
+                var isStillEligible = requireListViewport
+                    ? IsPhotoInListViewport(candidate)
+                    : IsPhotoInViewport(candidate);
+                if (!isStillEligible)
+                {
+                    candidate.CompleteFastThumbnailLoad(fastThumbnailWasAlreadyLoaded, workToken);
+                    continue;
+                }
+
                 photo = candidate;
                 return true;
             }
         }
 
         photo = null!;
+        fastThumbnailWasAlreadyLoaded = false;
+        workToken = 0;
         return false;
     }
 
-    private bool TryTakeVisibleThumbnailWork(bool preferDetailed, out AlbumPhotoViewModel photo, out AlbumImageWork work)
+    private bool TryTakeVisibleThumbnailWork(
+        long generation,
+        bool preferDetailed,
+        out AlbumPhotoViewModel photo,
+        out AlbumImageWork work,
+        out bool ownsOriginalLoad,
+        out bool fastThumbnailWasAlreadyLoaded,
+        out bool detailedThumbnailWasAlreadyLoaded,
+        out int workToken)
     {
         foreach (var candidate in GetViewportPhotos())
         {
-            var fastStatus = candidate.FastThumbnailStatus;
-            var detailedStatus = candidate.DetailedThumbnailStatus;
-            if (candidate.Image is null && fastStatus is AlbumImageItemStatus.Unloaded or AlbumImageItemStatus.Loaded &&
-                candidate.TryBeginFastThumbnailControlLoad())
+            var allowFastThumbnail = !IsVisibleFailureSkipped(candidate, AlbumImageWork.FastThumbnail);
+            if (IsCurrentGeneration(generation) && candidate.TryBeginVisibleThumbnailLoad(
+                candidate.Image is null,
+                preferDetailed,
+                candidate.IsFullImageLoaded,
+                out var loadDetailed,
+                out ownsOriginalLoad,
+                out fastThumbnailWasAlreadyLoaded,
+                out detailedThumbnailWasAlreadyLoaded,
+                out workToken,
+                allowFastThumbnail))
             {
-                photo = candidate;
-                work = AlbumImageWork.FastThumbnail;
-                return true;
-            }
+                var selectedWork = loadDetailed ? AlbumImageWork.DetailedThumbnail : AlbumImageWork.FastThumbnail;
+                if (IsVisibleFailureSkipped(candidate, selectedWork))
+                {
+                    if (loadDetailed)
+                    {
+                        candidate.CompleteDetailedThumbnailLoad(
+                            loaded: detailedThumbnailWasAlreadyLoaded,
+                            originalLoaded: false,
+                            ownsOriginalLoad,
+                            workToken);
+                    }
+                    else
+                    {
+                        candidate.CompleteFastThumbnailLoad(fastThumbnailWasAlreadyLoaded, workToken);
+                    }
 
-            if (preferDetailed &&
-                !candidate.IsFullImageLoaded &&
-                detailedStatus is AlbumImageItemStatus.Unloaded or AlbumImageItemStatus.Loaded &&
-                candidate.TryBeginDetailedThumbnailControlLoad(out _))
-            {
+                    continue;
+                }
+
+                if (!IsCurrentGeneration(generation))
+                {
+                    if (loadDetailed)
+                    {
+                        candidate.CompleteDetailedThumbnailLoad(
+                            loaded: detailedThumbnailWasAlreadyLoaded,
+                            originalLoaded: false,
+                            ownsOriginalLoad,
+                            workToken);
+                    }
+                    else
+                    {
+                        candidate.CompleteFastThumbnailLoad(fastThumbnailWasAlreadyLoaded, workToken);
+                    }
+
+                    continue;
+                }
+
+                if (!IsPhotoInViewport(candidate))
+                {
+                    if (loadDetailed)
+                    {
+                        candidate.CompleteDetailedThumbnailLoad(
+                            loaded: detailedThumbnailWasAlreadyLoaded,
+                            originalLoaded: false,
+                            ownsOriginalLoad,
+                            workToken);
+                    }
+                    else
+                    {
+                        candidate.CompleteFastThumbnailLoad(fastThumbnailWasAlreadyLoaded, workToken);
+                    }
+
+                    continue;
+                }
+
                 photo = candidate;
-                work = AlbumImageWork.DetailedThumbnail;
+                work = selectedWork;
                 return true;
             }
         }
 
         photo = null!;
         work = AlbumImageWork.FastThumbnail;
+        ownsOriginalLoad = false;
+        fastThumbnailWasAlreadyLoaded = false;
+        detailedThumbnailWasAlreadyLoaded = false;
+        workToken = 0;
         return false;
     }
 
-    private bool TryTakeNearestWork(AlbumImageWork work, out AlbumPhotoViewModel photo)
+    private bool TryTakeNearestWork(long generation, AlbumImageWork work, out AlbumPhotoViewModel photo, out bool ownsOriginalLoad, out int workToken)
     {
+        ownsOriginalLoad = false;
+        workToken = 0;
         foreach (var candidate in GetPhotosByViewportDistance())
         {
             if (work == AlbumImageWork.FastThumbnail &&
                 candidate.FastThumbnailStatus == AlbumImageItemStatus.Unloaded &&
-                candidate.TryBeginFastThumbnailLoad())
+                IsCurrentGeneration(generation) &&
+                !IsWarmupSkipped(candidate, work) &&
+                !IsVisibleFailureSkipped(candidate, work) &&
+                candidate.TryBeginFastThumbnailLoad(out workToken))
             {
+                if (!IsCurrentGeneration(generation))
+                {
+                    candidate.CompleteFastThumbnailLoad(loaded: false, workToken);
+                    continue;
+                }
+
                 photo = candidate;
                 return true;
             }
 
             if (work == AlbumImageWork.DetailedThumbnail &&
                 candidate.DetailedThumbnailStatus == AlbumImageItemStatus.Unloaded &&
-                candidate.TryBeginDetailedThumbnailLoad(out _))
+                IsCurrentGeneration(generation) &&
+                !IsWarmupSkipped(candidate, work) &&
+                !IsVisibleFailureSkipped(candidate, work) &&
+                candidate.TryBeginDetailedThumbnailLoad(out ownsOriginalLoad, out workToken))
             {
+                if (!IsCurrentGeneration(generation))
+                {
+                    candidate.CompleteDetailedThumbnailLoad(
+                        loaded: false,
+                        originalLoaded: false,
+                        ownsOriginalLoad,
+                        workToken);
+                    continue;
+                }
+
                 photo = candidate;
                 return true;
             }
 
             if (work == AlbumImageWork.OriginalImage &&
                 candidate.OriginalImageStatus == AlbumImageItemStatus.Unloaded &&
-                candidate.TryBeginOriginalImageLoad())
+                IsCurrentGeneration(generation) &&
+                !IsWarmupSkipped(candidate, work) &&
+                candidate.TryBeginOriginalImageLoad(out workToken))
             {
+                if (!IsCurrentGeneration(generation))
+                {
+                    candidate.CompleteOriginalImageLoad(loaded: false, workToken);
+                    continue;
+                }
+
                 photo = candidate;
                 return true;
             }
         }
 
         photo = null!;
+        ownsOriginalLoad = false;
+        workToken = 0;
         return false;
     }
 
@@ -422,47 +1082,120 @@ public sealed class AlbumImageListLoader : IDisposable
         AlbumPhotoViewModel photo,
         AlbumImageWork work,
         bool isVisible,
+        bool ownsOriginalLoad,
+        bool fastThumbnailWasAlreadyLoaded,
+        bool detailedThumbnailWasAlreadyLoaded,
+        int workToken,
+        long generation,
         CancellationToken cancellationToken)
     {
-        var ownsOriginalLoad = false;
         try
         {
             if (isVisible)
             {
-                await Dispatcher.UIThread.InvokeAsync(() => photo.IsImageLoading = true);
+                await Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    if (IsCurrentGeneration(generation) && IsPhotoInViewport(photo))
+                    {
+                        photo.IsImageLoading = true;
+                    }
+                });
             }
 
             if (work == AlbumImageWork.FastThumbnail)
             {
-                if (isVisible && await TryLoadCachedDetailedThumbnailForFastWorkAsync(photo, cancellationToken))
+                if (isVisible && await TryLoadCachedDetailedThumbnailForFastWorkAsync(
+                    photo,
+                    fastThumbnailWasAlreadyLoaded,
+                    workToken,
+                    generation,
+                    cancellationToken))
                 {
-                    photo.CompleteFastThumbnailLoad(loaded: false);
                     return;
                 }
 
-                var bitmap = await _imageCache.LoadFastThumbnailBitmapAsync(
+                if (!isVisible)
+                {
+                    var fastThumbnailLoaded = await _imageCache.WarmFastThumbnailAsync(
+                        photo.AlbumId,
+                        photo.PhotoId,
+                        photo.ThumbnailDownloadUrl,
+                        _httpClient,
+                        AlbumImageCacheReadMode.Lazy,
+                        cancellationToken);
+                    if (IsCurrentGeneration(generation))
+                    {
+                        if (!fastThumbnailLoaded)
+                        {
+                            MarkWarmupSkipped(photo, AlbumImageWork.FastThumbnail);
+                        }
+                    }
+
+                    photo.CompleteFastThumbnailLoad(fastThumbnailLoaded, workToken);
+                    return;
+                }
+
+                var fastResult = await _imageCache.LoadFastThumbnailBitmapAsync(
                     photo.AlbumId,
                     photo.PhotoId,
                     photo.ThumbnailDownloadUrl,
                     _httpClient,
                     isVisible ? AlbumImageCacheReadMode.Eager : AlbumImageCacheReadMode.Lazy,
                     cancellationToken);
-                photo.CompleteFastThumbnailLoad(loaded: true);
+                var boundToControl = false;
                 if (isVisible)
                 {
-                    await Dispatcher.UIThread.InvokeAsync(() =>
-                        photo.SetLoadedImage(bitmap, isDetailedThumbnail: false, "Loading detailed image"));
+                    boundToControl = await SetLoadedImageIfStillVisibleAsync(
+                        photo,
+                        fastResult.Bitmap,
+                        isDetailedThumbnail: false,
+                        "Loading detailed image",
+                        workToken,
+                        generation);
                 }
                 else
                 {
-                    bitmap.Dispose();
+                    fastResult.Bitmap.Dispose();
                 }
+
+                photo.CompleteFastThumbnailLoad(boundToControl || fastResult.FastThumbnailLoaded, workToken);
 
                 return;
             }
 
-            ownsOriginalLoad = photo.OriginalImageStatus == AlbumImageItemStatus.Loading;
-            var detailedBitmap = await _imageCache.LoadDetailedThumbnailBitmapAsync(
+            if (!isVisible)
+            {
+                var warmResult = await _imageCache.WarmDetailedThumbnailAsync(
+                    photo.AlbumId,
+                    photo.PhotoId,
+                    $"{photo.PhotoId}-full{photo.FileExtension}",
+                    photo.DownloadUrl,
+                    _httpClient,
+                    AlbumImageCacheReadMode.Lazy,
+                    AlbumImageCacheReadMode.Lazy,
+                    cancellationToken);
+                if (IsCurrentGeneration(generation))
+                {
+                    if (!warmResult.DetailedThumbnailLoaded)
+                    {
+                        MarkWarmupSkipped(photo, AlbumImageWork.DetailedThumbnail);
+                    }
+
+                    if (ownsOriginalLoad && !warmResult.OriginalImageLoaded)
+                    {
+                        MarkWarmupSkipped(photo, AlbumImageWork.OriginalImage);
+                    }
+                }
+
+                photo.CompleteDetailedThumbnailLoad(
+                    loaded: warmResult.DetailedThumbnailLoaded,
+                    originalLoaded: warmResult.OriginalImageLoaded,
+                    ownsOriginalLoad,
+                    workToken);
+                return;
+            }
+
+            var detailedResult = await _imageCache.LoadDetailedThumbnailBitmapAsync(
                 photo.AlbumId,
                 photo.PhotoId,
                 $"{photo.PhotoId}-full{photo.FileExtension}",
@@ -471,50 +1204,133 @@ public sealed class AlbumImageListLoader : IDisposable
                 isVisible ? AlbumImageCacheReadMode.Eager : AlbumImageCacheReadMode.Lazy,
                 AlbumImageCacheReadMode.Lazy,
                 cancellationToken);
-            photo.CompleteDetailedThumbnailLoad(loaded: true, originalLoaded: true, ownsOriginalLoad);
             if (isVisible)
             {
-                await Dispatcher.UIThread.InvokeAsync(() =>
-                    photo.SetLoadedImage(detailedBitmap, isDetailedThumbnail: true, "Detailed image loaded"));
+                var boundToControl = await SetLoadedImageIfStillVisibleAsync(
+                    photo,
+                    detailedResult.Bitmap,
+                    isDetailedThumbnail: true,
+                    "Detailed image loaded",
+                    workToken,
+                    generation);
+                photo.CompleteDetailedThumbnailLoad(
+                    loaded: boundToControl || detailedResult.DetailedThumbnailLoaded,
+                    detailedResult.OriginalImageLoaded,
+                    ownsOriginalLoad,
+                    workToken);
             }
             else
             {
-                detailedBitmap.Dispose();
+                detailedResult.Bitmap.Dispose();
+                photo.CompleteDetailedThumbnailLoad(
+                    loaded: detailedResult.DetailedThumbnailLoaded,
+                    detailedResult.OriginalImageLoaded,
+                    ownsOriginalLoad,
+                    workToken);
             }
         }
         catch (OperationCanceledException)
         {
-            ResetWorkStatus(photo, work, ownsOriginalLoad);
+            ResetWorkStatus(photo, work, ownsOriginalLoad, fastThumbnailWasAlreadyLoaded, detailedThumbnailWasAlreadyLoaded, workToken);
+        }
+        catch (AlbumImageCacheEntryInvalidException ex)
+        {
+            if (IsCurrentGeneration(generation))
+            {
+                photo.InvalidateImageCacheStatus(ex.Kind);
+                if (isVisible)
+                {
+                    MarkVisibleFailureSkippedIfCurrentVisible(photo, work, workToken);
+                }
+
+                ResetWorkStatus(
+                    photo,
+                    work,
+                    ownsOriginalLoad,
+                    ex.Kind != AlbumImageCacheKind.FastThumbnail && fastThumbnailWasAlreadyLoaded,
+                    ex.Kind != AlbumImageCacheKind.DetailedThumbnail && detailedThumbnailWasAlreadyLoaded,
+                    workToken);
+            }
+            else
+            {
+                ResetWorkStatus(photo, work, ownsOriginalLoad, fastThumbnailWasAlreadyLoaded, detailedThumbnailWasAlreadyLoaded, workToken);
+            }
+
+            if (isVisible)
+            {
+                await Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    if (IsCurrentGeneration(generation) && photo.IsImageWorkCurrent(workToken) && IsPhotoInViewport(photo))
+                    {
+                        photo.Status = ex.InnerException?.Message ?? ex.Message;
+                    }
+                });
+            }
         }
         catch (Exception ex)
         {
-            ResetWorkStatus(photo, work, ownsOriginalLoad);
+            if (IsCurrentGeneration(generation))
+            {
+                if (isVisible)
+                {
+                    MarkVisibleFailureSkippedIfCurrentVisible(photo, work, workToken);
+                }
+                else
+                {
+                    MarkWarmupSkipped(photo, work);
+                    if (work == AlbumImageWork.DetailedThumbnail && ownsOriginalLoad)
+                    {
+                        MarkWarmupSkipped(photo, AlbumImageWork.OriginalImage);
+                    }
+                }
+            }
+
+            ResetWorkStatus(photo, work, ownsOriginalLoad, fastThumbnailWasAlreadyLoaded, detailedThumbnailWasAlreadyLoaded, workToken);
+
             if (isVisible)
             {
-                await Dispatcher.UIThread.InvokeAsync(() => photo.Status = ex.Message);
+                await Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    if (IsCurrentGeneration(generation) && photo.IsImageWorkCurrent(workToken) && IsPhotoInViewport(photo))
+                    {
+                        photo.Status = ex.Message;
+                    }
+                });
             }
         }
         finally
         {
             if (isVisible)
             {
-                await Dispatcher.UIThread.InvokeAsync(() => photo.IsImageLoading = false);
+                await Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    if (IsCurrentGeneration(generation) && !photo.IsImageLoadBusyAtomic())
+                    {
+                        photo.IsImageLoading = false;
+                    }
+                });
             }
+
+            SignalWorkers();
         }
     }
 
     private async Task<bool> TryLoadCachedDetailedThumbnailForFastWorkAsync(
         AlbumPhotoViewModel photo,
+        bool fastThumbnailWasAlreadyLoaded,
+        int workToken,
+        long generation,
         CancellationToken cancellationToken)
     {
-        if (photo.DetailedThumbnailStatus != AlbumImageItemStatus.Unloaded)
+        var detailedThumbnailWasLoaded = photo.DetailedThumbnailStatus == AlbumImageItemStatus.Loaded;
+        if (photo.DetailedThumbnailStatus is not (AlbumImageItemStatus.Unloaded or AlbumImageItemStatus.Loaded))
         {
             return false;
         }
 
         try
         {
-            var bitmap = await _imageCache.LoadDetailedThumbnailBitmapAsync(
+            var result = await _imageCache.LoadDetailedThumbnailBitmapAsync(
                 photo.AlbumId,
                 photo.PhotoId,
                 $"{photo.PhotoId}-full{photo.FileExtension}",
@@ -524,59 +1340,229 @@ public sealed class AlbumImageListLoader : IDisposable
                 AlbumImageCacheReadMode.Lookup,
                 cancellationToken);
 
-            photo.CompleteDetailedThumbnailLoad(loaded: true, originalLoaded: false, ownsOriginalLoad: false);
-            await Dispatcher.UIThread.InvokeAsync(() =>
-                photo.SetLoadedImage(bitmap, isDetailedThumbnail: true, "Detailed image loaded"));
+            var boundToControl = await SetLoadedImageIfStillVisibleAsync(
+                photo,
+                result.Bitmap,
+                isDetailedThumbnail: true,
+                "Detailed image loaded",
+                workToken,
+                generation);
+            if (!boundToControl)
+            {
+                return false;
+            }
+
+            photo.CompleteFastThumbnailLoadWithDetailedThumbnail(fastThumbnailWasAlreadyLoaded, workToken);
+
             return true;
         }
         catch (FileNotFoundException)
         {
+            if (IsCurrentGeneration(generation) && detailedThumbnailWasLoaded)
+            {
+                photo.InvalidateDetailedThumbnailStatus();
+            }
+
+            return false;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (AlbumImageCacheEntryInvalidException ex)
+        {
+            if (IsCurrentGeneration(generation))
+            {
+                photo.InvalidateImageCacheStatus(ex.Kind);
+            }
+
+            return false;
+        }
+        catch
+        {
+            if (IsCurrentGeneration(generation))
+            {
+                photo.InvalidateDetailedThumbnailStatus();
+            }
+
             return false;
         }
     }
 
-    private async Task ExecuteOriginalWarmupAsync(AlbumPhotoViewModel photo, CancellationToken cancellationToken)
+    private async Task ExecuteOriginalWarmupAsync(AlbumPhotoViewModel photo, int workToken, long generation, CancellationToken cancellationToken)
     {
         try
         {
-            await _imageCache.WarmOriginalAsync(
+            var originalLoaded = await _imageCache.WarmOriginalAsync(
                 photo.AlbumId,
                 $"{photo.PhotoId}-full{photo.FileExtension}",
                 photo.DownloadUrl,
                 _httpClient,
                 AlbumImageCacheReadMode.Lazy,
                 cancellationToken);
-            photo.CompleteOriginalImageLoad(loaded: true);
+            if (IsCurrentGeneration(generation))
+            {
+                if (!originalLoaded)
+                {
+                    MarkWarmupSkipped(photo, AlbumImageWork.OriginalImage);
+                }
+            }
+
+            photo.CompleteOriginalImageLoad(originalLoaded, workToken);
+        }
+        catch (OperationCanceledException)
+        {
+            photo.CompleteOriginalImageLoad(loaded: false, workToken);
         }
         catch
         {
-            photo.CompleteOriginalImageLoad(loaded: false);
+            if (IsCurrentGeneration(generation))
+            {
+                MarkWarmupSkipped(photo, AlbumImageWork.OriginalImage);
+            }
+
+            photo.CompleteOriginalImageLoad(loaded: false, workToken);
+        }
+        finally
+        {
+            SignalWorkers();
         }
     }
 
-    private static void ResetWorkStatus(AlbumPhotoViewModel photo, AlbumImageWork work, bool ownsOriginalLoad)
+    private static void ResetWorkStatus(
+        AlbumPhotoViewModel photo,
+        AlbumImageWork work,
+        bool ownsOriginalLoad,
+        bool fastThumbnailWasAlreadyLoaded,
+        bool detailedThumbnailWasAlreadyLoaded,
+        int workToken)
     {
         if (work == AlbumImageWork.FastThumbnail)
         {
-            photo.CompleteFastThumbnailLoad(loaded: false);
+            photo.CompleteFastThumbnailLoad(fastThumbnailWasAlreadyLoaded, workToken);
             return;
         }
 
         if (work == AlbumImageWork.DetailedThumbnail)
         {
-            photo.CompleteDetailedThumbnailLoad(loaded: false, originalLoaded: false, ownsOriginalLoad);
+            photo.CompleteDetailedThumbnailLoad(loaded: detailedThumbnailWasAlreadyLoaded, originalLoaded: false, ownsOriginalLoad, workToken);
             return;
         }
 
-        photo.CompleteOriginalImageLoad(loaded: false);
+        photo.CompleteOriginalImageLoad(loaded: false, workToken);
+    }
+
+    private async Task<bool> SetLoadedImageIfStillVisibleAsync(
+        AlbumPhotoViewModel photo,
+        Avalonia.Media.Imaging.Bitmap bitmap,
+        bool isDetailedThumbnail,
+        string status,
+        int workToken,
+        long generation)
+    {
+        var wasBound = false;
+        try
+        {
+            await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                if (!IsCurrentGeneration(generation) || !photo.IsImageWorkCurrent(workToken) || !IsPhotoInViewport(photo))
+                {
+                    return;
+                }
+
+                photo.SetLoadedImage(bitmap, isDetailedThumbnail, status);
+                wasBound = true;
+            });
+        }
+        finally
+        {
+            if (!wasBound)
+            {
+                bitmap.Dispose();
+            }
+        }
+
+        return wasBound;
+    }
+
+    private bool IsPhotoInViewport(AlbumPhotoViewModel photo)
+    {
+        lock (_sync)
+        {
+            return _indexByPhoto.TryGetValue(photo, out var index) &&
+                (_viewportIndices.Contains(index) || _priorityIndices.Contains(index));
+        }
+    }
+
+    private bool IsPhotoInListViewport(AlbumPhotoViewModel photo)
+    {
+        lock (_sync)
+        {
+            return _indexByPhoto.TryGetValue(photo, out var index) &&
+                _viewportIndices.Contains(index);
+        }
+    }
+
+    private bool IsWarmupSkipped(AlbumPhotoViewModel photo, AlbumImageWork work)
+    {
+        lock (_sync)
+        {
+            return _indexByPhoto.TryGetValue(photo, out var index) &&
+                _skippedWarmupKeys.Contains(new AlbumImageWarmupKey(index, work));
+        }
+    }
+
+    private bool IsVisibleFailureSkipped(AlbumPhotoViewModel photo, AlbumImageWork work)
+    {
+        lock (_sync)
+        {
+            return _indexByPhoto.TryGetValue(photo, out var index) &&
+                _failedVisibleKeys.Contains(new AlbumImageWarmupKey(index, work));
+        }
+    }
+
+    private void MarkWarmupSkipped(AlbumPhotoViewModel photo, AlbumImageWork work)
+    {
+        lock (_sync)
+        {
+            if (_indexByPhoto.TryGetValue(photo, out var index))
+            {
+                _skippedWarmupKeys.Add(new AlbumImageWarmupKey(index, work));
+            }
+        }
+    }
+
+    private void MarkVisibleFailureSkipped(AlbumPhotoViewModel photo, AlbumImageWork work)
+    {
+        lock (_sync)
+        {
+            if (_indexByPhoto.TryGetValue(photo, out var index))
+            {
+                _failedVisibleKeys.Add(new AlbumImageWarmupKey(index, work));
+            }
+        }
+    }
+
+    private void MarkVisibleFailureSkippedIfCurrentVisible(AlbumPhotoViewModel photo, AlbumImageWork work, int workToken)
+    {
+        lock (_sync)
+        {
+            if (photo.IsImageWorkCurrent(workToken) &&
+                _indexByPhoto.TryGetValue(photo, out var index) &&
+                (_viewportIndices.Contains(index) || _priorityIndices.Contains(index)))
+            {
+                _failedVisibleKeys.Add(new AlbumImageWarmupKey(index, work));
+            }
+        }
     }
 
     private IReadOnlyList<AlbumPhotoViewModel> GetViewportPhotos()
     {
         lock (_sync)
         {
-            return _viewportIndices
-                .Order()
+            return _orderedPriorityIndices
+                .Concat(_orderedViewportIndices)
+                .Distinct()
                 .Select(index => index >= 0 && index < _photos.Count ? _photos[index] : null)
                 .Where(photo => photo is not null)
                 .Cast<AlbumPhotoViewModel>()
@@ -584,23 +1570,85 @@ public sealed class AlbumImageListLoader : IDisposable
         }
     }
 
+    private IReadOnlyList<AlbumPhotoViewModel> GetListViewportPhotos()
+    {
+        lock (_sync)
+        {
+            return _orderedViewportIndices
+                .Select(index => index >= 0 && index < _photos.Count ? _photos[index] : null)
+                .Where(photo => photo is not null)
+                .Cast<AlbumPhotoViewModel>()
+                .ToList();
+        }
+    }
+
+    private IReadOnlyList<int> GetListViewportIndicesForRestoreNoLock()
+    {
+        List<int> indices = new();
+        foreach (var index in _orderedViewportIndices)
+        {
+            if (index < 0 || index >= _photos.Count)
+            {
+                continue;
+            }
+
+            _viewportSnapshotIndexCounts.TryGetValue(index, out var snapshotCount);
+            _viewportLoadedIndexCounts.TryGetValue(index, out var loadedCount);
+            var count = Math.Max(1, Math.Max(snapshotCount, loadedCount));
+            for (var position = 0; position < count; position++)
+            {
+                indices.Add(index);
+            }
+        }
+
+        return indices;
+    }
+
+    private IReadOnlyList<int> GetListViewportSnapshotIndicesForRestoreNoLock()
+    {
+        List<int> indices = new();
+        foreach (var index in _orderedViewportIndices)
+        {
+            if (index < 0 || index >= _photos.Count)
+            {
+                continue;
+            }
+
+            _viewportSnapshotIndexCounts.TryGetValue(index, out var snapshotCount);
+            for (var position = 0; position < snapshotCount; position++)
+            {
+                indices.Add(index);
+            }
+        }
+
+        return indices;
+    }
+
+    private IReadOnlyList<LoadedViewportRegistration> GetLoadedViewportRegistrationsForRestoreNoLock()
+    {
+        return _viewportLoadedRegistrations
+            .SelectMany(item => item.Value.Select(indices => new LoadedViewportRegistration(item.Key, indices.ToArray())))
+            .ToList();
+    }
+
     private IEnumerable<AlbumPhotoViewModel> GetPhotosByViewportDistance()
     {
         IReadOnlyList<AlbumPhotoViewModel> photos;
-        int min;
-        int max;
+        IReadOnlyList<int> seedIndices;
         lock (_sync)
         {
             photos = _photos;
-            if (_viewportIndices.Count == 0)
+            if (_orderedViewportIndices.Count > 0)
             {
-                min = 0;
-                max = -1;
+                seedIndices = _orderedViewportIndices.ToArray();
+            }
+            else if (_orderedPriorityIndices.Count > 0)
+            {
+                seedIndices = _orderedPriorityIndices.ToArray();
             }
             else
             {
-                min = _viewportIndices.Min();
-                max = _viewportIndices.Max();
+                seedIndices = [];
             }
         }
 
@@ -609,36 +1657,53 @@ public sealed class AlbumImageListLoader : IDisposable
             yield break;
         }
 
-        if (max >= min)
+        if (seedIndices.Count == 0)
         {
-            for (var index = min; index <= max && index < photos.Count; index++)
+            yield break;
+        }
+
+        HashSet<int> yielded = new();
+        foreach (var index in seedIndices)
+        {
+            if (index >= 0 && index < photos.Count && yielded.Add(index))
             {
-                if (index >= 0)
-                {
-                    yield return photos[index];
-                }
+                yield return photos[index];
             }
         }
 
         for (var distance = 1; distance < photos.Count; distance++)
         {
-            var down = max + distance;
-            if (down >= 0 && down < photos.Count)
+            var yieldedAny = false;
+            foreach (var seedIndex in seedIndices)
             {
-                yield return photos[down];
+                var down = seedIndex + distance;
+                if (down >= 0 && down < photos.Count && yielded.Add(down))
+                {
+                    yieldedAny = true;
+                    yield return photos[down];
+                }
+
+                var up = seedIndex - distance;
+                if (up >= 0 && up < photos.Count && yielded.Add(up))
+                {
+                    yieldedAny = true;
+                    yield return photos[up];
+                }
             }
 
-            var up = min - distance;
-            if (up >= 0 && up < photos.Count)
+            if (!yieldedAny && yielded.Count >= photos.Count)
             {
-                yield return photos[up];
+                yield break;
             }
         }
     }
 
     private string GetAlbumId()
     {
-        return _photos.FirstOrDefault()?.AlbumId ?? "";
+        lock (_sync)
+        {
+            return _photos.FirstOrDefault()?.AlbumId ?? "";
+        }
     }
 
     private enum AlbumImageWorkerKind
@@ -655,4 +1720,8 @@ public sealed class AlbumImageListLoader : IDisposable
         DetailedThumbnail,
         OriginalImage
     }
+
+    private readonly record struct AlbumImageWarmupKey(int Index, AlbumImageWork Work);
+
+    private readonly record struct LoadedViewportRegistration(AlbumPhotoViewModel Photo, int[] Indices);
 }

@@ -103,6 +103,7 @@ public partial class AlbumPhotoViewModel : ObservableObject
     private bool _isImageLoading;
 
     private int _imageLoadStatusBits;
+    private int _untokenedImageWorkToken;
 
     public bool HasDuplicateGroup => IsDuplicateGroupMain && DuplicateGroupCount > 1;
 
@@ -150,28 +151,101 @@ public partial class AlbumPhotoViewModel : ObservableObject
             GetImageItemStatus(bits, ImageLoadStatusField.DetailedThumbnail) == AlbumImageItemStatus.Loaded;
     }
 
-    public bool TryBeginFastThumbnailLoad()
+    public bool IsImageLoadBusyAtomic()
     {
-        return TrySetStatus(ImageLoadStatusField.FastThumbnail, AlbumImageItemStatus.Unloaded, AlbumImageItemStatus.Loading);
+        return IsImageItemBusy(Volatile.Read(ref _imageLoadStatusBits));
     }
 
-    public bool TryBeginFastThumbnailControlLoad()
+    public bool IsImageWorkCurrent(int workToken)
     {
-        return TrySetStatus(ImageLoadStatusField.FastThumbnail, AlbumImageItemStatus.Unloaded, AlbumImageItemStatus.Loading) ||
-            TrySetStatus(ImageLoadStatusField.FastThumbnail, AlbumImageItemStatus.Loaded, AlbumImageItemStatus.Loading);
+        var current = Volatile.Read(ref _imageLoadStatusBits);
+        return !IsImageItemResetRequested(current) && IsImageItemWorkTokenMatch(current, workToken);
+    }
+
+    public bool TryBeginFastThumbnailLoad()
+    {
+        if (TryBeginFastThumbnailLoad(out var workToken))
+        {
+            Volatile.Write(ref _untokenedImageWorkToken, workToken);
+            return true;
+        }
+
+        return false;
+    }
+
+    public bool TryBeginFastThumbnailLoad(out int workToken)
+    {
+        return TrySetStatusAndLockItem(ImageLoadStatusField.FastThumbnail, AlbumImageItemStatus.Unloaded, AlbumImageItemStatus.Loading, out workToken);
+    }
+
+    public bool TryBeginFastThumbnailControlLoad(out bool wasLoaded)
+    {
+        if (TryBeginFastThumbnailControlLoad(out wasLoaded, out var workToken))
+        {
+            Volatile.Write(ref _untokenedImageWorkToken, workToken);
+            return true;
+        }
+
+        return false;
+    }
+
+    public bool TryBeginFastThumbnailControlLoad(out bool wasLoaded, out int workToken)
+    {
+        wasLoaded = false;
+        if (TrySetStatusAndLockItem(ImageLoadStatusField.FastThumbnail, AlbumImageItemStatus.Unloaded, AlbumImageItemStatus.Loading, out workToken))
+        {
+            return true;
+        }
+
+        if (TrySetStatusAndLockItem(ImageLoadStatusField.FastThumbnail, AlbumImageItemStatus.Loaded, AlbumImageItemStatus.Loading, out workToken))
+        {
+            wasLoaded = true;
+            return true;
+        }
+
+        workToken = 0;
+        return false;
     }
 
     public bool TryBeginOriginalImageLoad()
     {
-        return TrySetStatus(ImageLoadStatusField.OriginalImage, AlbumImageItemStatus.Unloaded, AlbumImageItemStatus.Loading);
+        if (TryBeginOriginalImageLoad(out var workToken))
+        {
+            Volatile.Write(ref _untokenedImageWorkToken, workToken);
+            return true;
+        }
+
+        return false;
+    }
+
+    public bool TryBeginOriginalImageLoad(out int workToken)
+    {
+        return TrySetStatusAndLockItem(ImageLoadStatusField.OriginalImage, AlbumImageItemStatus.Unloaded, AlbumImageItemStatus.Loading, out workToken);
     }
 
     public bool TryBeginDetailedThumbnailLoad(out bool ownsOriginalLoad)
     {
+        if (TryBeginDetailedThumbnailLoad(out ownsOriginalLoad, out var workToken))
+        {
+            Volatile.Write(ref _untokenedImageWorkToken, workToken);
+            return true;
+        }
+
+        return false;
+    }
+
+    public bool TryBeginDetailedThumbnailLoad(out bool ownsOriginalLoad, out int workToken)
+    {
         ownsOriginalLoad = false;
+        workToken = 0;
         while (true)
         {
             var current = Volatile.Read(ref _imageLoadStatusBits);
+            if (IsImageItemBusy(current))
+            {
+                return false;
+            }
+
             if (GetImageItemStatus(current, ImageLoadStatusField.DetailedThumbnail) != AlbumImageItemStatus.Unloaded)
             {
                 return false;
@@ -183,26 +257,47 @@ public partial class AlbumPhotoViewModel : ObservableObject
                 return false;
             }
 
-            var next = SetImageItemStatus(current, ImageLoadStatusField.DetailedThumbnail, AlbumImageItemStatus.Loading);
+            var next = SetImageItemBusyForNewWork(
+                SetImageItemStatus(current, ImageLoadStatusField.DetailedThumbnail, AlbumImageItemStatus.Loading));
             if (originalStatus == AlbumImageItemStatus.Unloaded)
             {
                 next = SetImageItemStatus(next, ImageLoadStatusField.OriginalImage, AlbumImageItemStatus.Loading);
             }
 
+            next = AdvanceImageItemWorkToken(next);
             if (Interlocked.CompareExchange(ref _imageLoadStatusBits, next, current) == current)
             {
                 ownsOriginalLoad = originalStatus == AlbumImageItemStatus.Unloaded;
+                workToken = GetImageItemWorkToken(next);
                 return true;
             }
         }
     }
 
-    public bool TryBeginDetailedThumbnailControlLoad(out bool ownsOriginalLoad)
+    public bool TryBeginDetailedThumbnailControlLoad(out bool ownsOriginalLoad, out bool detailedThumbnailWasAlreadyLoaded)
+    {
+        if (TryBeginDetailedThumbnailControlLoad(out ownsOriginalLoad, out detailedThumbnailWasAlreadyLoaded, out var workToken))
+        {
+            Volatile.Write(ref _untokenedImageWorkToken, workToken);
+            return true;
+        }
+
+        return false;
+    }
+
+    public bool TryBeginDetailedThumbnailControlLoad(out bool ownsOriginalLoad, out bool detailedThumbnailWasAlreadyLoaded, out int workToken)
     {
         ownsOriginalLoad = false;
+        detailedThumbnailWasAlreadyLoaded = false;
+        workToken = 0;
         while (true)
         {
             var current = Volatile.Read(ref _imageLoadStatusBits);
+            if (IsImageItemBusy(current))
+            {
+                return false;
+            }
+
             var detailedStatus = GetImageItemStatus(current, ImageLoadStatusField.DetailedThumbnail);
             if (detailedStatus is not (AlbumImageItemStatus.Unloaded or AlbumImageItemStatus.Loaded))
             {
@@ -210,23 +305,121 @@ public partial class AlbumPhotoViewModel : ObservableObject
             }
 
             var originalStatus = GetImageItemStatus(current, ImageLoadStatusField.OriginalImage);
-            if (detailedStatus == AlbumImageItemStatus.Unloaded &&
-                originalStatus == AlbumImageItemStatus.Loading)
+            if (originalStatus == AlbumImageItemStatus.Loading)
             {
                 return false;
             }
 
-            var next = SetImageItemStatus(current, ImageLoadStatusField.DetailedThumbnail, AlbumImageItemStatus.Loading);
-            if (detailedStatus == AlbumImageItemStatus.Unloaded &&
-                originalStatus == AlbumImageItemStatus.Unloaded)
+            var next = SetImageItemBusyForNewWork(
+                SetImageItemStatus(current, ImageLoadStatusField.DetailedThumbnail, AlbumImageItemStatus.Loading));
+            if (originalStatus == AlbumImageItemStatus.Unloaded)
             {
                 next = SetImageItemStatus(next, ImageLoadStatusField.OriginalImage, AlbumImageItemStatus.Loading);
             }
 
+            next = AdvanceImageItemWorkToken(next);
             if (Interlocked.CompareExchange(ref _imageLoadStatusBits, next, current) == current)
             {
-                ownsOriginalLoad = detailedStatus == AlbumImageItemStatus.Unloaded &&
-                    originalStatus == AlbumImageItemStatus.Unloaded;
+                ownsOriginalLoad = originalStatus == AlbumImageItemStatus.Unloaded;
+                detailedThumbnailWasAlreadyLoaded = detailedStatus == AlbumImageItemStatus.Loaded;
+                workToken = GetImageItemWorkToken(next);
+                return true;
+            }
+        }
+    }
+
+    public bool TryBeginVisibleThumbnailLoad(
+        bool imageMissing,
+        bool preferDetailed,
+        bool isFullImageLoaded,
+        out bool loadDetailed,
+        out bool ownsOriginalLoad,
+        out bool fastThumbnailWasAlreadyLoaded,
+        out bool detailedThumbnailWasAlreadyLoaded)
+    {
+        return TryBeginVisibleThumbnailLoad(
+            imageMissing,
+            preferDetailed,
+            isFullImageLoaded,
+            out loadDetailed,
+            out ownsOriginalLoad,
+            out fastThumbnailWasAlreadyLoaded,
+            out detailedThumbnailWasAlreadyLoaded,
+            out var workToken) &&
+            StoreUntokenedImageWorkToken(workToken);
+    }
+
+    public bool TryBeginVisibleThumbnailLoad(
+        bool imageMissing,
+        bool preferDetailed,
+        bool isFullImageLoaded,
+        out bool loadDetailed,
+        out bool ownsOriginalLoad,
+        out bool fastThumbnailWasAlreadyLoaded,
+        out bool detailedThumbnailWasAlreadyLoaded,
+        out int workToken,
+        bool allowFastThumbnail = true)
+    {
+        loadDetailed = false;
+        ownsOriginalLoad = false;
+        fastThumbnailWasAlreadyLoaded = false;
+        detailedThumbnailWasAlreadyLoaded = false;
+        workToken = 0;
+        while (true)
+        {
+            var current = Volatile.Read(ref _imageLoadStatusBits);
+            if (IsImageItemBusy(current))
+            {
+                return false;
+            }
+
+            var fastStatus = GetImageItemStatus(current, ImageLoadStatusField.FastThumbnail);
+            if (imageMissing &&
+                allowFastThumbnail &&
+                fastStatus is AlbumImageItemStatus.Unloaded or AlbumImageItemStatus.Loaded)
+            {
+                var next = SetImageItemBusyForNewWork(
+                    SetImageItemStatus(current, ImageLoadStatusField.FastThumbnail, AlbumImageItemStatus.Loading));
+                next = AdvanceImageItemWorkToken(next);
+                if (Interlocked.CompareExchange(ref _imageLoadStatusBits, next, current) == current)
+                {
+                    fastThumbnailWasAlreadyLoaded = fastStatus == AlbumImageItemStatus.Loaded;
+                    workToken = GetImageItemWorkToken(next);
+                    return true;
+                }
+
+                continue;
+            }
+
+            var detailedStatus = GetImageItemStatus(current, ImageLoadStatusField.DetailedThumbnail);
+            if (!preferDetailed ||
+                isFullImageLoaded ||
+                detailedStatus is not (AlbumImageItemStatus.Unloaded or AlbumImageItemStatus.Loaded))
+            {
+                return false;
+            }
+
+            var originalStatus = GetImageItemStatus(current, ImageLoadStatusField.OriginalImage);
+            if (originalStatus == AlbumImageItemStatus.Loading)
+            {
+                return false;
+            }
+
+            var claimedOwnsOriginalLoad = originalStatus == AlbumImageItemStatus.Unloaded;
+            var detailedNext = SetImageItemBusyForNewWork(
+                SetImageItemStatus(current, ImageLoadStatusField.DetailedThumbnail, AlbumImageItemStatus.Loading));
+            if (claimedOwnsOriginalLoad)
+            {
+                detailedNext = SetImageItemStatus(detailedNext, ImageLoadStatusField.OriginalImage, AlbumImageItemStatus.Loading);
+            }
+
+            detailedNext = AdvanceImageItemWorkToken(detailedNext);
+            if (Interlocked.CompareExchange(ref _imageLoadStatusBits, detailedNext, current) == current)
+            {
+                loadDetailed = true;
+                ownsOriginalLoad = claimedOwnsOriginalLoad;
+                detailedThumbnailWasAlreadyLoaded = detailedStatus == AlbumImageItemStatus.Loaded;
+                workToken = GetImageItemWorkToken(detailedNext);
                 return true;
             }
         }
@@ -234,19 +427,55 @@ public partial class AlbumPhotoViewModel : ObservableObject
 
     public void CompleteFastThumbnailLoad(bool loaded)
     {
-        SetStatus(ImageLoadStatusField.FastThumbnail, loaded ? AlbumImageItemStatus.Loaded : AlbumImageItemStatus.Unloaded);
+        CompleteFastThumbnailLoad(loaded, TakeUntokenedImageWorkToken());
+    }
+
+    public void CompleteFastThumbnailLoad(bool loaded, int workToken)
+    {
+        SetStatusAndUnlockItem(ImageLoadStatusField.FastThumbnail, loaded ? AlbumImageItemStatus.Loaded : AlbumImageItemStatus.Unloaded, workToken);
     }
 
     public void CompleteOriginalImageLoad(bool loaded)
     {
-        SetStatus(ImageLoadStatusField.OriginalImage, loaded ? AlbumImageItemStatus.Loaded : AlbumImageItemStatus.Unloaded);
+        CompleteOriginalImageLoad(loaded, TakeUntokenedImageWorkToken());
+    }
+
+    public void CompleteOriginalImageLoad(bool loaded, int workToken)
+    {
+        SetStatusAndUnlockItem(ImageLoadStatusField.OriginalImage, loaded ? AlbumImageItemStatus.Loaded : AlbumImageItemStatus.Unloaded, workToken);
     }
 
     public void CompleteDetailedThumbnailLoad(bool loaded, bool originalLoaded, bool ownsOriginalLoad)
     {
+        CompleteDetailedThumbnailLoad(loaded, originalLoaded, ownsOriginalLoad, TakeUntokenedImageWorkToken());
+    }
+
+    public void CompleteDetailedThumbnailLoad(bool loaded, bool originalLoaded, bool ownsOriginalLoad, int workToken)
+    {
         while (true)
         {
             var current = Volatile.Read(ref _imageLoadStatusBits);
+            if (!IsImageItemWorkTokenMatch(current, workToken))
+            {
+                return;
+            }
+
+            if (IsImageItemResetRequested(current))
+            {
+                var reset = ClearImageItemStatusesAndAdvanceWorkToken(current);
+                if (Interlocked.CompareExchange(ref _imageLoadStatusBits, reset, current) == current)
+                {
+                    return;
+                }
+
+                continue;
+            }
+
+            if (!IsImageItemBusy(current))
+            {
+                return;
+            }
+
             var next = SetImageItemStatus(
                 current,
                 ImageLoadStatusField.DetailedThumbnail,
@@ -259,6 +488,7 @@ public partial class AlbumPhotoViewModel : ObservableObject
                     originalLoaded ? AlbumImageItemStatus.Loaded : AlbumImageItemStatus.Unloaded);
             }
 
+            next = SetImageItemBusy(next, isBusy: false);
             if (Interlocked.CompareExchange(ref _imageLoadStatusBits, next, current) == current)
             {
                 return;
@@ -266,10 +496,105 @@ public partial class AlbumPhotoViewModel : ObservableObject
         }
     }
 
+    public void CompleteFastThumbnailLoadWithDetailedThumbnail(bool fastThumbnailWasAlreadyLoaded)
+    {
+        CompleteFastThumbnailLoadWithDetailedThumbnail(fastThumbnailWasAlreadyLoaded, TakeUntokenedImageWorkToken());
+    }
+
+    public void CompleteFastThumbnailLoadWithDetailedThumbnail(bool fastThumbnailWasAlreadyLoaded, int workToken)
+    {
+        while (true)
+        {
+            var current = Volatile.Read(ref _imageLoadStatusBits);
+            if (!IsImageItemWorkTokenMatch(current, workToken))
+            {
+                return;
+            }
+
+            if (IsImageItemResetRequested(current))
+            {
+                var reset = ClearImageItemStatusesAndAdvanceWorkToken(current);
+                if (Interlocked.CompareExchange(ref _imageLoadStatusBits, reset, current) == current)
+                {
+                    return;
+                }
+
+                continue;
+            }
+
+            if (!IsImageItemBusy(current))
+            {
+                return;
+            }
+
+            var next = SetImageItemStatus(
+                current,
+                ImageLoadStatusField.FastThumbnail,
+                fastThumbnailWasAlreadyLoaded ? AlbumImageItemStatus.Loaded : AlbumImageItemStatus.Unloaded);
+            next = SetImageItemStatus(next, ImageLoadStatusField.DetailedThumbnail, AlbumImageItemStatus.Loaded);
+            next = SetImageItemBusy(next, isBusy: false);
+            if (Interlocked.CompareExchange(ref _imageLoadStatusBits, next, current) == current)
+            {
+                return;
+            }
+        }
+    }
+
+    public void InvalidateDetailedThumbnailStatus()
+    {
+        InvalidateImageLoadStatus(ImageLoadStatusField.DetailedThumbnail);
+    }
+
+    public void InvalidateImageCacheStatus(AlbumImageCacheKind kind)
+    {
+        var field = kind switch
+        {
+            AlbumImageCacheKind.FastThumbnail => ImageLoadStatusField.FastThumbnail,
+            AlbumImageCacheKind.DetailedThumbnail => ImageLoadStatusField.DetailedThumbnail,
+            AlbumImageCacheKind.OriginalImage => ImageLoadStatusField.OriginalImage,
+            _ => ImageLoadStatusField.FastThumbnail
+        };
+        InvalidateImageLoadStatus(field);
+    }
+
     public void ResetImageLoadStatuses()
     {
-        Volatile.Write(ref _imageLoadStatusBits, 0);
+        while (true)
+        {
+            var current = Volatile.Read(ref _imageLoadStatusBits);
+            if (IsImageItemBusy(current))
+            {
+                var next = SetImageItemResetRequested(current, isResetRequested: true);
+                if (Interlocked.CompareExchange(ref _imageLoadStatusBits, next, current) != current)
+                {
+                    continue;
+                }
+
+                IsFullImageLoaded = false;
+                IsImageLoading = false;
+                return;
+            }
+
+            if (Interlocked.CompareExchange(ref _imageLoadStatusBits, 0, current) == current)
+            {
+                Interlocked.Exchange(ref _untokenedImageWorkToken, 0);
+                break;
+            }
+        }
+
         IsFullImageLoaded = false;
+        IsImageLoading = false;
+    }
+
+    public void ResetImageLoadStatusesForNewGeneration()
+    {
+        CancelDeferredImageRelease();
+        Image = null;
+        ClearImageLoadStatusesAndInvalidateClaims();
+        Interlocked.Exchange(ref _untokenedImageWorkToken, 0);
+        IsFullImageLoaded = false;
+        IsImageLoading = false;
+        Status = "Loading";
     }
 
     public void SetLoadedImage(Bitmap bitmap, bool isDetailedThumbnail, string status)
@@ -284,30 +609,73 @@ public partial class AlbumPhotoViewModel : ObservableObject
         return GetImageItemStatus(Volatile.Read(ref _imageLoadStatusBits), field);
     }
 
-    private bool TrySetStatus(ImageLoadStatusField field, AlbumImageItemStatus expected, AlbumImageItemStatus replacement)
+    private bool TrySetStatusAndLockItem(ImageLoadStatusField field, AlbumImageItemStatus expected, AlbumImageItemStatus replacement, out int workToken)
     {
+        workToken = 0;
         while (true)
         {
             var current = Volatile.Read(ref _imageLoadStatusBits);
-            if (GetImageItemStatus(current, field) != expected)
+            if (IsImageItemBusy(current) || GetImageItemStatus(current, field) != expected)
             {
                 return false;
             }
 
-            var next = SetImageItemStatus(current, field, replacement);
+            var next = SetImageItemBusyForNewWork(SetImageItemStatus(current, field, replacement));
+            next = AdvanceImageItemWorkToken(next);
             if (Interlocked.CompareExchange(ref _imageLoadStatusBits, next, current) == current)
             {
+                workToken = GetImageItemWorkToken(next);
                 return true;
             }
         }
     }
 
-    private void SetStatus(ImageLoadStatusField field, AlbumImageItemStatus status)
+    private void SetStatusAndUnlockItem(ImageLoadStatusField field, AlbumImageItemStatus status, int workToken)
     {
         while (true)
         {
             var current = Volatile.Read(ref _imageLoadStatusBits);
-            var next = SetImageItemStatus(current, field, status);
+            if (!IsImageItemWorkTokenMatch(current, workToken))
+            {
+                return;
+            }
+
+            if (IsImageItemResetRequested(current))
+            {
+                var reset = ClearImageItemStatusesAndAdvanceWorkToken(current);
+                if (Interlocked.CompareExchange(ref _imageLoadStatusBits, reset, current) == current)
+                {
+                    return;
+                }
+
+                continue;
+            }
+
+            if (!IsImageItemBusy(current))
+            {
+                return;
+            }
+
+            var next = SetImageItemBusy(SetImageItemStatus(current, field, status), isBusy: false);
+            if (Interlocked.CompareExchange(ref _imageLoadStatusBits, next, current) == current)
+            {
+                return;
+            }
+        }
+    }
+
+    private void InvalidateImageLoadStatus(ImageLoadStatusField field)
+    {
+        while (true)
+        {
+            var current = Volatile.Read(ref _imageLoadStatusBits);
+            var status = GetImageItemStatus(current, field);
+            if (status != AlbumImageItemStatus.Loaded)
+            {
+                return;
+            }
+
+            var next = SetImageItemStatus(current, field, AlbumImageItemStatus.Unloaded);
             if (Interlocked.CompareExchange(ref _imageLoadStatusBits, next, current) == current)
             {
                 return;
@@ -325,6 +693,83 @@ public partial class AlbumPhotoViewModel : ObservableObject
         var offset = GetImageLoadStatusOffset(field);
         var mask = 0b11 << offset;
         return (bits & ~mask) | (((int)status & 0b11) << offset);
+    }
+
+    private static int GetImageItemWorkToken(int bits)
+    {
+        return (int)((uint)bits >> 8);
+    }
+
+    private static bool IsImageItemWorkTokenMatch(int bits, int workToken)
+    {
+        return workToken != 0 && GetImageItemWorkToken(bits) == workToken;
+    }
+
+    private bool StoreUntokenedImageWorkToken(int workToken)
+    {
+        Volatile.Write(ref _untokenedImageWorkToken, workToken);
+        return true;
+    }
+
+    private int TakeUntokenedImageWorkToken()
+    {
+        return Interlocked.Exchange(ref _untokenedImageWorkToken, 0);
+    }
+
+    private static int AdvanceImageItemWorkToken(int bits)
+    {
+        var nextToken = (GetImageItemWorkToken(bits) + 1) & 0x00ffffff;
+        if (nextToken == 0)
+        {
+            nextToken = 1;
+        }
+
+        return (bits & 0xff) | (nextToken << 8);
+    }
+
+    private static int ClearImageItemStatusesAndAdvanceWorkToken(int bits)
+    {
+        return AdvanceImageItemWorkToken(bits) & ~0xff;
+    }
+
+    private void ClearImageLoadStatusesAndInvalidateClaims()
+    {
+        while (true)
+        {
+            var current = Volatile.Read(ref _imageLoadStatusBits);
+            var next = ClearImageItemStatusesAndAdvanceWorkToken(current);
+            if (Interlocked.CompareExchange(ref _imageLoadStatusBits, next, current) == current)
+            {
+                return;
+            }
+        }
+    }
+
+    private static bool IsImageItemBusy(int bits)
+    {
+        return (bits & (1 << 6)) != 0;
+    }
+
+    private static int SetImageItemBusy(int bits, bool isBusy)
+    {
+        const int mask = 1 << 6;
+        return isBusy ? bits | mask : bits & ~mask;
+    }
+
+    private static bool IsImageItemResetRequested(int bits)
+    {
+        return (bits & (1 << 7)) != 0;
+    }
+
+    private static int SetImageItemResetRequested(int bits, bool isResetRequested)
+    {
+        const int mask = 1 << 7;
+        return isResetRequested ? bits | mask : bits & ~mask;
+    }
+
+    private static int SetImageItemBusyForNewWork(int bits)
+    {
+        return SetImageItemResetRequested(SetImageItemBusy(bits, isBusy: true), isResetRequested: false);
     }
 
     private static int GetImageLoadStatusOffset(ImageLoadStatusField field)
@@ -384,7 +829,13 @@ public partial class AlbumPhotoViewModel : ObservableObject
 
     private sealed class ThumbnailLoadPermit : IDisposable
     {
+        private readonly bool _countsAgainstActive;
         private bool _disposed;
+
+        public ThumbnailLoadPermit(bool countsAgainstActive = true)
+        {
+            _countsAgainstActive = countsAgainstActive;
+        }
 
         public void Dispose()
         {
@@ -394,13 +845,22 @@ public partial class AlbumPhotoViewModel : ObservableObject
             }
 
             _disposed = true;
-            CompleteThumbnailLoad();
+            if (_countsAgainstActive)
+            {
+                CompleteThumbnailLoad();
+            }
         }
     }
 
     private sealed class DisplayImageLoadPermit : IDisposable
     {
+        private readonly bool _countsAgainstActive;
         private bool _disposed;
+
+        public DisplayImageLoadPermit(bool countsAgainstActive = true)
+        {
+            _countsAgainstActive = countsAgainstActive;
+        }
 
         public void Dispose()
         {
@@ -410,7 +870,10 @@ public partial class AlbumPhotoViewModel : ObservableObject
             }
 
             _disposed = true;
-            CompleteDisplayImageLoad();
+            if (_countsAgainstActive)
+            {
+                CompleteDisplayImageLoad();
+            }
         }
     }
 
@@ -422,8 +885,20 @@ public partial class AlbumPhotoViewModel : ObservableObject
         }
 
         CancelDeferredImageRelease();
-        _loadCancellation?.Cancel();
-        _loadCancellation?.Dispose();
+        var previousCancellation = _loadCancellation;
+        _loadCancellation = null;
+        try
+        {
+            previousCancellation?.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+        finally
+        {
+            previousCancellation?.Dispose();
+        }
+
         var cancellation = new CancellationTokenSource();
         _loadCancellation = cancellation;
 
@@ -454,11 +929,25 @@ public partial class AlbumPhotoViewModel : ObservableObject
 
     public void StopViewportLoad()
     {
-        _loadCancellation?.Cancel();
+        var cancellation = _loadCancellation;
+        _loadCancellation = null;
+        try
+        {
+            cancellation?.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+        finally
+        {
+            cancellation?.Dispose();
+        }
+
         CancelPendingThumbnailLoad(this);
         CancelPendingDisplayImageLoad(this);
+        ClearPendingLoadPriority(this);
         IsImageLoading = false;
-        ReleaseCachedImage();
+        ScheduleDeferredImageRelease();
     }
 
     private async Task LoadThumbnailAsync(ImageCacheService imageCache, HttpClient httpClient, CancellationToken cancellationToken)
@@ -472,7 +961,7 @@ public partial class AlbumPhotoViewModel : ObservableObject
                 return;
             }
 
-            Image = await imageCache.LoadDisplayBitmapAsync(
+            var bitmap = await imageCache.LoadDisplayBitmapAsync(
                 AlbumId,
                 $"{PhotoId}-thumbnail.jpg",
                 ThumbnailDownloadUrl,
@@ -480,6 +969,13 @@ public partial class AlbumPhotoViewModel : ObservableObject
                 ThumbnailPixelSize,
                 ThumbnailPixelSize,
                 cancellationToken);
+            if (cancellationToken.IsCancellationRequested)
+            {
+                bitmap.Dispose();
+                cancellationToken.ThrowIfCancellationRequested();
+            }
+
+            Image = bitmap;
 
             Status = "Loading full image";
         }
@@ -532,7 +1028,7 @@ public partial class AlbumPhotoViewModel : ObservableObject
                 return;
             }
 
-            Image = await imageCache.LoadDisplayBitmapAsync(
+            var bitmap = await imageCache.LoadDisplayBitmapAsync(
                 AlbumId,
                 $"{PhotoId}-full{FileExtension}",
                 DownloadUrl,
@@ -540,7 +1036,13 @@ public partial class AlbumPhotoViewModel : ObservableObject
                 DisplayPixelWidth,
                 DisplayPixelHeight,
                 cancellationToken);
+            if (cancellationToken.IsCancellationRequested)
+            {
+                bitmap.Dispose();
+                cancellationToken.ThrowIfCancellationRequested();
+            }
 
+            Image = bitmap;
             IsFullImageLoaded = true;
             Status = "Full image loaded";
         }
@@ -687,6 +1189,21 @@ public partial class AlbumPhotoViewModel : ObservableObject
         ProcessDisplayImageLoadQueue();
     }
 
+    private static void ClearPendingLoadPriority(AlbumPhotoViewModel photo)
+    {
+        lock (ThumbnailLoadQueueSync)
+        {
+            PrioritizedThumbnailPhotos.Remove(photo);
+            photo._thumbnailPriorityRank = int.MaxValue;
+        }
+
+        lock (DisplayImageLoadQueueSync)
+        {
+            PrioritizedDisplayImagePhotos.Remove(photo);
+            photo._displayImagePriorityRank = int.MaxValue;
+        }
+    }
+
     private static void CompleteThumbnailLoad()
     {
         lock (ThumbnailLoadQueueSync)
@@ -750,7 +1267,7 @@ public partial class AlbumPhotoViewModel : ObservableObject
             }
             else
             {
-                request.Completion.TrySetResult(new ThumbnailLoadPermit());
+                request.Completion.TrySetResult(new ThumbnailLoadPermit(countsAgainstActive: false));
             }
         }
 
@@ -802,7 +1319,7 @@ public partial class AlbumPhotoViewModel : ObservableObject
             }
             else
             {
-                request.Completion.TrySetResult(new DisplayImageLoadPermit());
+                request.Completion.TrySetResult(new DisplayImageLoadPermit(countsAgainstActive: false));
             }
         }
 
@@ -817,7 +1334,12 @@ public partial class AlbumPhotoViewModel : ObservableObject
         Status = "Loading";
     }
 
-    private void ScheduleDeferredImageRelease()
+    public void KeepCachedImage()
+    {
+        CancelDeferredImageRelease();
+    }
+
+    public void ScheduleDeferredImageRelease()
     {
         if (Image is null)
         {
@@ -846,9 +1368,19 @@ public partial class AlbumPhotoViewModel : ObservableObject
 
     private void CancelDeferredImageRelease()
     {
-        _imageReleaseCancellation?.Cancel();
-        _imageReleaseCancellation?.Dispose();
+        var cancellation = _imageReleaseCancellation;
         _imageReleaseCancellation = null;
+        try
+        {
+            cancellation?.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+        finally
+        {
+            cancellation?.Dispose();
+        }
     }
 
     partial void OnImageChanging(Bitmap? value)

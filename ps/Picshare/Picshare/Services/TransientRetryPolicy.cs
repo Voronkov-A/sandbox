@@ -104,7 +104,16 @@ public static class TransientRetryPolicy
             return false;
         }
 
-        return exception is HttpRequestException or TimeoutException or IOException ||
+        if (exception is HttpRequestException httpRequestException)
+        {
+            return httpRequestException.StatusCode is null ||
+                httpRequestException.StatusCode == System.Net.HttpStatusCode.RequestTimeout ||
+                httpRequestException.StatusCode == System.Net.HttpStatusCode.Conflict ||
+                (int)httpRequestException.StatusCode == 429 ||
+                (int)httpRequestException.StatusCode >= 500;
+        }
+
+        return exception is TimeoutException or IOException ||
             exception is TaskCanceledException ||
             exception is InvalidOperationException invalidOperationException &&
             IsTransientGoogleDriveFailure(invalidOperationException.Message);

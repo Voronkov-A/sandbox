@@ -35,6 +35,8 @@ public partial class MainView : UserControl
     private Point _photoViewerPointerStart;
     private INotifyPropertyChanged? _viewModelPropertyChanged;
     private readonly HashSet<ScrollViewer> _albumPhotoScrollViewers = new();
+    private readonly Dictionary<ListBox, List<ScrollViewer>> _albumPhotoScrollViewersByList = new();
+    private bool _isVisibleAlbumPhotoPriorityUpdateQueued;
 
     public MainView()
     {
@@ -46,6 +48,10 @@ public partial class MainView : UserControl
         if (_viewModelPropertyChanged is not null)
         {
             _viewModelPropertyChanged.PropertyChanged -= ViewModel_PropertyChanged;
+            if (_viewModelPropertyChanged is MainViewModel oldViewModel)
+            {
+                oldViewModel.ClearPhotoViewportLoads();
+            }
         }
 
         _viewModelPropertyChanged = DataContext as INotifyPropertyChanged;
@@ -54,7 +60,31 @@ public partial class MainView : UserControl
             _viewModelPropertyChanged.PropertyChanged += ViewModel_PropertyChanged;
         }
 
+        QueueVisibleAlbumPhotoPriorityUpdate();
+
         base.OnDataContextChanged(e);
+    }
+
+    protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        if (_viewModelPropertyChanged is not null)
+        {
+            _viewModelPropertyChanged.PropertyChanged -= ViewModel_PropertyChanged;
+            _viewModelPropertyChanged = null;
+        }
+
+        foreach (var scrollViewer in _albumPhotoScrollViewers.ToList())
+        {
+            DetachAlbumPhotoScrollViewer(scrollViewer);
+        }
+
+        _albumPhotoScrollViewersByList.Clear();
+        if (DataContext is MainViewModel viewModel)
+        {
+            viewModel.ClearPhotoViewportLoads();
+        }
+
+        base.OnDetachedFromVisualTree(e);
     }
 
     private void ViewModel_PropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -495,10 +525,14 @@ public partial class MainView : UserControl
     private async void AlbumPhoto_Loaded(object? sender, RoutedEventArgs e)
     {
         if (DataContext is MainViewModel viewModel &&
-            sender is Control { DataContext: AlbumPhotoViewModel photo })
+            sender is Control { DataContext: AlbumPhotoViewModel photo } control)
         {
-            UpdateVisibleAlbumPhotoPriorities();
-            await viewModel.StartPhotoViewportLoadAsync(photo);
+            if (IsInSelectedAlbumPhotoList(control) && IsControlInViewport(control))
+            {
+                await viewModel.StartPhotoViewportLoadAsync(photo);
+            }
+
+            QueueVisibleAlbumPhotoPriorityUpdate();
         }
     }
 
@@ -508,6 +542,7 @@ public partial class MainView : UserControl
             sender is Control { DataContext: AlbumPhotoViewModel photo })
         {
             viewModel.StopPhotoViewportLoad(photo);
+            QueueVisibleAlbumPhotoPriorityUpdate();
         }
     }
 
@@ -520,21 +555,102 @@ public partial class MainView : UserControl
 
         _ = Dispatcher.UIThread.InvokeAsync(() =>
         {
-            foreach (var scrollViewer in listBox.GetVisualDescendants().OfType<ScrollViewer>())
+            if (listBox.GetVisualRoot() is null)
             {
-                if (_albumPhotoScrollViewers.Add(scrollViewer))
+                return;
+            }
+
+            if (!AttachAlbumPhotoScrollViewers(listBox))
+            {
+                _ = Dispatcher.UIThread.InvokeAsync(() =>
                 {
-                    scrollViewer.ScrollChanged += AlbumPhotoScrollViewer_ScrollChanged;
-                }
+                    if (listBox.GetVisualRoot() is null)
+                    {
+                        return;
+                    }
+
+                    AttachAlbumPhotoScrollViewers(listBox);
+                    QueueVisibleAlbumPhotoPriorityUpdate();
+                }, DispatcherPriority.Render);
             }
 
             UpdateVisibleAlbumPhotoPriorities();
         }, DispatcherPriority.Loaded);
     }
 
+    private bool AttachAlbumPhotoScrollViewers(ListBox listBox)
+    {
+        if (listBox.GetVisualRoot() is null)
+        {
+            return true;
+        }
+
+        if (_albumPhotoScrollViewersByList.Remove(listBox, out var previousScrollViewers))
+        {
+            foreach (var scrollViewer in previousScrollViewers)
+            {
+                DetachAlbumPhotoScrollViewer(scrollViewer);
+            }
+        }
+
+        var listScrollViewers = listBox.GetVisualDescendants().OfType<ScrollViewer>().ToList();
+        if (listScrollViewers.Count == 0)
+        {
+            return false;
+        }
+
+        _albumPhotoScrollViewersByList[listBox] = listScrollViewers;
+        foreach (var scrollViewer in listScrollViewers)
+        {
+            if (_albumPhotoScrollViewers.Add(scrollViewer))
+            {
+                scrollViewer.ScrollChanged += AlbumPhotoScrollViewer_ScrollChanged;
+                scrollViewer.SizeChanged += AlbumPhotoScrollViewer_SizeChanged;
+            }
+        }
+
+        return true;
+    }
+
+    private void AlbumPhotoList_Unloaded(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not ListBox listBox)
+        {
+            return;
+        }
+
+        if (!_albumPhotoScrollViewersByList.Remove(listBox, out var scrollViewers))
+        {
+            scrollViewers = listBox.GetVisualDescendants().OfType<ScrollViewer>().ToList();
+        }
+
+        foreach (var scrollViewer in scrollViewers)
+        {
+            DetachAlbumPhotoScrollViewer(scrollViewer);
+        }
+
+        QueueVisibleAlbumPhotoPriorityUpdate();
+    }
+
+    private void DetachAlbumPhotoScrollViewer(ScrollViewer scrollViewer)
+    {
+        if (!_albumPhotoScrollViewers.Remove(scrollViewer))
+        {
+            return;
+        }
+
+        scrollViewer.ScrollChanged -= AlbumPhotoScrollViewer_ScrollChanged;
+        scrollViewer.SizeChanged -= AlbumPhotoScrollViewer_SizeChanged;
+    }
+
     private void AlbumPhotoScrollViewer_ScrollChanged(object? sender, ScrollChangedEventArgs e)
     {
-        UpdateVisibleAlbumPhotoPriorities();
+        QueueVisibleAlbumPhotoPriorityUpdate();
+    }
+
+    private void AlbumPhotoScrollViewer_SizeChanged(object? sender, SizeChangedEventArgs e)
+    {
+        QueueVisibleAlbumPhotoPriorityUpdate();
     }
 
     private void MainTabs_SelectionChanged(object? sender, SelectionChangedEventArgs e)
@@ -544,7 +660,27 @@ public partial class MainView : UserControl
             return;
         }
 
-        _ = Dispatcher.UIThread.InvokeAsync(UpdateVisibleAlbumPhotoPriorities, DispatcherPriority.Render);
+        QueueVisibleAlbumPhotoPriorityUpdate();
+    }
+
+    private void QueueVisibleAlbumPhotoPriorityUpdate()
+    {
+        if (_isVisibleAlbumPhotoPriorityUpdateQueued)
+        {
+            return;
+        }
+
+        _isVisibleAlbumPhotoPriorityUpdateQueued = true;
+        _ = Dispatcher.UIThread.InvokeAsync(() =>
+        {
+            _isVisibleAlbumPhotoPriorityUpdateQueued = false;
+            if (TopLevel.GetTopLevel(this) is null)
+            {
+                return;
+            }
+
+            UpdateVisibleAlbumPhotoPriorities();
+        }, DispatcherPriority.Render);
     }
 
     private void AlbumPhotoList_SelectionChanged(object? sender, SelectionChangedEventArgs e)
@@ -566,6 +702,7 @@ public partial class MainView : UserControl
             .OfType<Control>()
             .Where(control => string.Equals(control.Name, "AlbumPhotoCard", StringComparison.Ordinal) &&
                 control.IsVisible &&
+                IsInSelectedAlbumPhotoList(control) &&
                 control.DataContext is AlbumPhotoViewModel &&
                 IsControlInViewport(control))
             .Select(control => new
@@ -588,6 +725,20 @@ public partial class MainView : UserControl
         viewModel.PrioritizePhotoViewportLoads(visiblePhotos);
     }
 
+    private static bool IsInSelectedAlbumPhotoList(Control control)
+    {
+        var listBox = control.GetVisualAncestors()
+            .OfType<ListBox>()
+            .FirstOrDefault(list => list.Classes.Contains("album-photo-list"));
+        if (listBox is null)
+        {
+            return false;
+        }
+
+        var tabItem = listBox.GetVisualAncestors().OfType<TabItem>().FirstOrDefault();
+        return tabItem?.IsSelected == true;
+    }
+
     private static bool IsControlInViewport(Control control)
     {
         var scrollViewer = control.GetVisualAncestors().OfType<ScrollViewer>().FirstOrDefault();
@@ -603,10 +754,10 @@ public partial class MainView : UserControl
         }
 
         var bounds = TransformBounds(control, scrollViewer);
-        return bounds.Right >= 0 &&
-            bounds.Bottom >= 0 &&
-            bounds.Left <= scrollViewer.Bounds.Width &&
-            bounds.Top <= scrollViewer.Bounds.Height;
+        return bounds.Right > 0 &&
+            bounds.Bottom > 0 &&
+            bounds.Left < scrollViewer.Bounds.Width &&
+            bounds.Top < scrollViewer.Bounds.Height;
     }
 
     private static bool IsControlFullyInViewport(Control control)
@@ -703,6 +854,7 @@ public partial class MainView : UserControl
             sender is TabControl { SelectedItem: TabItem selectedTab })
         {
             viewModel.SetActiveReviewTab(selectedTab.Tag?.ToString() ?? "");
+            QueueVisibleAlbumPhotoPriorityUpdate();
         }
     }
 
