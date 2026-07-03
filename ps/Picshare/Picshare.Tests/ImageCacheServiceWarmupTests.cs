@@ -1,10 +1,16 @@
 using System.Net;
+using Avalonia.Skia;
 using Picshare.Services;
 
 namespace Picshare.Tests;
 
 public sealed class ImageCacheServiceWarmupTests
 {
+    static ImageCacheServiceWarmupTests()
+    {
+        SkiaPlatform.Initialize();
+    }
+
     private static readonly byte[] PngBytes = Convert.FromBase64String(
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==");
 
@@ -47,21 +53,14 @@ public sealed class ImageCacheServiceWarmupTests
             Limits = new AlbumImageCacheLimits(
                 FastThumbnailMemoryBytes: 0,
                 DetailedThumbnailMemoryBytes: 0,
-                OriginalImageMemoryBytes: 1024 * 1024,
+                OriginalImageMemoryBytes: 0,
                 FastThumbnailDiskBytes: 0,
                 DetailedThumbnailDiskBytes: 1024 * 1024,
-                OriginalImageDiskBytes: 0)
+                OriginalImageDiskBytes: 1024 * 1024)
         };
-        var handler = new SequentialBytesHandler([1, 2, 3, 4], PngBytes);
+        var handler = new BytesHandler(PngBytes);
         using var httpClient = new HttpClient(handler);
-
-        Assert.True(await imageCache.WarmOriginalAsync(
-            "album",
-            "photo-1-full.jpg",
-            "https://example.invalid/photo-1.jpg",
-            httpClient,
-            AlbumImageCacheReadMode.Eager,
-            CancellationToken.None));
+        await WriteCacheFileAsync(imageCache, "album", "photo-1-full.jpg", [1, 2, 3, 4]);
 
         var result = await imageCache.WarmDetailedThumbnailAsync(
             "album",
@@ -75,7 +74,7 @@ public sealed class ImageCacheServiceWarmupTests
 
         Assert.True(result.DetailedThumbnailLoaded);
         Assert.True(result.OriginalImageLoaded);
-        Assert.Equal(2, handler.RequestCount);
+        Assert.Equal(1, handler.RequestCount);
     }
 
     [Fact]
@@ -573,7 +572,7 @@ public sealed class ImageCacheServiceWarmupTests
                 DetailedThumbnailDiskBytes: 0,
                 OriginalImageDiskBytes: 0)
         };
-        var handler = new FailSeekableReadThenBytesHandler([1, 2, 3, 4]);
+        var handler = new FailSeekableReadThenBytesHandler(PngBytes);
         using var httpClient = new HttpClient(handler);
 
         Assert.True(await imageCache.WarmFastThumbnailAsync(
@@ -605,16 +604,16 @@ public sealed class ImageCacheServiceWarmupTests
         using var httpClient = new HttpClient(handler);
         await WriteCacheFileAsync(imageCache, "album", "photo-1-thumbnail.jpg", [1, 2, 3, 4]);
 
-        var exception = await Assert.ThrowsAsync<AlbumImageCacheEntryInvalidException>(() => imageCache.LoadFastThumbnailBitmapAsync(
+        var result = await imageCache.LoadFastThumbnailBitmapAsync(
             "album",
             "photo-1",
             "https://example.invalid/photo-1-thumb.jpg",
             httpClient,
             AlbumImageCacheReadMode.Eager,
-            CancellationToken.None));
+            CancellationToken.None);
 
-        Assert.Equal(AlbumImageCacheKind.FastThumbnail, exception.Kind);
-        Assert.Contains("IPlatformRenderInterface", exception.InnerException?.Message);
+        result.Bitmap.Dispose();
+        Assert.True(result.FastThumbnailLoaded);
         Assert.Equal(1, handler.RequestCount);
     }
 
@@ -636,7 +635,7 @@ public sealed class ImageCacheServiceWarmupTests
         using var httpClient = new HttpClient(handler);
         await WriteCacheFileAsync(imageCache, "album", "photo-1-detailed-220x150.jpg", [1, 2, 3, 4]);
 
-        var exception = await Assert.ThrowsAsync<AlbumImageCacheEntryInvalidException>(() => imageCache.LoadDetailedThumbnailBitmapAsync(
+        var result = await imageCache.LoadDetailedThumbnailBitmapAsync(
             "album",
             "photo-1",
             "photo-1-full.jpg",
@@ -644,10 +643,11 @@ public sealed class ImageCacheServiceWarmupTests
             httpClient,
             AlbumImageCacheReadMode.Eager,
             AlbumImageCacheReadMode.Lazy,
-            CancellationToken.None));
+            CancellationToken.None);
 
-        Assert.Equal(AlbumImageCacheKind.DetailedThumbnail, exception.Kind);
-        Assert.Contains("IPlatformRenderInterface", exception.InnerException?.Message);
+        result.Bitmap.Dispose();
+        Assert.True(result.DetailedThumbnailLoaded);
+        Assert.True(result.OriginalImageLoaded);
         Assert.Equal(1, handler.RequestCount);
     }
 
@@ -668,16 +668,16 @@ public sealed class ImageCacheServiceWarmupTests
         var handler = new FailSeekableReadThenBytesHandler(PngBytes);
         using var httpClient = new HttpClient(handler);
 
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => imageCache.LoadDisplayBitmapAsync(
+        var bitmap = await imageCache.LoadDisplayBitmapAsync(
             "album",
             "photo-thumbnail.jpg",
             "https://example.invalid/photo-display.jpg",
             httpClient,
             maxPixelWidth: 64,
             maxPixelHeight: 64,
-            CancellationToken.None));
+            CancellationToken.None);
 
-        Assert.Contains("IPlatformRenderInterface", exception.Message);
+        bitmap.Dispose();
         Assert.Equal(2, handler.RequestCount);
     }
 
@@ -690,33 +690,26 @@ public sealed class ImageCacheServiceWarmupTests
             Limits = new AlbumImageCacheLimits(
                 FastThumbnailMemoryBytes: 0,
                 DetailedThumbnailMemoryBytes: 0,
-                OriginalImageMemoryBytes: 1024 * 1024,
+                OriginalImageMemoryBytes: 0,
                 FastThumbnailDiskBytes: 0,
                 DetailedThumbnailDiskBytes: 0,
-                OriginalImageDiskBytes: 0)
+                OriginalImageDiskBytes: 1024 * 1024)
         };
-        var handler = new SequentialBytesHandler([1, 2, 3, 4], PngBytes);
+        var handler = new BytesHandler(PngBytes);
         using var httpClient = new HttpClient(handler);
+        await WriteCacheFileAsync(imageCache, "album", "photo-full.jpg", [1, 2, 3, 4]);
 
-        Assert.True(await imageCache.WarmOriginalAsync(
-            "album",
-            "photo-full.jpg",
-            "https://example.invalid/photo-original.jpg",
-            httpClient,
-            AlbumImageCacheReadMode.Eager,
-            CancellationToken.None));
-
-        var exception = await Assert.ThrowsAsync<AlbumImageCacheEntryInvalidException>(() => imageCache.LoadDisplayBitmapAsync(
+        var bitmap = await imageCache.LoadDisplayBitmapAsync(
             "album",
             "photo-full.jpg",
             "https://example.invalid/photo-original.jpg",
             httpClient,
             maxPixelWidth: 64,
             maxPixelHeight: 64,
-            CancellationToken.None));
+            CancellationToken.None);
 
-        Assert.Contains("IPlatformRenderInterface", exception.InnerException?.Message);
-        Assert.Equal(2, handler.RequestCount);
+        bitmap.Dispose();
+        Assert.Equal(1, handler.RequestCount);
     }
 
     [Fact]
@@ -788,10 +781,10 @@ public sealed class ImageCacheServiceWarmupTests
             Limits = new AlbumImageCacheLimits(
                 FastThumbnailMemoryBytes: 0,
                 DetailedThumbnailMemoryBytes: 0,
-                OriginalImageMemoryBytes: 1024 * 1024,
+                OriginalImageMemoryBytes: 0,
                 FastThumbnailDiskBytes: 0,
                 DetailedThumbnailDiskBytes: 0,
-                OriginalImageDiskBytes: 0)
+                OriginalImageDiskBytes: 1024 * 1024)
         };
         var handler = new BytesHandler([1, 2, 3, 4]);
         using var httpClient = new HttpClient(handler);
@@ -825,10 +818,10 @@ public sealed class ImageCacheServiceWarmupTests
             Limits = new AlbumImageCacheLimits(
                 FastThumbnailMemoryBytes: 0,
                 DetailedThumbnailMemoryBytes: 0,
-                OriginalImageMemoryBytes: 1024 * 1024,
+                OriginalImageMemoryBytes: 0,
                 FastThumbnailDiskBytes: 0,
                 DetailedThumbnailDiskBytes: 0,
-                OriginalImageDiskBytes: 0)
+                OriginalImageDiskBytes: 1024 * 1024)
         };
         var handler = new BytesHandler([1, 2, 3, 4]);
         using var httpClient = new HttpClient(handler);
@@ -862,10 +855,10 @@ public sealed class ImageCacheServiceWarmupTests
             Limits = new AlbumImageCacheLimits(
                 FastThumbnailMemoryBytes: 0,
                 DetailedThumbnailMemoryBytes: 0,
-                OriginalImageMemoryBytes: 1024 * 1024,
+                OriginalImageMemoryBytes: 0,
                 FastThumbnailDiskBytes: 0,
                 DetailedThumbnailDiskBytes: 0,
-                OriginalImageDiskBytes: 0)
+                OriginalImageDiskBytes: 1024 * 1024)
         };
         var handler = new BytesHandler([1, 2, 3, 4]);
         using var httpClient = new HttpClient(handler);

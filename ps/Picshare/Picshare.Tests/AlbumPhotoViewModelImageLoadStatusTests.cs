@@ -331,43 +331,20 @@ public sealed class AlbumPhotoViewModelImageLoadStatusTests
     }
 
     [Fact]
-    public void StopViewportLoad_DefersImageRelease()
+    public void StopViewportLoad_ReleasesImageImmediately()
     {
         var photo = CreatePhoto();
-        var bitmap = CreateBitmap();
         Assert.True(photo.TryBeginFastThumbnailLoad(out var workToken));
-        SetPrivateField(photo, "_image", bitmap);
+        SetPrivateField(photo, "_image", CreateBitmap());
         photo.Status = "Loading detailed image";
         photo.CompleteFastThumbnailLoad(loaded: true, workToken);
+        SetPrivateField<Bitmap?>(photo, "_image", null);
 
         photo.StopViewportLoad();
 
-        Assert.Same(bitmap, photo.Image);
-        Assert.Equal(AlbumImageItemStatus.Loaded, photo.FastThumbnailStatus);
-        Assert.Equal("Loading detailed image", photo.Status);
-        Assert.NotNull(GetPrivateField<CancellationTokenSource?>(photo, "_imageReleaseCancellation"));
-
-        photo.KeepCachedImage();
-        SetPrivateField<Bitmap?>(photo, "_image", null);
-    }
-
-    [Fact]
-    public void KeepCachedImage_CancelsDeferredImageRelease()
-    {
-        var photo = CreatePhoto();
-        var bitmap = CreateBitmap();
-        SetPrivateField(photo, "_image", bitmap);
-        photo.Status = "Loading detailed image";
-
-        photo.ScheduleDeferredImageRelease();
-        Assert.NotNull(GetPrivateField<CancellationTokenSource?>(photo, "_imageReleaseCancellation"));
-
-        photo.KeepCachedImage();
-
-        Assert.Null(GetPrivateField<CancellationTokenSource?>(photo, "_imageReleaseCancellation"));
-        Assert.Same(bitmap, photo.Image);
-
-        SetPrivateField<Bitmap?>(photo, "_image", null);
+        Assert.Null(photo.Image);
+        Assert.Equal(AlbumImageItemStatus.Unloaded, photo.FastThumbnailStatus);
+        Assert.Equal("Loading", photo.Status);
     }
 
     private static AlbumPhotoViewModel CreatePhoto()

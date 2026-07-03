@@ -3040,12 +3040,6 @@ public partial class MainViewModel : ViewModelBase
     public async Task StartPhotoViewportLoadAsync(AlbumPhotoViewModel photo)
     {
         await Task.CompletedTask;
-        photo.KeepCachedImage();
-        if (photo.DuplicateStackPhoto is not null && !ReferenceEquals(photo.DuplicateStackPhoto, photo))
-        {
-            photo.DuplicateStackPhoto.KeepCachedImage();
-        }
-
         _albumImageListLoader.AddViewportPhoto(photo);
     }
 
@@ -3063,7 +3057,7 @@ public partial class MainViewModel : ViewModelBase
         {
             if (!remainingViewportPhotos.Contains(removedPhoto) && !IsPhotoViewerPriorityPhoto(removedPhoto))
             {
-                removedPhoto.ScheduleDeferredImageRelease();
+                removedPhoto.ReleaseCachedImage();
             }
         }
     }
@@ -3071,15 +3065,6 @@ public partial class MainViewModel : ViewModelBase
     public void PrioritizePhotoViewportLoads(IReadOnlyList<AlbumPhotoViewModel> photos)
     {
         _albumImageListLoader.UpdateViewport(photos);
-        foreach (var photo in photos)
-        {
-            photo.KeepCachedImage();
-            if (photo.DuplicateStackPhoto is not null && !ReferenceEquals(photo.DuplicateStackPhoto, photo))
-            {
-                photo.DuplicateStackPhoto.KeepCachedImage();
-            }
-        }
-
         var remainingViewportPhotos = _albumImageListLoader.GetListViewportPhotosSnapshot().ToHashSet();
         var removedPhotos = _visibleAlbumPhotoViewport.Except(remainingViewportPhotos).ToList();
 
@@ -3096,7 +3081,7 @@ public partial class MainViewModel : ViewModelBase
                 continue;
             }
 
-            photo.ScheduleDeferredImageRelease();
+            photo.ReleaseCachedImage();
         }
     }
 
@@ -3224,7 +3209,6 @@ public partial class MainViewModel : ViewModelBase
 
             if (ReferenceEquals(_selectedViewedPhoto, photo) || PhotoViewerDuplicatePhotos.Contains(photo))
             {
-                photo.KeepCachedImage();
                 _albumImageListLoader.AddPriorityPhoto(photo);
             }
 
@@ -3241,7 +3225,6 @@ public partial class MainViewModel : ViewModelBase
                 return;
             }
 
-            photo.KeepCachedImage();
             _albumImageListLoader.AddPriorityPhoto(photo);
             await Task.CompletedTask;
         }
@@ -5195,7 +5178,7 @@ public partial class MainViewModel : ViewModelBase
             var listViewportPhotos = _albumImageListLoader.GetListViewportPhotosSnapshot().ToHashSet();
             foreach (var oldPriorityPhoto in oldPriorityPhotos.Except(newPriorityPhotos).Where(photo => !listViewportPhotos.Contains(photo)))
             {
-                oldPriorityPhoto.ScheduleDeferredImageRelease();
+                oldPriorityPhoto.ReleaseCachedImage();
             }
         }
 

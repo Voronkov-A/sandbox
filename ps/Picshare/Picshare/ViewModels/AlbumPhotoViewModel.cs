@@ -12,7 +12,6 @@ public partial class AlbumPhotoViewModel : ObservableObject
     private const int DisplayPixelWidth = 220;
     private const int DisplayPixelHeight = 150;
     private const int MaxConcurrentThumbnailLoads = 4;
-    private static readonly TimeSpan DeferredImageReleaseDelay = TimeSpan.FromSeconds(30);
     private static readonly object ThumbnailLoadQueueSync = new();
     private static readonly Dictionary<AlbumPhotoViewModel, ThumbnailLoadRequest> PendingThumbnailLoads = new();
     private static readonly HashSet<AlbumPhotoViewModel> PrioritizedThumbnailPhotos = new();
@@ -134,7 +133,6 @@ public partial class AlbumPhotoViewModel : ObservableObject
     public IBrush SelectionForeground => IsSelectedForBulk ? Brushes.White : Brushes.Black;
 
     private CancellationTokenSource? _loadCancellation;
-    private CancellationTokenSource? _imageReleaseCancellation;
     private int _thumbnailPriorityRank = int.MaxValue;
     private int _displayImagePriorityRank = int.MaxValue;
 
@@ -588,7 +586,6 @@ public partial class AlbumPhotoViewModel : ObservableObject
 
     public void ResetImageLoadStatusesForNewGeneration()
     {
-        CancelDeferredImageRelease();
         Image = null;
         ClearImageLoadStatusesAndInvalidateClaims();
         Interlocked.Exchange(ref _untokenedImageWorkToken, 0);
@@ -884,7 +881,6 @@ public partial class AlbumPhotoViewModel : ObservableObject
             return;
         }
 
-        CancelDeferredImageRelease();
         var previousCancellation = _loadCancellation;
         _loadCancellation = null;
         try
@@ -947,7 +943,7 @@ public partial class AlbumPhotoViewModel : ObservableObject
         CancelPendingDisplayImageLoad(this);
         ClearPendingLoadPriority(this);
         IsImageLoading = false;
-        ScheduleDeferredImageRelease();
+        ReleaseCachedImage();
     }
 
     private async Task LoadThumbnailAsync(ImageCacheService imageCache, HttpClient httpClient, CancellationToken cancellationToken)
@@ -1328,59 +1324,9 @@ public partial class AlbumPhotoViewModel : ObservableObject
 
     public void ReleaseCachedImage()
     {
-        CancelDeferredImageRelease();
         Image = null;
         ResetImageLoadStatuses();
         Status = "Loading";
-    }
-
-    public void KeepCachedImage()
-    {
-        CancelDeferredImageRelease();
-    }
-
-    public void ScheduleDeferredImageRelease()
-    {
-        if (Image is null)
-        {
-            return;
-        }
-
-        CancelDeferredImageRelease();
-        _imageReleaseCancellation = new CancellationTokenSource();
-        _ = ReleaseCachedImageAfterDelayAsync(_imageReleaseCancellation);
-    }
-
-    private async Task ReleaseCachedImageAfterDelayAsync(CancellationTokenSource cancellation)
-    {
-        try
-        {
-            await Task.Delay(DeferredImageReleaseDelay, cancellation.Token);
-            if (ReferenceEquals(_imageReleaseCancellation, cancellation))
-            {
-                ReleaseCachedImage();
-            }
-        }
-        catch (OperationCanceledException)
-        {
-        }
-    }
-
-    private void CancelDeferredImageRelease()
-    {
-        var cancellation = _imageReleaseCancellation;
-        _imageReleaseCancellation = null;
-        try
-        {
-            cancellation?.Cancel();
-        }
-        catch (ObjectDisposedException)
-        {
-        }
-        finally
-        {
-            cancellation?.Dispose();
-        }
     }
 
     partial void OnImageChanging(Bitmap? value)
