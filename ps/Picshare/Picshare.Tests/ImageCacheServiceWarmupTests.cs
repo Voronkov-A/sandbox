@@ -45,6 +45,102 @@ public sealed class ImageCacheServiceWarmupTests
     }
 
     [Fact]
+    public async Task DetailedThumbnailWarmup_WarmsDiskWhenMemoryCacheCannotStoreGeneratedThumbnail()
+    {
+        using var tempDirectory = new TempDirectory();
+        var imageCache = new ImageCacheService(tempDirectory.Path)
+        {
+            Limits = new AlbumImageCacheLimits(
+                FastThumbnailMemoryBytes: 0,
+                DetailedThumbnailMemoryBytes: 1,
+                OriginalImageMemoryBytes: 1,
+                FastThumbnailDiskBytes: 0,
+                DetailedThumbnailDiskBytes: 1024 * 1024,
+                OriginalImageDiskBytes: 0)
+        };
+        var handler = new BytesHandler(PngBytes);
+        using var httpClient = new HttpClient(handler);
+
+        var result = await imageCache.WarmDetailedThumbnailAsync(
+            "album",
+            "photo-1",
+            "photo-1-full.jpg",
+            "https://example.invalid/photo-1.jpg",
+            httpClient,
+            AlbumImageCacheReadMode.Lazy,
+            AlbumImageCacheReadMode.Lazy,
+            CancellationToken.None);
+
+        Assert.True(result.DetailedThumbnailLoaded);
+        Assert.False(result.OriginalImageLoaded);
+        Assert.Equal(1, handler.RequestCount);
+
+        imageCache.Limits = imageCache.Limits with { DetailedThumbnailMemoryBytes = 0 };
+
+        var lookupResult = await imageCache.WarmDetailedThumbnailAsync(
+            "album",
+            "photo-1",
+            "photo-1-full.jpg",
+            "https://example.invalid/photo-1.jpg",
+            httpClient,
+            AlbumImageCacheReadMode.Lookup,
+            AlbumImageCacheReadMode.Lookup,
+            CancellationToken.None);
+
+        Assert.True(lookupResult.DetailedThumbnailLoaded);
+        Assert.False(lookupResult.OriginalImageLoaded);
+        Assert.Equal(1, handler.RequestCount);
+    }
+
+    [Fact]
+    public async Task WarmFastThumbnailAsync_WarmsDiskWhenMemoryCacheAlreadyContainsItem()
+    {
+        using var tempDirectory = new TempDirectory();
+        var imageCache = new ImageCacheService(tempDirectory.Path)
+        {
+            Limits = new AlbumImageCacheLimits(
+                FastThumbnailMemoryBytes: 1024 * 1024,
+                DetailedThumbnailMemoryBytes: 0,
+                OriginalImageMemoryBytes: 0,
+                FastThumbnailDiskBytes: 0,
+                DetailedThumbnailDiskBytes: 0,
+                OriginalImageDiskBytes: 0)
+        };
+        var handler = new BytesHandler(PngBytes);
+        using var httpClient = new HttpClient(handler);
+
+        Assert.True(await imageCache.WarmFastThumbnailAsync(
+            "album",
+            "photo-1",
+            "https://example.invalid/photo-1-thumb.jpg",
+            httpClient,
+            AlbumImageCacheReadMode.Eager,
+            CancellationToken.None));
+
+        imageCache.Limits = imageCache.Limits with { FastThumbnailDiskBytes = 1024 * 1024 };
+
+        Assert.True(await imageCache.WarmFastThumbnailAsync(
+            "album",
+            "photo-1",
+            "https://example.invalid/photo-1-thumb.jpg",
+            httpClient,
+            AlbumImageCacheReadMode.Eager,
+            CancellationToken.None));
+        Assert.Equal(2, handler.RequestCount);
+
+        imageCache.Limits = imageCache.Limits with { FastThumbnailMemoryBytes = 0 };
+
+        Assert.True(await imageCache.WarmFastThumbnailAsync(
+            "album",
+            "photo-1",
+            "https://example.invalid/photo-1-thumb.jpg",
+            httpClient,
+            AlbumImageCacheReadMode.Lookup,
+            CancellationToken.None));
+        Assert.Equal(2, handler.RequestCount);
+    }
+
+    [Fact]
     public async Task DetailedThumbnailWarmup_RetriesAfterInvalidOriginalCacheEntry()
     {
         using var tempDirectory = new TempDirectory();

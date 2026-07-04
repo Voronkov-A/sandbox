@@ -613,10 +613,16 @@ public sealed class ImageCacheService
         Func<Task<Stream>> openSourceAsync,
         CancellationToken cancellationToken)
     {
+        var memoryCached = false;
         if (TryGetMemoryCache(albumId, cacheFileName, kind, readMode, out var memoryBitmap))
         {
             memoryBitmap.Dispose();
-            return true;
+            memoryCached = true;
+            if (readMode == AlbumImageCacheReadMode.Lookup ||
+                !ShouldAttemptDiskWarmup(albumId, cacheFileName, kind))
+            {
+                return true;
+            }
         }
 
         var result = await GetEncodedImageBytesAsync(
@@ -626,14 +632,37 @@ public sealed class ImageCacheService
             readMode,
             openSourceAsync,
             cancellationToken);
-        var memoryCached = false;
-        if (!result.IsCached && readMode != AlbumImageCacheReadMode.Lookup)
+        if (!memoryCached && !result.IsCached && readMode != AlbumImageCacheReadMode.Lookup)
         {
             using var bitmap = await DecodeCachedBitmapAsync(result, albumId, cacheFileName, kind, cancellationToken);
             memoryCached = AddMemoryCache(albumId, cacheFileName, kind, bitmap, readMode);
         }
 
         return result.IsCached || memoryCached;
+    }
+
+    private bool ShouldAttemptDiskWarmup(string albumId, string cacheFileName, AlbumImageCacheKind kind)
+    {
+        var diskLimit = Limits.GetDiskBytes(kind);
+        if (!IsDiskCachingEnabled(kind) || diskLimit <= 0)
+        {
+            return false;
+        }
+
+        var diskPath = GetCachedPath(albumId, cacheFileName);
+        if (diskPath is null)
+        {
+            return true;
+        }
+
+        try
+        {
+            return new FileInfo(diskPath).Length > diskLimit;
+        }
+        catch
+        {
+            return true;
+        }
     }
 
     private async Task<AlbumImageCacheLoadResult> GetEncodedImageBytesAsync(
