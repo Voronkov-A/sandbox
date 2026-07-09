@@ -155,6 +155,15 @@ public partial class MainViewModel : ViewModelBase
     private int _albumOriginalImageMemoryCacheSizeMb = 256;
 
     [ObservableProperty]
+    private int _albumFastThumbnailBitmapCacheSizeMb = 64;
+
+    [ObservableProperty]
+    private int _albumDetailedThumbnailBitmapCacheSizeMb = 128;
+
+    [ObservableProperty]
+    private int _albumOriginalImageBitmapCacheSizeMb = 64;
+
+    [ObservableProperty]
     private int _albumFastThumbnailDiskCacheSizeMb = 512;
 
     [ObservableProperty]
@@ -189,6 +198,8 @@ public partial class MainViewModel : ViewModelBase
 
     [ObservableProperty]
     private Bitmap? _photoViewerImage;
+    private AlbumImageBitmapLease? _photoViewerImageLease;
+    private bool _isApplyingPhotoViewerImageLease;
 
     [ObservableProperty]
     private int _photoViewerRotationDegrees;
@@ -724,6 +735,9 @@ public partial class MainViewModel : ViewModelBase
             AlbumFastThumbnailMemoryCacheSizeMb = NormalizeCacheSizeMb(localSettings.AlbumFastThumbnailMemoryCacheSizeMb, 256);
             AlbumDetailedThumbnailMemoryCacheSizeMb = NormalizeCacheSizeMb(localSettings.AlbumDetailedThumbnailMemoryCacheSizeMb, 512);
             AlbumOriginalImageMemoryCacheSizeMb = NormalizeCacheSizeMb(localSettings.AlbumOriginalImageMemoryCacheSizeMb, 256);
+            AlbumFastThumbnailBitmapCacheSizeMb = NormalizeCacheSizeMb(localSettings.AlbumFastThumbnailBitmapCacheSizeMb, 64);
+            AlbumDetailedThumbnailBitmapCacheSizeMb = NormalizeCacheSizeMb(localSettings.AlbumDetailedThumbnailBitmapCacheSizeMb, 128);
+            AlbumOriginalImageBitmapCacheSizeMb = NormalizeCacheSizeMb(localSettings.AlbumOriginalImageBitmapCacheSizeMb, 64);
             AlbumFastThumbnailDiskCacheSizeMb = NormalizeCacheSizeMb(localSettings.AlbumFastThumbnailDiskCacheSizeMb, 512);
             AlbumDetailedThumbnailDiskCacheSizeMb = NormalizeCacheSizeMb(localSettings.AlbumDetailedThumbnailDiskCacheSizeMb, 2048);
             AlbumOriginalImageDiskCacheSizeMb = NormalizeCacheSizeMb(localSettings.AlbumOriginalImageDiskCacheSizeMb, 2048);
@@ -1605,7 +1619,7 @@ public partial class MainViewModel : ViewModelBase
         CancelPhotoViewerLoad();
         _albumImageListLoader.ClearPriorityPhotos();
         ReleasePhotoViewerPriorityImages();
-        PhotoViewerImage = null;
+        SetPhotoViewerImageLease(null);
         PhotoViewerRotationDegrees = 0;
         PhotoViewerTitle = "";
         PhotoViewerStatus = "";
@@ -1655,7 +1669,7 @@ public partial class MainViewModel : ViewModelBase
             PhotoViewerTitle = photo.FileName;
             PhotoViewerRotationDegrees = photo.RotationDegrees;
             PhotoViewerStatus = "Loading";
-            PhotoViewerImage = null;
+            SetPhotoViewerImageLease(null);
 
             var viewerImage = await _imageCache.LoadOriginalBitmapAsync(
                 photo.AlbumId,
@@ -1666,7 +1680,7 @@ public partial class MainViewModel : ViewModelBase
 
             if (ReferenceEquals(_photoViewerCancellation, cancellation))
             {
-                PhotoViewerImage = viewerImage;
+                SetPhotoViewerImageLease(viewerImage);
                 PhotoViewerStatus = "";
                 _ = LoadViewedPhotoDisplayImageAsync(photo, cancellation);
                 _ = PreloadPhotoViewerDuplicatePhotosAsync(cancellation);
@@ -3040,6 +3054,7 @@ public partial class MainViewModel : ViewModelBase
     public async Task StartPhotoViewportLoadAsync(AlbumPhotoViewModel photo)
     {
         await Task.CompletedTask;
+        photo.ResetImageLoadStatusesIfImageMissing();
         _albumImageListLoader.AddViewportPhoto(photo);
     }
 
@@ -3083,6 +3098,11 @@ public partial class MainViewModel : ViewModelBase
 
             photo.ReleaseCachedImage();
         }
+    }
+
+    public string DescribePhotoImageLoadState(AlbumPhotoViewModel photo)
+    {
+        return _albumImageListLoader.DescribePhotoImageLoadState(photo);
     }
 
     public void ClearPhotoViewportLoads()
@@ -3156,7 +3176,7 @@ public partial class MainViewModel : ViewModelBase
         PhotoViewerTitle = photo.FileName;
         PhotoViewerRotationDegrees = photo.RotationDegrees;
         PhotoViewerStatus = "Loading";
-        PhotoViewerImage = null;
+        SetPhotoViewerImageLease(null);
 
         try
         {
@@ -3168,7 +3188,7 @@ public partial class MainViewModel : ViewModelBase
                 cancellation.Token);
             if (ReferenceEquals(_photoViewerCancellation, cancellation))
             {
-                PhotoViewerImage = viewerImage;
+                SetPhotoViewerImageLease(viewerImage);
                 PhotoViewerStatus = "Original loaded";
                 _ = LoadViewedPhotoDisplayImageAsync(photo, cancellation);
                 _ = PreloadPhotoViewerDuplicatePhotosAsync(cancellation);
@@ -3922,9 +3942,41 @@ public partial class MainViewModel : ViewModelBase
 
     partial void OnPhotoViewerImageChanging(Bitmap? value)
     {
-        if (PhotoViewerImage is not null && !ReferenceEquals(PhotoViewerImage, value))
+        if (PhotoViewerImage is null || ReferenceEquals(PhotoViewerImage, value) || _isApplyingPhotoViewerImageLease)
+        {
+            return;
+        }
+
+        if (_photoViewerImageLease is not null)
+        {
+            _photoViewerImageLease.Dispose();
+            _photoViewerImageLease = null;
+            return;
+        }
+
+        if (PhotoViewerImage is not null)
         {
             PhotoViewerImage.Dispose();
+        }
+    }
+
+    private void SetPhotoViewerImageLease(AlbumImageBitmapLease? value)
+    {
+        var oldLease = _photoViewerImageLease;
+        _photoViewerImageLease = value;
+        _isApplyingPhotoViewerImageLease = true;
+        try
+        {
+            PhotoViewerImage = value?.Bitmap;
+        }
+        finally
+        {
+            _isApplyingPhotoViewerImageLease = false;
+        }
+
+        if (!ReferenceEquals(oldLease, value))
+        {
+            oldLease?.Dispose();
         }
     }
 
@@ -6012,6 +6064,9 @@ public partial class MainViewModel : ViewModelBase
             AlbumFastThumbnailMemoryCacheSizeMb = GetCacheSizeMb(AlbumFastThumbnailMemoryCacheSizeMb, 256),
             AlbumDetailedThumbnailMemoryCacheSizeMb = GetCacheSizeMb(AlbumDetailedThumbnailMemoryCacheSizeMb, 512),
             AlbumOriginalImageMemoryCacheSizeMb = GetCacheSizeMb(AlbumOriginalImageMemoryCacheSizeMb, 256),
+            AlbumFastThumbnailBitmapCacheSizeMb = GetCacheSizeMb(AlbumFastThumbnailBitmapCacheSizeMb, 64),
+            AlbumDetailedThumbnailBitmapCacheSizeMb = GetCacheSizeMb(AlbumDetailedThumbnailBitmapCacheSizeMb, 128),
+            AlbumOriginalImageBitmapCacheSizeMb = GetCacheSizeMb(AlbumOriginalImageBitmapCacheSizeMb, 64),
             AlbumFastThumbnailDiskCacheSizeMb = GetCacheSizeMb(AlbumFastThumbnailDiskCacheSizeMb, 512),
             AlbumDetailedThumbnailDiskCacheSizeMb = GetCacheSizeMb(AlbumDetailedThumbnailDiskCacheSizeMb, 2048),
             AlbumOriginalImageDiskCacheSizeMb = GetCacheSizeMb(AlbumOriginalImageDiskCacheSizeMb, 2048),
@@ -6033,6 +6088,9 @@ public partial class MainViewModel : ViewModelBase
             AlbumImageCacheLimits.Megabytes(GetCacheSizeMb(AlbumFastThumbnailMemoryCacheSizeMb, 256)),
             AlbumImageCacheLimits.Megabytes(GetCacheSizeMb(AlbumDetailedThumbnailMemoryCacheSizeMb, 512)),
             AlbumImageCacheLimits.Megabytes(GetCacheSizeMb(AlbumOriginalImageMemoryCacheSizeMb, 256)),
+            AlbumImageCacheLimits.Megabytes(GetCacheSizeMb(AlbumFastThumbnailBitmapCacheSizeMb, 64)),
+            AlbumImageCacheLimits.Megabytes(GetCacheSizeMb(AlbumDetailedThumbnailBitmapCacheSizeMb, 128)),
+            AlbumImageCacheLimits.Megabytes(GetCacheSizeMb(AlbumOriginalImageBitmapCacheSizeMb, 64)),
             AlbumImageCacheLimits.Megabytes(GetCacheSizeMb(AlbumFastThumbnailDiskCacheSizeMb, 512)),
             AlbumImageCacheLimits.Megabytes(GetCacheSizeMb(AlbumDetailedThumbnailDiskCacheSizeMb, 2048)),
             AlbumImageCacheLimits.Megabytes(GetCacheSizeMb(AlbumOriginalImageDiskCacheSizeMb, 2048)));
@@ -6151,6 +6209,21 @@ public partial class MainViewModel : ViewModelBase
     }
 
     partial void OnAlbumOriginalImageMemoryCacheSizeMbChanged(int value)
+    {
+        PersistLocalUserSettingsIfReady();
+    }
+
+    partial void OnAlbumFastThumbnailBitmapCacheSizeMbChanged(int value)
+    {
+        PersistLocalUserSettingsIfReady();
+    }
+
+    partial void OnAlbumDetailedThumbnailBitmapCacheSizeMbChanged(int value)
+    {
+        PersistLocalUserSettingsIfReady();
+    }
+
+    partial void OnAlbumOriginalImageBitmapCacheSizeMbChanged(int value)
     {
         PersistLocalUserSettingsIfReady();
     }

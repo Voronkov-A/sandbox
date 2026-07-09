@@ -72,6 +72,12 @@ public sealed class LocalUserSettings
 
     public int AlbumOriginalImageMemoryCacheSizeMb { get; set; } = 256;
 
+    public int AlbumFastThumbnailBitmapCacheSizeMb { get; set; } = 64;
+
+    public int AlbumDetailedThumbnailBitmapCacheSizeMb { get; set; } = 128;
+
+    public int AlbumOriginalImageBitmapCacheSizeMb { get; set; } = 64;
+
     public int AlbumFastThumbnailDiskCacheSizeMb { get; set; } = 512;
 
     public int AlbumDetailedThumbnailDiskCacheSizeMb { get; set; } = 2048;

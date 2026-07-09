@@ -1,0 +1,1 @@
+dotnet publish ./Picshare.Android/Picshare.Android.csproj -c Release -r android-x64 --self-contained

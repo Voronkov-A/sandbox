@@ -59,6 +59,9 @@ public partial class AlbumPhotoViewModel : ObservableObject
     [ObservableProperty]
     private Bitmap? _image;
 
+    private AlbumImageBitmapLease? _imageLease;
+    private bool _isApplyingImageLease;
+
     [ObservableProperty]
     private string _status = "Loading";
 
@@ -584,9 +587,20 @@ public partial class AlbumPhotoViewModel : ObservableObject
         IsImageLoading = false;
     }
 
+    public void ResetImageLoadStatusesIfImageMissing()
+    {
+        if (Image is not null)
+        {
+            return;
+        }
+
+        ResetImageLoadStatuses();
+        Status = "Loading";
+    }
+
     public void ResetImageLoadStatusesForNewGeneration()
     {
-        Image = null;
+        SetImageLease(null);
         ClearImageLoadStatusesAndInvalidateClaims();
         Interlocked.Exchange(ref _untokenedImageWorkToken, 0);
         IsFullImageLoaded = false;
@@ -594,9 +608,9 @@ public partial class AlbumPhotoViewModel : ObservableObject
         Status = "Loading";
     }
 
-    public void SetLoadedImage(Bitmap bitmap, bool isDetailedThumbnail, string status)
+    public void SetLoadedImage(AlbumImageBitmapLease bitmap, bool isDetailedThumbnail, string status)
     {
-        Image = bitmap;
+        SetImageLease(bitmap);
         IsFullImageLoaded = isDetailedThumbnail;
         Status = status;
     }
@@ -971,7 +985,7 @@ public partial class AlbumPhotoViewModel : ObservableObject
                 cancellationToken.ThrowIfCancellationRequested();
             }
 
-            Image = bitmap;
+            SetImageLease(bitmap);
 
             Status = "Loading full image";
         }
@@ -1038,7 +1052,7 @@ public partial class AlbumPhotoViewModel : ObservableObject
                 cancellationToken.ThrowIfCancellationRequested();
             }
 
-            Image = bitmap;
+            SetImageLease(bitmap);
             IsFullImageLoaded = true;
             Status = "Full image loaded";
         }
@@ -1324,16 +1338,48 @@ public partial class AlbumPhotoViewModel : ObservableObject
 
     public void ReleaseCachedImage()
     {
-        Image = null;
+        SetImageLease(null);
         ResetImageLoadStatuses();
         Status = "Loading";
     }
 
     partial void OnImageChanging(Bitmap? value)
     {
-        if (Image is not null && !ReferenceEquals(Image, value))
+        if (Image is null || ReferenceEquals(Image, value) || _isApplyingImageLease)
+        {
+            return;
+        }
+
+        if (_imageLease is not null)
+        {
+            _imageLease.Dispose();
+            _imageLease = null;
+            return;
+        }
+
+        if (Image is not null)
         {
             Image.Dispose();
+        }
+    }
+
+    private void SetImageLease(AlbumImageBitmapLease? value)
+    {
+        var oldLease = _imageLease;
+        _imageLease = value;
+        _isApplyingImageLease = true;
+        try
+        {
+            Image = value?.Bitmap;
+        }
+        finally
+        {
+            _isApplyingImageLease = false;
+        }
+
+        if (!ReferenceEquals(oldLease, value))
+        {
+            oldLease?.Dispose();
         }
     }
 

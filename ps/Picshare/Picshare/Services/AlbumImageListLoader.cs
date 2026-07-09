@@ -20,6 +20,7 @@ public sealed class AlbumImageListLoader : IDisposable
     private List<int> _orderedPriorityIndices = new();
     private HashSet<AlbumImageWarmupKey> _skippedWarmupKeys = new();
     private HashSet<AlbumImageWarmupKey> _failedVisibleKeys = new();
+    private Dictionary<int, ActiveImageWork> _activeImageWorks = new();
     private CancellationTokenSource? _lifetime;
     private readonly List<Task> _workerTasks = new();
     private Task _stoppedWorkerTasks = Task.CompletedTask;
@@ -57,6 +58,7 @@ public sealed class AlbumImageListLoader : IDisposable
             _orderedPriorityIndices = new List<int>();
             _skippedWarmupKeys = new HashSet<AlbumImageWarmupKey>();
             _failedVisibleKeys = new HashSet<AlbumImageWarmupKey>();
+            _activeImageWorks = new Dictionary<int, ActiveImageWork>();
         }
 
         StartWorkers(generation);
@@ -126,6 +128,7 @@ public sealed class AlbumImageListLoader : IDisposable
     {
         lock (_sync)
         {
+            var previousSnapshotIndices = _viewportSnapshotIndexCounts.Keys.ToHashSet();
             var viewportIndices = visiblePhotos
                 .SelectMany(photo => photo.DuplicateStackPhoto is not null && !ReferenceEquals(photo.DuplicateStackPhoto, photo)
                     ? new[] { photo, photo.DuplicateStackPhoto }
@@ -133,6 +136,11 @@ public sealed class AlbumImageListLoader : IDisposable
                 .Select(photo => _indexByPhoto.TryGetValue(photo, out var index) ? index : -1)
                 .Where(index => index >= 0)
                 .ToList();
+            foreach (var index in viewportIndices.Distinct().Where(index => !previousSnapshotIndices.Contains(index)))
+            {
+                ClearVisibleFailureSkippedNoLock(index);
+            }
+
             _orderedViewportIndices = viewportIndices
                 .Distinct()
                 .ToList();
@@ -258,6 +266,7 @@ public sealed class AlbumImageListLoader : IDisposable
             _orderedPriorityIndices = new List<int>();
             _skippedWarmupKeys = new HashSet<AlbumImageWarmupKey>();
             _failedVisibleKeys = new HashSet<AlbumImageWarmupKey>();
+            _activeImageWorks = new Dictionary<int, ActiveImageWork>();
         }
     }
 
@@ -275,6 +284,26 @@ public sealed class AlbumImageListLoader : IDisposable
     public IReadOnlyList<AlbumPhotoViewModel> GetListViewportPhotosSnapshot()
     {
         return GetListViewportPhotos();
+    }
+
+    public string DescribePhotoImageLoadState(AlbumPhotoViewModel photo)
+    {
+        lock (_sync)
+        {
+            var hasIndex = _indexByPhoto.TryGetValue(photo, out var index);
+            if (!hasIndex)
+            {
+                return $"index=missing, status=F:{photo.FastThumbnailStatus}/D:{photo.DetailedThumbnailStatus}/O:{photo.OriginalImageStatus}, busy={photo.IsImageLoadBusyAtomic()}, image={(photo.Image is null ? "null" : "set")}, full={photo.IsFullImageLoaded}, loading={photo.IsImageLoading}";
+            }
+
+            var fastSkipped = _failedVisibleKeys.Contains(new AlbumImageWarmupKey(index, AlbumImageWork.FastThumbnail));
+            var detailedSkipped = _failedVisibleKeys.Contains(new AlbumImageWarmupKey(index, AlbumImageWork.DetailedThumbnail));
+            var originalSkipped = _failedVisibleKeys.Contains(new AlbumImageWarmupKey(index, AlbumImageWork.OriginalImage));
+            var active = _activeImageWorks.TryGetValue(index, out var activeWork)
+                ? $", active={activeWork.Work}/{(activeWork.IsVisible ? "visible" : "warmup")}/{(DateTime.UtcNow - activeWork.StartedUtc).TotalSeconds:0.0}s"
+                : "";
+            return $"index={index}, viewport={_viewportIndices.Contains(index)}, snapshot={_viewportSnapshotIndexCounts.ContainsKey(index)}, loaded={_viewportLoadedIndexCounts.ContainsKey(index)}, priority={_priorityIndices.Contains(index)}, ordered={_orderedViewportIndices.Contains(index)}, skipped=F:{fastSkipped}/D:{detailedSkipped}/O:{originalSkipped}, status=F:{photo.FastThumbnailStatus}/D:{photo.DetailedThumbnailStatus}/O:{photo.OriginalImageStatus}, busy={photo.IsImageLoadBusyAtomic()}, image={(photo.Image is null ? "null" : "set")}, full={photo.IsFullImageLoaded}, loading={photo.IsImageLoading}{active}";
+        }
     }
 
     public IReadOnlyList<int> GetListViewportIndicesSnapshot()
@@ -481,12 +510,7 @@ public sealed class AlbumImageListLoader : IDisposable
     {
         _viewportLoadedIndexCounts.TryGetValue(index, out var count);
         _viewportLoadedIndexCounts[index] = count + 1;
-        if (!_orderedViewportIndices.Contains(index))
-        {
-            _orderedViewportIndices.Add(index);
-        }
-
-        RefreshViewportIndicesNoLock();
+        ClearVisibleFailureSkippedNoLock(index);
     }
 
     private void ClearViewportNoLock()
@@ -509,7 +533,10 @@ public sealed class AlbumImageListLoader : IDisposable
 
     private void RefreshViewportIndicesNoLock()
     {
-        foreach (var index in _viewportLoadedIndexCounts.Keys)
+        _orderedViewportIndices = _orderedViewportIndices
+            .Where(index => _viewportSnapshotIndexCounts.ContainsKey(index))
+            .ToList();
+        foreach (var index in _viewportSnapshotIndexCounts.Keys)
         {
             if (index >= 0 && index < _photos.Count && !_orderedViewportIndices.Contains(index))
             {
@@ -518,7 +545,6 @@ public sealed class AlbumImageListLoader : IDisposable
         }
 
         _viewportIndices = _viewportSnapshotIndexCounts.Keys
-            .Concat(_viewportLoadedIndexCounts.Keys)
             .ToHashSet();
     }
 
@@ -551,10 +577,6 @@ public sealed class AlbumImageListLoader : IDisposable
             else
             {
                 _viewportLoadedIndexCounts.Remove(index);
-                if (!_viewportSnapshotIndexCounts.ContainsKey(index))
-                {
-                    _orderedViewportIndices.Remove(index);
-                }
             }
         }
 
@@ -606,6 +628,7 @@ public sealed class AlbumImageListLoader : IDisposable
         {
             if (_priorityIndices.Add(index))
             {
+                ClearVisibleFailureSkippedNoLock(index);
                 _orderedPriorityIndices.Add(index);
             }
         }
@@ -642,8 +665,9 @@ public sealed class AlbumImageListLoader : IDisposable
             {
                 return;
             }
-            catch
+            catch (Exception ex)
             {
+                Console.WriteLine($"PicshareImageLoader: worker {kind} loop failed: {ex.GetType().Name}: {ex.Message}");
                 SignalWorkers();
                 try
                 {
@@ -1089,6 +1113,7 @@ public sealed class AlbumImageListLoader : IDisposable
         long generation,
         CancellationToken cancellationToken)
     {
+        MarkActiveWork(photo, work, isVisible);
         try
         {
             if (isVisible)
@@ -1131,7 +1156,9 @@ public sealed class AlbumImageListLoader : IDisposable
                         }
                     }
 
-                    photo.CompleteFastThumbnailLoad(fastThumbnailLoaded, workToken);
+                    photo.CompleteFastThumbnailLoad(
+                        fastThumbnailLoaded && !NeedsVisibleControlReload(photo, generation),
+                        workToken);
                     return;
                 }
 
@@ -1158,7 +1185,7 @@ public sealed class AlbumImageListLoader : IDisposable
                     fastResult.Bitmap.Dispose();
                 }
 
-                photo.CompleteFastThumbnailLoad(boundToControl || fastResult.FastThumbnailLoaded, workToken);
+                photo.CompleteFastThumbnailLoad(boundToControl, workToken);
 
                 return;
             }
@@ -1188,7 +1215,7 @@ public sealed class AlbumImageListLoader : IDisposable
                 }
 
                 photo.CompleteDetailedThumbnailLoad(
-                    loaded: warmResult.DetailedThumbnailLoaded,
+                    loaded: warmResult.DetailedThumbnailLoaded && !NeedsVisibleControlReload(photo, generation),
                     originalLoaded: warmResult.OriginalImageLoaded,
                     ownsOriginalLoad,
                     workToken);
@@ -1214,7 +1241,7 @@ public sealed class AlbumImageListLoader : IDisposable
                     workToken,
                     generation);
                 photo.CompleteDetailedThumbnailLoad(
-                    loaded: boundToControl || detailedResult.DetailedThumbnailLoaded,
+                    loaded: boundToControl,
                     detailedResult.OriginalImageLoaded,
                     ownsOriginalLoad,
                     workToken);
@@ -1240,6 +1267,7 @@ public sealed class AlbumImageListLoader : IDisposable
                 photo.InvalidateImageCacheStatus(ex.Kind);
                 if (isVisible)
                 {
+                    LogImageLoadFailure(photo, work, isVisible, ex);
                     MarkVisibleFailureSkippedIfCurrentVisible(photo, work, workToken);
                 }
 
@@ -1271,6 +1299,7 @@ public sealed class AlbumImageListLoader : IDisposable
         {
             if (IsCurrentGeneration(generation))
             {
+                LogImageLoadFailure(photo, work, isVisible, ex);
                 if (isVisible)
                 {
                     MarkVisibleFailureSkippedIfCurrentVisible(photo, work, workToken);
@@ -1300,6 +1329,7 @@ public sealed class AlbumImageListLoader : IDisposable
         }
         finally
         {
+            ClearActiveWork(photo);
             if (isVisible)
             {
                 await Dispatcher.UIThread.InvokeAsync(() =>
@@ -1313,6 +1343,13 @@ public sealed class AlbumImageListLoader : IDisposable
 
             SignalWorkers();
         }
+    }
+
+    private static void LogImageLoadFailure(AlbumPhotoViewModel photo, AlbumImageWork work, bool isVisible, Exception ex)
+    {
+        Console.WriteLine(
+            $"PicshareImageLoader: {(TransientRetryPolicy.IsTransient(ex, CancellationToken.None) ? "warning" : "BUG")} {work} {(isVisible ? "visible" : "warmup")} failed for {photo.FileName} ({photo.PhotoId}): {ex.GetType().Name}: {ex.Message}");
+        Console.WriteLine($"PicshareImageLoader: exception detail: {ex}");
     }
 
     private async Task<bool> TryLoadCachedDetailedThumbnailForFastWorkAsync(
@@ -1391,6 +1428,7 @@ public sealed class AlbumImageListLoader : IDisposable
 
     private async Task ExecuteOriginalWarmupAsync(AlbumPhotoViewModel photo, int workToken, long generation, CancellationToken cancellationToken)
     {
+        MarkActiveWork(photo, AlbumImageWork.OriginalImage, isVisible: false);
         try
         {
             var originalLoaded = await _imageCache.WarmOriginalAsync(
@@ -1414,10 +1452,11 @@ public sealed class AlbumImageListLoader : IDisposable
         {
             photo.CompleteOriginalImageLoad(loaded: false, workToken);
         }
-        catch
+        catch (Exception ex)
         {
             if (IsCurrentGeneration(generation))
             {
+                LogImageLoadFailure(photo, AlbumImageWork.OriginalImage, isVisible: false, ex);
                 MarkWarmupSkipped(photo, AlbumImageWork.OriginalImage);
             }
 
@@ -1426,6 +1465,7 @@ public sealed class AlbumImageListLoader : IDisposable
         finally
         {
             SignalWorkers();
+            ClearActiveWork(photo);
         }
     }
 
@@ -1454,7 +1494,7 @@ public sealed class AlbumImageListLoader : IDisposable
 
     private async Task<bool> SetLoadedImageIfStillVisibleAsync(
         AlbumPhotoViewModel photo,
-        Avalonia.Media.Imaging.Bitmap bitmap,
+        AlbumImageBitmapLease bitmap,
         bool isDetailedThumbnail,
         string status,
         int workToken,
@@ -1492,6 +1532,11 @@ public sealed class AlbumImageListLoader : IDisposable
             return _indexByPhoto.TryGetValue(photo, out var index) &&
                 (_viewportIndices.Contains(index) || _priorityIndices.Contains(index));
         }
+    }
+
+    private bool NeedsVisibleControlReload(AlbumPhotoViewModel photo, long generation)
+    {
+        return IsCurrentGeneration(generation) && photo.Image is null && IsPhotoInViewport(photo);
     }
 
     private bool IsPhotoInListViewport(AlbumPhotoViewModel photo)
@@ -1556,6 +1601,35 @@ public sealed class AlbumImageListLoader : IDisposable
         }
     }
 
+    private void ClearVisibleFailureSkippedNoLock(int index)
+    {
+        _failedVisibleKeys.Remove(new AlbumImageWarmupKey(index, AlbumImageWork.FastThumbnail));
+        _failedVisibleKeys.Remove(new AlbumImageWarmupKey(index, AlbumImageWork.DetailedThumbnail));
+        _failedVisibleKeys.Remove(new AlbumImageWarmupKey(index, AlbumImageWork.OriginalImage));
+    }
+
+    private void MarkActiveWork(AlbumPhotoViewModel photo, AlbumImageWork work, bool isVisible)
+    {
+        lock (_sync)
+        {
+            if (_indexByPhoto.TryGetValue(photo, out var index))
+            {
+                _activeImageWorks[index] = new ActiveImageWork(work, isVisible, DateTime.UtcNow);
+            }
+        }
+    }
+
+    private void ClearActiveWork(AlbumPhotoViewModel photo)
+    {
+        lock (_sync)
+        {
+            if (_indexByPhoto.TryGetValue(photo, out var index))
+            {
+                _activeImageWorks.Remove(index);
+            }
+        }
+    }
+
     private IReadOnlyList<AlbumPhotoViewModel> GetViewportPhotos()
     {
         lock (_sync)
@@ -1593,9 +1667,7 @@ public sealed class AlbumImageListLoader : IDisposable
             }
 
             _viewportSnapshotIndexCounts.TryGetValue(index, out var snapshotCount);
-            _viewportLoadedIndexCounts.TryGetValue(index, out var loadedCount);
-            var count = Math.Max(1, Math.Max(snapshotCount, loadedCount));
-            for (var position = 0; position < count; position++)
+            for (var position = 0; position < snapshotCount; position++)
             {
                 indices.Add(index);
             }
@@ -1724,4 +1796,6 @@ public sealed class AlbumImageListLoader : IDisposable
     private readonly record struct AlbumImageWarmupKey(int Index, AlbumImageWork Work);
 
     private readonly record struct LoadedViewportRegistration(AlbumPhotoViewModel Photo, int[] Indices);
+
+    private readonly record struct ActiveImageWork(AlbumImageWork Work, bool IsVisible, DateTime StartedUtc);
 }

@@ -6,6 +6,9 @@ namespace Picshare.Tests;
 
 public sealed class AlbumImageListLoaderWarmupTests
 {
+    private static readonly byte[] PngBytes = Convert.FromBase64String(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==");
+
     [Fact]
     public void VisibleFastWork_DoesNotClaimPriorityOnlyPhoto()
     {
@@ -78,6 +81,87 @@ public sealed class AlbumImageListLoaderWarmupTests
         Assert.False(didTakeWork);
         Assert.Equal(AlbumImageItemStatus.Unloaded, photo.FastThumbnailStatus);
         Assert.False(photo.IsImageLoadBusyAtomic());
+    }
+
+    [Fact]
+    public async Task FastThumbnailWarmup_DoesNotMarkLoadedWhenPhotoBecomesVisibleBeforeCompletion()
+    {
+        using var tempDirectory = new TempDirectory();
+        var imageCache = new ImageCacheService(tempDirectory.Path);
+        using var httpClient = new HttpClient(new BytesHandler(PngBytes));
+        using var loader = new AlbumImageListLoader(imageCache, httpClient);
+        var photo = new AlbumPhotoViewModel(
+            "album",
+            "photo-1",
+            "photo-1.jpg",
+            "https://example.invalid/photo-1.jpg",
+            "https://example.invalid/photo-1-thumb.jpg");
+        SetLoaderPhotos(loader, [photo], generation: 1);
+        Assert.True(photo.TryBeginFastThumbnailLoad(out var workToken));
+
+        loader.UpdateViewport([photo]);
+        await InvokeExecuteThumbnailWorkAsync(
+            loader,
+            photo,
+            "FastThumbnail",
+            isVisible: false,
+            ownsOriginalLoad: false,
+            fastThumbnailWasAlreadyLoaded: false,
+            detailedThumbnailWasAlreadyLoaded: false,
+            workToken,
+            generation: 1);
+
+        Assert.Null(photo.Image);
+        Assert.Equal(AlbumImageItemStatus.Unloaded, photo.FastThumbnailStatus);
+        Assert.True(TryTakeVisibleFastWork(loader, generation: 1, out var visiblePhoto, out _, out var visibleWorkToken));
+        Assert.Same(photo, visiblePhoto);
+        photo.CompleteFastThumbnailLoad(loaded: false, visibleWorkToken);
+    }
+
+    [Fact]
+    public async Task DetailedThumbnailWarmup_DoesNotMarkLoadedWhenPhotoBecomesVisibleBeforeCompletion()
+    {
+        using var tempDirectory = new TempDirectory();
+        var imageCache = new ImageCacheService(tempDirectory.Path);
+        using var httpClient = new HttpClient(new BytesHandler(PngBytes));
+        using var loader = new AlbumImageListLoader(imageCache, httpClient);
+        var photo = new AlbumPhotoViewModel(
+            "album",
+            "photo-1",
+            "photo-1.jpg",
+            "https://example.invalid/photo-1.jpg",
+            "https://example.invalid/photo-1-thumb.jpg");
+        SetLoaderPhotos(loader, [photo], generation: 1);
+        Assert.True(photo.TryBeginDetailedThumbnailLoad(out var ownsOriginalLoad, out var workToken));
+
+        loader.UpdateViewport([photo]);
+        await InvokeExecuteThumbnailWorkAsync(
+            loader,
+            photo,
+            "DetailedThumbnail",
+            isVisible: false,
+            ownsOriginalLoad,
+            fastThumbnailWasAlreadyLoaded: false,
+            detailedThumbnailWasAlreadyLoaded: false,
+            workToken,
+            generation: 1);
+
+        Assert.Null(photo.Image);
+        Assert.Equal(AlbumImageItemStatus.Unloaded, photo.DetailedThumbnailStatus);
+        Assert.Equal(AlbumImageItemStatus.Loaded, photo.OriginalImageStatus);
+        Assert.True(TryTakeVisibleThumbnailWork(
+            loader,
+            generation: 1,
+            preferDetailed: true,
+            out var visiblePhoto,
+            out var workName,
+            out var visibleOwnsOriginalLoad,
+            out _,
+            out _,
+            out var visibleWorkToken));
+        Assert.Same(photo, visiblePhoto);
+        Assert.Equal("FastThumbnail", workName);
+        photo.CompleteFastThumbnailLoad(loaded: false, visibleWorkToken);
     }
 
     [Fact]
@@ -327,7 +411,8 @@ public sealed class AlbumImageListLoaderWarmupTests
         duplicatePhoto.DuplicateStackPhoto = newStackPhoto;
         loader.RemoveLoadedViewportPhoto(duplicatePhoto);
 
-        Assert.Same(newStackPhoto, Assert.Single(loader.GetListViewportPhotosSnapshot()));
+        Assert.Empty(loader.GetListViewportPhotosSnapshot());
+        Assert.Same(newStackPhoto, Assert.Single(loader.RemoveLoadedViewportPhoto(newStackPhoto)));
     }
 
     [Fact]
@@ -366,11 +451,12 @@ public sealed class AlbumImageListLoaderWarmupTests
         duplicatePhoto.DuplicateStackPhoto = newStackPhoto;
         loader.RemoveViewportPhoto(duplicatePhoto);
 
-        Assert.Same(newStackPhoto, Assert.Single(loader.GetListViewportPhotosSnapshot()));
+        Assert.Empty(loader.GetListViewportPhotosSnapshot());
+        Assert.Same(newStackPhoto, Assert.Single(loader.RemoveLoadedViewportPhoto(newStackPhoto)));
     }
 
     [Fact]
-    public void UpdateViewport_PreservesLoadedRegistrationWhenSnapshotScanMissesControl()
+    public void UpdateViewport_PreservesLoadedRegistrationWithoutTreatingItAsVisibleWork()
     {
         using var tempDirectory = new TempDirectory();
         var imageCache = new ImageCacheService(tempDirectory.Path);
@@ -388,7 +474,8 @@ public sealed class AlbumImageListLoaderWarmupTests
 
         loader.UpdateViewport([]);
 
-        Assert.Same(photo, Assert.Single(loader.GetListViewportPhotosSnapshot()));
+        Assert.Empty(loader.GetListViewportPhotosSnapshot());
+        Assert.Same(photo, Assert.Single(loader.RemoveLoadedViewportPhoto(photo)));
     }
 
     [Fact]
@@ -688,6 +775,82 @@ public sealed class AlbumImageListLoaderWarmupTests
     }
 
     [Fact]
+    public void LoadedViewportRegistration_ClearsPreviousVisibleFailureSkip()
+    {
+        using var tempDirectory = new TempDirectory();
+        var imageCache = new ImageCacheService(tempDirectory.Path);
+        using var httpClient = new HttpClient(new BytesHandler([1, 2, 3, 4]));
+        using var loader = new AlbumImageListLoader(imageCache, httpClient);
+        var photo = new AlbumPhotoViewModel(
+            "album",
+            "photo-1",
+            "photo-1.jpg",
+            "https://example.invalid/photo-1.jpg",
+            "https://example.invalid/photo-1-thumb.jpg");
+        SetLoaderPhotos(loader, [photo], generation: 1);
+        loader.UpdateViewport([photo]);
+        MarkVisibleFailureSkipped(loader, photo, "FastThumbnail");
+
+        Assert.False(TryTakeVisibleFastWork(loader, generation: 1, out _, out _, out _));
+
+        loader.RemoveLoadedViewportPhoto(photo);
+        loader.AddViewportPhoto(photo);
+
+        Assert.True(TryTakeVisibleFastWork(loader, generation: 1, out var retryPhoto, out _, out var retryWorkToken));
+        Assert.Same(photo, retryPhoto);
+        photo.CompleteFastThumbnailLoad(loaded: false, retryWorkToken);
+    }
+
+    [Fact]
+    public void SnapshotViewportReentry_ClearsPreviousVisibleFailureSkip()
+    {
+        using var tempDirectory = new TempDirectory();
+        var imageCache = new ImageCacheService(tempDirectory.Path);
+        using var httpClient = new HttpClient(new BytesHandler([1, 2, 3, 4]));
+        using var loader = new AlbumImageListLoader(imageCache, httpClient);
+        var photo = new AlbumPhotoViewModel(
+            "album",
+            "photo-1",
+            "photo-1.jpg",
+            "https://example.invalid/photo-1.jpg",
+            "https://example.invalid/photo-1-thumb.jpg");
+        SetLoaderPhotos(loader, [photo], generation: 1);
+        loader.UpdateViewport([photo]);
+        MarkVisibleFailureSkipped(loader, photo, "FastThumbnail");
+
+        Assert.False(TryTakeVisibleFastWork(loader, generation: 1, out _, out _, out _));
+
+        loader.UpdateViewport([]);
+        loader.UpdateViewport([photo]);
+
+        Assert.True(TryTakeVisibleFastWork(loader, generation: 1, out var retryPhoto, out _, out var retryWorkToken));
+        Assert.Same(photo, retryPhoto);
+        photo.CompleteFastThumbnailLoad(loaded: false, retryWorkToken);
+    }
+
+    [Fact]
+    public void SnapshotViewportRefresh_DoesNotClearCurrentVisibleFailureSkip()
+    {
+        using var tempDirectory = new TempDirectory();
+        var imageCache = new ImageCacheService(tempDirectory.Path);
+        using var httpClient = new HttpClient(new BytesHandler([1, 2, 3, 4]));
+        using var loader = new AlbumImageListLoader(imageCache, httpClient);
+        var photo = new AlbumPhotoViewModel(
+            "album",
+            "photo-1",
+            "photo-1.jpg",
+            "https://example.invalid/photo-1.jpg",
+            "https://example.invalid/photo-1-thumb.jpg");
+        SetLoaderPhotos(loader, [photo], generation: 1);
+        loader.UpdateViewport([photo]);
+        MarkVisibleFailureSkipped(loader, photo, "FastThumbnail");
+
+        loader.UpdateViewport([photo]);
+
+        Assert.False(TryTakeVisibleFastWork(loader, generation: 1, out _, out _, out _));
+    }
+
+    [Fact]
     public async Task OriginalWarmupFailure_IsSkippedAfterPermanentFailure()
     {
         using var tempDirectory = new TempDirectory();
@@ -859,6 +1022,27 @@ public sealed class AlbumImageListLoaderWarmupTests
         fastThumbnailWasAlreadyLoaded = (bool)arguments[5]!;
         detailedThumbnailWasAlreadyLoaded = (bool)arguments[6]!;
         workToken = (int)arguments[7]!;
+        return didTakeWork;
+    }
+
+    private static bool TryTakeVisibleFastWork(
+        AlbumImageListLoader loader,
+        long generation,
+        out AlbumPhotoViewModel? photo,
+        out bool fastThumbnailWasAlreadyLoaded,
+        out int workToken)
+    {
+        var method = typeof(AlbumImageListLoader).GetMethod(
+            "TryTakeVisibleFastWork",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        Assert.NotNull(method);
+        object?[] arguments = { generation, null, false, 0 };
+
+        var didTakeWork = (bool)method.Invoke(loader, arguments)!;
+
+        photo = (AlbumPhotoViewModel?)arguments[1];
+        fastThumbnailWasAlreadyLoaded = (bool)arguments[2]!;
+        workToken = (int)arguments[3]!;
         return didTakeWork;
     }
 

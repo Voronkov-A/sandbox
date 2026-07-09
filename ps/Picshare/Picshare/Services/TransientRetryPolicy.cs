@@ -49,6 +49,7 @@ public static class TransientRetryPolicy
             {
                 attempt++;
                 var waitDelay = GetRetryDelay(delay);
+                LogTransientRetry(ex, attempt, waitDelay);
                 if (attempt >= WarningAttemptThreshold)
                 {
                     warningWasReported = true;
@@ -86,7 +87,9 @@ public static class TransientRetryPolicy
                     return false;
                 }
 
-                await Task.Delay(GetRetryDelay(delay), cancellationToken);
+                var waitDelay = GetRetryDelay(delay);
+                LogTransientRetry(ex, attempt, waitDelay);
+                await Task.Delay(waitDelay, cancellationToken);
                 delay = TimeSpan.FromMilliseconds(Math.Min(delay.TotalMilliseconds * 2, MaximumDelay.TotalMilliseconds));
             }
         }
@@ -168,5 +171,12 @@ public static class TransientRetryPolicy
     {
         var message = exception.Message.ReplaceLineEndings(" ").Trim();
         return message.Length <= 220 ? message : message[..220] + "...";
+    }
+
+    private static void LogTransientRetry(Exception exception, int attempt, TimeSpan waitDelay)
+    {
+        Console.WriteLine(
+            $"PicshareRetry: transient {exception.GetType().Name} on attempt {attempt}; retrying in {FormatDelay(waitDelay)}. {GetShortMessage(exception)}");
+        Console.WriteLine($"PicshareRetry: exception detail: {exception}");
     }
 }

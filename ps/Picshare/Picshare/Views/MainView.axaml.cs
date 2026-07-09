@@ -37,6 +37,7 @@ public partial class MainView : UserControl
     private readonly HashSet<ScrollViewer> _albumPhotoScrollViewers = new();
     private readonly Dictionary<ListBox, List<ScrollViewer>> _albumPhotoScrollViewersByList = new();
     private bool _isVisibleAlbumPhotoPriorityUpdateQueued;
+    private DateTime _lastBlankPhotoDiagnosticsUtc = DateTime.MinValue;
 
     public MainView()
     {
@@ -698,23 +699,28 @@ public partial class MainView : UserControl
             return;
         }
 
-        var visiblePhotos = this.GetVisualDescendants()
+        var albumPhotoControls = this.GetVisualDescendants()
             .OfType<Control>()
             .Where(control => string.Equals(control.Name, "AlbumPhotoCard", StringComparison.Ordinal) &&
                 control.IsVisible &&
                 IsInSelectedAlbumPhotoList(control) &&
-                control.DataContext is AlbumPhotoViewModel &&
-                IsControlInViewport(control))
-            .Select(control => new
-            {
-                Control = control,
-                Photo = (AlbumPhotoViewModel)control.DataContext!
-            })
+                control.DataContext is AlbumPhotoViewModel)
+            .Select(control => new AlbumPhotoControlSnapshot(
+                control,
+                (AlbumPhotoViewModel)control.DataContext!,
+                TransformBounds(control, this),
+                GetControlBoundsInNearestScrollViewer(control),
+                IsControlInViewport(control),
+                IsControlFullyInViewport(control)))
+            .ToList();
+
+        var visiblePhotos = albumPhotoControls
+            .Where(item => item.IsInViewport)
             .Select(item => new
             {
                 item.Photo,
-                Bounds = TransformBounds(item.Control, this),
-                IsFullyInViewport = IsControlFullyInViewport(item.Control)
+                item.Bounds,
+                item.IsFullyInViewport
             })
             .OrderByDescending(item => item.IsFullyInViewport)
             .ThenBy(item => item.Bounds.Y)
@@ -723,6 +729,7 @@ public partial class MainView : UserControl
             .ToList();
 
         viewModel.PrioritizePhotoViewportLoads(visiblePhotos);
+        LogBlankPhotoDiagnostics(viewModel, albumPhotoControls);
     }
 
     private static bool IsInSelectedAlbumPhotoList(Control control)
@@ -737,6 +744,34 @@ public partial class MainView : UserControl
 
         var tabItem = listBox.GetVisualAncestors().OfType<TabItem>().FirstOrDefault();
         return tabItem?.IsSelected ?? listBox.IsVisible;
+    }
+
+    private void LogBlankPhotoDiagnostics(
+        MainViewModel viewModel,
+        IEnumerable<AlbumPhotoControlSnapshot> albumPhotoControls)
+    {
+        var blankControls = albumPhotoControls
+            .Where(item => item.Photo.Image is null)
+            .Take(8)
+            .ToList();
+        if (blankControls.Count == 0)
+        {
+            return;
+        }
+
+        var now = DateTime.UtcNow;
+        if (now - _lastBlankPhotoDiagnosticsUtc < TimeSpan.FromSeconds(1))
+        {
+            return;
+        }
+
+        _lastBlankPhotoDiagnosticsUtc = now;
+        Console.WriteLine($"PicshareImageLoader: visible blank card diagnostics count={blankControls.Count}");
+        foreach (var item in blankControls)
+        {
+            Console.WriteLine(
+                $"PicshareImageLoader: blank {item.Photo.FileName} ({item.Photo.PhotoId}) inViewport={item.IsInViewport} fully={item.IsFullyInViewport} bounds={FormatRect(item.Bounds)} scrollBounds={FormatRect(item.ViewportBounds)} {viewModel.DescribePhotoImageLoadState(item.Photo)}");
+        }
     }
 
     private static bool IsControlInViewport(Control control)
@@ -775,6 +810,12 @@ public partial class MainView : UserControl
             bounds.Bottom <= scrollViewer.Bounds.Height;
     }
 
+    private static Rect GetControlBoundsInNearestScrollViewer(Control control)
+    {
+        var scrollViewer = control.GetVisualAncestors().OfType<ScrollViewer>().FirstOrDefault();
+        return scrollViewer is null ? default : TransformBounds(control, scrollViewer);
+    }
+
     private static Rect TransformBounds(Control control, Visual target)
     {
         var transform = control.TransformToVisual(target);
@@ -794,6 +835,19 @@ public partial class MainView : UserControl
         var bottom = Math.Max(Math.Max(topLeft.Y, topRight.Y), Math.Max(bottomLeft.Y, bottomRight.Y));
         return new Rect(left, top, Math.Max(0, right - left), Math.Max(0, bottom - top));
     }
+
+    private static string FormatRect(Rect rect)
+    {
+        return $"{rect.X:0.##},{rect.Y:0.##},{rect.Width:0.##},{rect.Height:0.##}";
+    }
+
+    private sealed record AlbumPhotoControlSnapshot(
+        Control Control,
+        AlbumPhotoViewModel Photo,
+        Rect Bounds,
+        Rect ViewportBounds,
+        bool IsInViewport,
+        bool IsFullyInViewport);
 
     private async void AlbumPhoto_Click(object? sender, RoutedEventArgs e)
     {

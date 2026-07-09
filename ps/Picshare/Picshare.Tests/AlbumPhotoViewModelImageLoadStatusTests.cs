@@ -114,6 +114,45 @@ public sealed class AlbumPhotoViewModelImageLoadStatusTests
     }
 
     [Fact]
+    public void FastThumbnailControlLoad_CanResetAlreadyLoadedStatusWhenBitmapWasNotBound()
+    {
+        var photo = CreatePhoto();
+        Assert.True(photo.TryBeginFastThumbnailLoad());
+        photo.CompleteFastThumbnailLoad(loaded: true);
+
+        Assert.True(photo.TryBeginFastThumbnailControlLoad(out var wasLoaded));
+        Assert.True(wasLoaded);
+
+        photo.CompleteFastThumbnailLoad(loaded: false);
+
+        Assert.Equal(AlbumImageItemStatus.Unloaded, photo.FastThumbnailStatus);
+        Assert.False(photo.IsImageLoadBusyAtomic());
+    }
+
+    [Fact]
+    public void DetailedThumbnailControlLoad_CanResetLoadedStatusWhenBitmapWasNotBound()
+    {
+        var photo = CreatePhoto();
+        Assert.True(photo.TryBeginDetailedThumbnailLoad(out var ownsOriginalLoad));
+        photo.CompleteDetailedThumbnailLoad(loaded: true, originalLoaded: true, ownsOriginalLoad);
+
+        Assert.True(photo.TryBeginDetailedThumbnailControlLoad(
+            out ownsOriginalLoad,
+            out var detailedThumbnailWasAlreadyLoaded));
+        Assert.False(ownsOriginalLoad);
+        Assert.True(detailedThumbnailWasAlreadyLoaded);
+
+        photo.CompleteDetailedThumbnailLoad(
+            loaded: false,
+            originalLoaded: false,
+            ownsOriginalLoad);
+
+        Assert.Equal(AlbumImageItemStatus.Unloaded, photo.DetailedThumbnailStatus);
+        Assert.Equal(AlbumImageItemStatus.Loaded, photo.OriginalImageStatus);
+        Assert.False(photo.IsImageLoadBusyAtomic());
+    }
+
+    [Fact]
     public void ResetForNewGeneration_ClearsBusyAndLoadedStatuses()
     {
         var photo = CreatePhoto();
@@ -128,6 +167,41 @@ public sealed class AlbumPhotoViewModelImageLoadStatusTests
         Assert.False(photo.IsFullImageLoaded);
         Assert.False(photo.IsImageLoading);
         Assert.False(photo.IsImageLoadBusyAtomic());
+    }
+
+    [Fact]
+    public void ResetIfImageMissing_ClearsLoadedStatusesSoVisibleCardCanReload()
+    {
+        var photo = CreatePhoto();
+        Assert.True(photo.TryBeginDetailedThumbnailLoad(out var ownsOriginalLoad));
+        photo.CompleteDetailedThumbnailLoad(loaded: true, originalLoaded: true, ownsOriginalLoad);
+        Assert.Null(photo.Image);
+        Assert.Equal(AlbumImageItemStatus.Loaded, photo.OriginalImageStatus);
+        Assert.Equal(AlbumImageItemStatus.Loaded, photo.DetailedThumbnailStatus);
+
+        photo.ResetImageLoadStatusesIfImageMissing();
+
+        Assert.Equal(AlbumImageItemStatus.Unloaded, photo.FastThumbnailStatus);
+        Assert.Equal(AlbumImageItemStatus.Unloaded, photo.OriginalImageStatus);
+        Assert.Equal(AlbumImageItemStatus.Unloaded, photo.DetailedThumbnailStatus);
+        Assert.False(photo.IsFullImageLoaded);
+        Assert.False(photo.IsImageLoading);
+        Assert.Equal("Loading", photo.Status);
+    }
+
+    [Fact]
+    public void ResetIfImageMissing_KeepsLoadedStatusesWhenImageIsBound()
+    {
+        var photo = CreatePhoto();
+        Assert.True(photo.TryBeginDetailedThumbnailLoad(out var ownsOriginalLoad));
+        SetPrivateField(photo, "_image", CreateBitmap());
+        photo.CompleteDetailedThumbnailLoad(loaded: true, originalLoaded: true, ownsOriginalLoad);
+
+        photo.ResetImageLoadStatusesIfImageMissing();
+
+        Assert.Equal(AlbumImageItemStatus.Loaded, photo.OriginalImageStatus);
+        Assert.Equal(AlbumImageItemStatus.Loaded, photo.DetailedThumbnailStatus);
+        Assert.NotNull(photo.Image);
     }
 
     [Fact]

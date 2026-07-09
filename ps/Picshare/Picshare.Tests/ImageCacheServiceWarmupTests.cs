@@ -126,7 +126,7 @@ public sealed class ImageCacheServiceWarmupTests
             httpClient,
             AlbumImageCacheReadMode.Eager,
             CancellationToken.None));
-        Assert.Equal(2, handler.RequestCount);
+        Assert.Equal(1, handler.RequestCount);
 
         imageCache.Limits = imageCache.Limits with { FastThumbnailMemoryBytes = 0 };
 
@@ -137,7 +137,7 @@ public sealed class ImageCacheServiceWarmupTests
             httpClient,
             AlbumImageCacheReadMode.Lookup,
             CancellationToken.None));
-        Assert.Equal(2, handler.RequestCount);
+        Assert.Equal(1, handler.RequestCount);
     }
 
     [Fact]
@@ -504,6 +504,45 @@ public sealed class ImageCacheServiceWarmupTests
             httpClient,
             AlbumImageCacheReadMode.Lookup,
             CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task CopyOriginalToAsync_UsesOriginalEncodedMemoryCache()
+    {
+        using var tempDirectory = new TempDirectory();
+        var imageCache = new ImageCacheService(tempDirectory.Path)
+        {
+            Limits = new AlbumImageCacheLimits(
+                FastThumbnailMemoryBytes: 0,
+                DetailedThumbnailMemoryBytes: 0,
+                OriginalImageMemoryBytes: 1024 * 1024,
+                FastThumbnailDiskBytes: 0,
+                DetailedThumbnailDiskBytes: 0,
+                OriginalImageDiskBytes: 0)
+        };
+        var handler = new BytesHandler([1, 2, 3, 4]);
+        using var httpClient = new HttpClient(handler);
+
+        Assert.True(await imageCache.WarmOriginalAsync(
+            "album",
+            "photo-full.jpg",
+            "https://example.invalid/photo-original.jpg",
+            httpClient,
+            AlbumImageCacheReadMode.Eager,
+            CancellationToken.None));
+        await using var destination = new MemoryStream();
+
+        await imageCache.CopyOriginalToAsync(
+            "album",
+            "photo-full.jpg",
+            "https://example.invalid/photo-original.jpg",
+            httpClient,
+            destination,
+            CancellationToken.None);
+
+        Assert.Equal([1, 2, 3, 4], destination.ToArray());
+        Assert.Equal(1, handler.RequestCount);
+        Assert.Empty(Directory.EnumerateFiles(tempDirectory.Path, "*", SearchOption.AllDirectories));
     }
 
     [Fact]
@@ -1007,6 +1046,68 @@ public sealed class ImageCacheServiceWarmupTests
         Assert.False(Directory.Exists(legacyAlbumPath));
     }
 
+    [Fact]
+    public async Task BitmapCache_DoesNotDisposeReferencedBitmapWhenEntryIsRemoved()
+    {
+        using var tempDirectory = new TempDirectory();
+        var imageCache = new ImageCacheService(tempDirectory.Path)
+        {
+            Limits = new AlbumImageCacheLimits(
+                FastThumbnailMemoryBytes: 1024 * 1024,
+                DetailedThumbnailMemoryBytes: 0,
+                OriginalImageMemoryBytes: 0,
+                FastThumbnailBitmapMemoryBytes: 4,
+                DetailedThumbnailBitmapMemoryBytes: 0,
+                OriginalImageBitmapMemoryBytes: 0,
+                FastThumbnailDiskBytes: 0,
+                DetailedThumbnailDiskBytes: 0,
+                OriginalImageDiskBytes: 0)
+        };
+        var handler = new BytesHandler(PngBytes);
+        using var httpClient = new HttpClient(handler);
+
+        var firstLoad = await imageCache.LoadFastThumbnailBitmapAsync(
+            "album",
+            "photo-1",
+            "https://example.invalid/photo-1.png",
+            httpClient,
+            AlbumImageCacheReadMode.Eager,
+            CancellationToken.None);
+        var cachedBitmap = firstLoad.Bitmap.Bitmap;
+        firstLoad.Bitmap.Dispose();
+
+        var cachedLoad = await imageCache.LoadFastThumbnailBitmapAsync(
+            "album",
+            "photo-1",
+            "https://example.invalid/photo-1.png",
+            httpClient,
+            AlbumImageCacheReadMode.Eager,
+            CancellationToken.None);
+
+        Assert.Equal(1, handler.RequestCount);
+        Assert.Same(cachedBitmap, cachedLoad.Bitmap.Bitmap);
+        Assert.Equal(1, GetBitmapCacheEntryCount(imageCache));
+
+        var secondLoad = await imageCache.LoadFastThumbnailBitmapAsync(
+            "album",
+            "photo-2",
+            "https://example.invalid/photo-2.png",
+            httpClient,
+            AlbumImageCacheReadMode.Eager,
+            CancellationToken.None);
+        secondLoad.Bitmap.Dispose();
+
+        Assert.Equal(2, handler.RequestCount);
+        Assert.Equal(1, GetBitmapCacheEntryCount(imageCache));
+
+        await imageCache.ClearAlbumAsync("album");
+
+        Assert.Equal(1, cachedLoad.Bitmap.Bitmap.PixelSize.Width);
+        Assert.Equal(1, cachedLoad.Bitmap.Bitmap.PixelSize.Height);
+        cachedLoad.Bitmap.Dispose();
+        Assert.Equal(0, GetBitmapCacheEntryCount(imageCache));
+    }
+
     private static async Task WriteCacheFileAsync(ImageCacheService imageCache, string albumId, string cacheFileName, byte[] bytes)
     {
         var albumPathMethod = typeof(ImageCacheService).GetMethod(
@@ -1058,6 +1159,16 @@ public sealed class ImageCacheServiceWarmupTests
         var albumPath = (string)albumPathMethod.Invoke(imageCache, [albumId])!;
         var cacheFileSystemName = (string)cacheNameMethod.Invoke(null, [cacheFileName])!;
         File.SetLastAccessTimeUtc(Path.Combine(albumPath, cacheFileSystemName), lastAccessTimeUtc);
+    }
+
+    private static int GetBitmapCacheEntryCount(ImageCacheService imageCache)
+    {
+        var field = typeof(ImageCacheService).GetField(
+            "_bitmapCache",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        Assert.NotNull(field);
+        var cache = (System.Collections.IDictionary)field.GetValue(imageCache)!;
+        return cache.Count;
     }
 
     private sealed class BytesHandler(byte[] bytes) : HttpMessageHandler

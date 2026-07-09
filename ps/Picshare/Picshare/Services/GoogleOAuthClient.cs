@@ -100,9 +100,7 @@ public sealed class GoogleOAuthClient
         };
         AddClientSecret(form, clientSecret);
 
-        using var content = new FormUrlEncodedContent(form);
-        using var response = await _httpClient.PostAsync(TokenEndpoint, content, cancellationToken);
-        await EnsureSuccessAsync(response, cancellationToken);
+        using var response = await PostTokenFormWithRetriesAsync(form, cancellationToken);
         return await ReadTokenSetAsync(response, cancellationToken, refreshToken);
     }
 
@@ -124,10 +122,32 @@ public sealed class GoogleOAuthClient
         };
         AddClientSecret(form, clientSecret);
 
-        using var content = new FormUrlEncodedContent(form);
-        using var response = await _httpClient.PostAsync(TokenEndpoint, content, cancellationToken);
-        await EnsureSuccessAsync(response, cancellationToken);
+        using var response = await PostTokenFormWithRetriesAsync(form, cancellationToken);
         return await ReadTokenSetAsync(response, cancellationToken);
+    }
+
+    private async Task<HttpResponseMessage> PostTokenFormWithRetriesAsync(
+        IReadOnlyDictionary<string, string> form,
+        CancellationToken cancellationToken)
+    {
+        return await TransientRetryPolicy.ExecuteAsync(
+            async token =>
+            {
+                using var content = new FormUrlEncodedContent(form);
+                var response = await _httpClient.PostAsync(TokenEndpoint, content, token);
+                try
+                {
+                    await EnsureSuccessAsync(response, token);
+                    return response;
+                }
+                catch
+                {
+                    response.Dispose();
+                    throw;
+                }
+            },
+            reportWarning: null,
+            cancellationToken);
     }
 
     private static HttpListener CreateLoopbackListener()
@@ -265,6 +285,16 @@ public sealed class GoogleOAuthClient
         }
 
         var message = error?.ErrorDescription ?? error?.Error ?? body;
+        if (TransientRetryPolicy.IsTransient(
+            new HttpRequestException(message, inner: null, statusCode: response.StatusCode),
+            cancellationToken))
+        {
+            throw new HttpRequestException(
+                $"Google OAuth request failed: {(int)response.StatusCode} {response.ReasonPhrase}. {message}",
+                inner: null,
+                statusCode: response.StatusCode);
+        }
+
         if (string.Equals(error?.Error, "invalid_client", StringComparison.Ordinal))
         {
             message += " If this is a Google Desktop OAuth client, add its client secret to google.oauthClientSecret in Picshare settings.";
