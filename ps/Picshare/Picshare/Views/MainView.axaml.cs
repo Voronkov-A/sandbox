@@ -214,6 +214,25 @@ public partial class MainView : UserControl
         }
     }
 
+    private async void CopyAlbumLink_Click(object? sender, RoutedEventArgs e)
+    {
+        if (sender is Control { DataContext: RecentAlbumViewModel album } &&
+            TopLevel.GetTopLevel(this)?.Clipboard is { } clipboard)
+        {
+            await clipboard.SetTextAsync(album.Link);
+            e.Handled = true;
+        }
+    }
+
+    private void SidebarScrim_PointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (DataContext is MainViewModel viewModel)
+        {
+            viewModel.CloseSidebarCommand.Execute(null);
+            e.Handled = true;
+        }
+    }
+
     private async void DownloadSelectedPhotos_Click(object? sender, RoutedEventArgs e)
     {
         await DownloadSelectedPhotosAsync(asArchive: false);
@@ -886,6 +905,7 @@ public partial class MainView : UserControl
             sender is Control { DataContext: RecentAlbumViewModel recentAlbum } &&
             viewModel.OpenRecentAlbumCommand.CanExecute(recentAlbum))
         {
+            viewModel.CloseSidebarCommand.Execute(null);
             viewModel.OpenRecentAlbumCommand.Execute(recentAlbum);
             e.Handled = true;
         }

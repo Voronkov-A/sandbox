@@ -10,6 +10,7 @@ public sealed class RecentAlbumViewModel
         Link = settings.Link;
         Location = settings.Location;
         OpenedAt = settings.OpenedAt;
+        Description = string.IsNullOrWhiteSpace(settings.Location) ? settings.Link : settings.Location;
     }
 
     public string Title { get; }
@@ -17,6 +18,8 @@ public sealed class RecentAlbumViewModel
     public string Link { get; }
 
     public string Location { get; }
+
+    public string Description { get; }
 
     public DateTimeOffset OpenedAt { get; }
 

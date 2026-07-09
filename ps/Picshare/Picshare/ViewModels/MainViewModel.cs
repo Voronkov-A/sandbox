@@ -110,6 +110,18 @@ public partial class MainViewModel : ViewModelBase
     private bool _hasRecentAlbums;
 
     [ObservableProperty]
+    private bool _isSidebarOpen;
+
+    [ObservableProperty]
+    private bool _isCreateSidebarExpanded;
+
+    [ObservableProperty]
+    private bool _isOpenSidebarExpanded;
+
+    [ObservableProperty]
+    private bool _hasSidebarRecentAlbums;
+
+    [ObservableProperty]
     private string _shareLink = "";
 
     [ObservableProperty]
@@ -129,6 +141,9 @@ public partial class MainViewModel : ViewModelBase
 
     [ObservableProperty]
     private int _mainTabIndex;
+
+    [ObservableProperty]
+    private RecentAlbumViewModel? _currentSidebarAlbum;
 
     [ObservableProperty]
     private bool _isSettingsPanelVisible;
@@ -515,6 +530,16 @@ public partial class MainViewModel : ViewModelBase
 
     public bool IsAlbumSettingsVisible => SelectedAlbumType is not null;
 
+    public bool IsCreateViewVisible => MainTabIndex == 0;
+
+    public bool IsOpenViewVisible => MainTabIndex == 1;
+
+    public bool IsSettingsViewVisible => MainTabIndex == 2;
+
+    public bool HasCurrentSidebarAlbum => CurrentSidebarAlbum is not null;
+
+    public bool CanOpenAlbumLink => IsSupportedAlbumLink(OpenAlbumLink);
+
     public bool IsAlbumDownloadProgressWarningVisible => !string.IsNullOrWhiteSpace(AlbumDownloadProgressWarning);
 
     public bool IsAlbumCreationProgressWarningVisible => !string.IsNullOrWhiteSpace(AlbumCreationProgressWarning);
@@ -570,6 +595,8 @@ public partial class MainViewModel : ViewModelBase
     public ObservableCollection<AlbumPhotoViewModel> PhotoViewerDuplicatePhotos { get; } = new();
 
     public ObservableCollection<RecentAlbumViewModel> RecentAlbums { get; } = new();
+
+    public ObservableCollection<RecentAlbumViewModel> SidebarRecentAlbums { get; } = new();
 
     public ObservableCollection<RecentPhotoViewModel> RecentPhotos { get; } = new();
 
@@ -754,7 +781,6 @@ public partial class MainViewModel : ViewModelBase
 
         ApplyImageCacheSettings();
         _lastOpenAlbumLink = albumOpenHistory.LastOpenAlbumLink;
-        OpenAlbumLink = albumOpenHistory.LastOpenAlbumLink;
         LoadRecentAlbums(albumOpenHistory.RecentAlbums);
         _googleTokenSet = _tokenStore.Load();
         IsGoogleSignedIn = _googleTokenSet is not null;
@@ -2239,10 +2265,11 @@ public partial class MainViewModel : ViewModelBase
     {
         ShareLink = result.PicshareLink;
         DriveFolderLink = result.AlbumLocation;
-        OpenAlbumLink = result.PicshareLink;
         Status = $"Album created with {result.Manifest.Photos.Count} photo(s).";
         await LoadAlbumAsync(result.Manifest);
         SaveOpenedAlbumReference(result.Manifest, result.PicshareLink);
+        OpenAlbumLink = "";
+        MainTabIndex = 1;
     }
 
     private async Task CancelPendingAlbumCreationAsync(PendingAlbumCreation pendingCreation)
@@ -2815,6 +2842,60 @@ public partial class MainViewModel : ViewModelBase
     }
 
     [RelayCommand]
+    private void ToggleSidebar()
+    {
+        IsSidebarOpen = !IsSidebarOpen;
+    }
+
+    [RelayCommand]
+    private void CloseSidebar()
+    {
+        IsSidebarOpen = false;
+    }
+
+    [RelayCommand]
+    private void ToggleCreateSidebar()
+    {
+        IsCreateSidebarExpanded = !IsCreateSidebarExpanded;
+    }
+
+    [RelayCommand]
+    private void ToggleOpenSidebar()
+    {
+        IsOpenSidebarExpanded = !IsOpenSidebarExpanded;
+    }
+
+    [RelayCommand]
+    private void ShowCurrentAlbum()
+    {
+        MainTabIndex = 1;
+        IsSidebarOpen = false;
+    }
+
+    [RelayCommand]
+    private void ShowSettings()
+    {
+        MainTabIndex = 2;
+        IsSidebarOpen = false;
+    }
+
+    [RelayCommand]
+    private void ShowCreateLocalToGoogleDrive()
+    {
+        SelectedAlbumType = AlbumTypes.FirstOrDefault(type => type.Id == LocalToGoogleDriveAlbumTypeId);
+        MainTabIndex = 0;
+        IsSidebarOpen = false;
+    }
+
+    [RelayCommand]
+    private void ShowCreateLocalAlbum()
+    {
+        SelectedAlbumType = AlbumTypes.FirstOrDefault(type => type.Id == LocalAlbumTypeId);
+        MainTabIndex = 0;
+        IsSidebarOpen = false;
+    }
+
+    [RelayCommand]
     private void CancelAlbumCreation()
     {
         ResetCreateInputs();
@@ -2831,6 +2912,13 @@ public partial class MainViewModel : ViewModelBase
         await OpenAlbumFromLinkAsync(OpenAlbumLink, saveHistory: true, showBusy: true);
     }
 
+    [RelayCommand(CanExecute = nameof(CanOpenAlbumLink))]
+    private async Task OpenAlbumFromSidebarAsync()
+    {
+        IsSidebarOpen = false;
+        await OpenAlbumFromLinkAsync(OpenAlbumLink, saveHistory: true, showBusy: true);
+    }
+
     [RelayCommand]
     private async Task OpenRecentAlbumAsync(RecentAlbumViewModel? recentAlbum)
     {
@@ -2839,7 +2927,6 @@ public partial class MainViewModel : ViewModelBase
             return;
         }
 
-        OpenAlbumLink = recentAlbum.Link;
         await OpenAlbumFromLinkAsync(recentAlbum.Link, saveHistory: true, showBusy: true);
     }
 
@@ -2909,7 +2996,13 @@ public partial class MainViewModel : ViewModelBase
                 {
                     SaveOpenedAlbumReference(manifest, ShareLink);
                 }
+                else
+                {
+                    CurrentSidebarAlbum = CreateSidebarAlbum(manifest, ShareLink);
+                }
 
+                MainTabIndex = 1;
+                OpenAlbumLink = "";
                 Status = $"Opened {manifest.Title} with {manifest.Photos.Count} photo(s).";
             }
         }
@@ -4414,6 +4507,8 @@ public partial class MainViewModel : ViewModelBase
         if (_currentManifest is not null)
         {
             SaveOpenedAlbumReference(manifest, GetAlbumShareLink(manifest));
+            MainTabIndex = 1;
+            OpenAlbumLink = "";
             Status = $"Opened {manifest.Title} with {manifest.Photos.Count} photo(s).";
         }
     }
@@ -4426,14 +4521,8 @@ public partial class MainViewModel : ViewModelBase
         }
 
         _lastOpenAlbumLink = link;
-        OpenAlbumLink = link;
-        var settings = new RecentAlbumSettings
-        {
-            Title = manifest.Title,
-            Link = link,
-            Location = manifest.GoogleDrive?.AlbumFolderUrl ?? manifest.LocalFileSystem?.RootPath ?? "",
-            OpenedAt = DateTimeOffset.UtcNow
-        };
+        var settings = CreateRecentAlbumSettings(manifest, link);
+        CurrentSidebarAlbum = new RecentAlbumViewModel(settings);
 
         var existing = RecentAlbums
             .Where(album => !string.Equals(album.Link, link, StringComparison.Ordinal))
@@ -4450,6 +4539,7 @@ public partial class MainViewModel : ViewModelBase
 
         LoadRecentAlbums(existing);
         SaveAlbumOpenHistory();
+        UpdateSidebarRecentAlbums();
     }
 
     private void ForgetOpenedAlbumReference(AlbumManifest manifest)
@@ -4497,6 +4587,45 @@ public partial class MainViewModel : ViewModelBase
         }
 
         HasRecentAlbums = RecentAlbums.Count > 0;
+        UpdateSidebarRecentAlbums();
+    }
+
+    private void UpdateSidebarRecentAlbums()
+    {
+        var currentLink = CurrentSidebarAlbum?.Link ?? "";
+        SidebarRecentAlbums.Clear();
+        foreach (var album in RecentAlbums.Where(album => !string.Equals(album.Link, currentLink, StringComparison.Ordinal)))
+        {
+            SidebarRecentAlbums.Add(album);
+        }
+
+        HasSidebarRecentAlbums = SidebarRecentAlbums.Count > 0;
+    }
+
+    private static string GetAlbumSidebarDescription(AlbumManifest manifest)
+    {
+        if (manifest.GoogleDrive is not null)
+        {
+            return $"{manifest.Author.DisplayLabel}/{manifest.Title}";
+        }
+
+        return manifest.LocalFileSystem?.RootPath ?? "";
+    }
+
+    private static RecentAlbumViewModel CreateSidebarAlbum(AlbumManifest manifest, string link)
+    {
+        return new RecentAlbumViewModel(CreateRecentAlbumSettings(manifest, link));
+    }
+
+    private static RecentAlbumSettings CreateRecentAlbumSettings(AlbumManifest manifest, string link)
+    {
+        return new RecentAlbumSettings
+        {
+            Title = manifest.Title,
+            Link = link,
+            Location = GetAlbumSidebarDescription(manifest),
+            OpenedAt = DateTimeOffset.UtcNow
+        };
     }
 
     private static string GetAlbumShareLink(AlbumManifest manifest)
@@ -4693,6 +4822,7 @@ public partial class MainViewModel : ViewModelBase
         CanFinalizeFeedback = false;
         CanDeleteAlbum = false;
         CurrentAlbumTitle = "";
+        CurrentSidebarAlbum = null;
         FlowStatus = "";
         ClearBulkPhotoSelection();
         _albumImageListLoader.Clear();
@@ -6164,12 +6294,42 @@ public partial class MainViewModel : ViewModelBase
         return NormalizeCacheSizeMb(value, defaultValue);
     }
 
+    private static bool IsSupportedAlbumLink(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        return AlbumLinkParser.TryGetLocalManifestPath(value) is not null ||
+            AlbumLinkParser.TryGetManifestFileId(value) is not null;
+    }
+
+    partial void OnOpenAlbumLinkChanged(string value)
+    {
+        OnPropertyChanged(nameof(CanOpenAlbumLink));
+        OpenAlbumFromSidebarCommand.NotifyCanExecuteChanged();
+    }
+
     partial void OnSelectedAlbumTypeChanged(AlbumTypeOptionViewModel? value)
     {
         OnPropertyChanged(nameof(IsAlbumSettingsVisible));
         OnPropertyChanged(nameof(IsGoogleDriveAlbumSettingsVisible));
         OnPropertyChanged(nameof(IsLocalAlbumSettingsVisible));
         OnPropertyChanged(nameof(IsGoogleAlbumRestrictedSharingVisible));
+    }
+
+    partial void OnMainTabIndexChanged(int value)
+    {
+        OnPropertyChanged(nameof(IsCreateViewVisible));
+        OnPropertyChanged(nameof(IsOpenViewVisible));
+        OnPropertyChanged(nameof(IsSettingsViewVisible));
+    }
+
+    partial void OnCurrentSidebarAlbumChanged(RecentAlbumViewModel? value)
+    {
+        OnPropertyChanged(nameof(HasCurrentSidebarAlbum));
+        UpdateSidebarRecentAlbums();
     }
 
     partial void OnIsGoogleAlbumPublicChanged(bool value)
