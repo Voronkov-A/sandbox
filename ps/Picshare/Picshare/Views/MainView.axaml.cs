@@ -19,6 +19,7 @@ public partial class MainView : UserControl
     private const double AlbumReviewHeaderDragThreshold = 6;
     private const double AlbumReviewSwipeThreshold = 72;
     private const double AlbumReviewSwipeDominance = 1.35;
+    private const double ChromeSurfaceHeight = 56;
     private const double FooterActionButtonMaxWidth = 92;
     private const double FooterActionButtonCompactThreshold = 70;
     private const double FooterActionButtonSpacing = 8;
@@ -49,9 +50,12 @@ public partial class MainView : UserControl
     private bool _albumReviewHeaderDragMoved;
     private INotifyPropertyChanged? _viewModelPropertyChanged;
     private readonly Dictionary<ScrollViewer, double> _albumPhotoScrollOffsets = new();
-    private readonly Dictionary<TranslateTransform, int> _translateAnimationVersions = new();
+    private readonly HashSet<ListBox> _albumPhotoLists = new();
     private readonly HashSet<ScrollViewer> _albumPhotoScrollViewers = new();
     private readonly Dictionary<ListBox, List<ScrollViewer>> _albumPhotoScrollViewersByList = new();
+    private double _mainHeaderHiddenHeight;
+    private double _albumReviewTabHeaderHiddenHeight;
+    private double _imageListFooterHiddenHeight;
     private bool _isVisibleAlbumPhotoPriorityUpdateQueued;
     private DateTime _lastBlankPhotoDiagnosticsUtc = DateTime.MinValue;
 
@@ -135,6 +139,11 @@ public partial class MainView : UserControl
         foreach (var scrollViewer in _albumPhotoScrollViewers.ToList())
         {
             DetachAlbumPhotoScrollViewer(scrollViewer);
+        }
+
+        foreach (var listBox in _albumPhotoLists.ToList())
+        {
+            DetachAlbumPhotoList(listBox);
         }
 
         _albumPhotoScrollViewersByList.Clear();
@@ -822,6 +831,7 @@ public partial class MainView : UserControl
             return;
         }
 
+        AttachAlbumPhotoList(listBox);
         _ = Dispatcher.UIThread.InvokeAsync(() =>
         {
             if (listBox.GetVisualRoot() is null)
@@ -845,6 +855,20 @@ public partial class MainView : UserControl
 
             QueueVisibleAlbumPhotoPriorityUpdate();
         }, DispatcherPriority.Loaded);
+    }
+
+    private void AttachAlbumPhotoList(ListBox listBox)
+    {
+        if (!_albumPhotoLists.Add(listBox))
+        {
+            return;
+        }
+
+        listBox.AddHandler(
+            ScrollViewer.ScrollChangedEvent,
+            AlbumPhotoList_ScrollChanged,
+            RoutingStrategies.Bubble,
+            handledEventsToo: true);
     }
 
     private bool AttachAlbumPhotoScrollViewers(ListBox listBox)
@@ -889,6 +913,7 @@ public partial class MainView : UserControl
             return;
         }
 
+        DetachAlbumPhotoList(listBox);
         if (!_albumPhotoScrollViewersByList.Remove(listBox, out var scrollViewers))
         {
             scrollViewers = listBox.GetVisualDescendants().OfType<ScrollViewer>().ToList();
@@ -902,6 +927,16 @@ public partial class MainView : UserControl
         QueueVisibleAlbumPhotoPriorityUpdate();
     }
 
+    private void DetachAlbumPhotoList(ListBox listBox)
+    {
+        if (!_albumPhotoLists.Remove(listBox))
+        {
+            return;
+        }
+
+        listBox.RemoveHandler(ScrollViewer.ScrollChangedEvent, AlbumPhotoList_ScrollChanged);
+    }
+
     private void DetachAlbumPhotoScrollViewer(ScrollViewer scrollViewer)
     {
         if (!_albumPhotoScrollViewers.Remove(scrollViewer))
@@ -912,6 +947,24 @@ public partial class MainView : UserControl
         scrollViewer.ScrollChanged -= AlbumPhotoScrollViewer_ScrollChanged;
         scrollViewer.SizeChanged -= AlbumPhotoScrollViewer_SizeChanged;
         _albumPhotoScrollOffsets.Remove(scrollViewer);
+    }
+
+    private void AlbumPhotoList_ScrollChanged(object? sender, ScrollChangedEventArgs e)
+    {
+        if (e.Source is not ScrollViewer scrollViewer)
+        {
+            return;
+        }
+
+        if (_albumPhotoScrollViewers.Contains(scrollViewer))
+        {
+            return;
+        }
+
+        _albumPhotoScrollOffsets.TryAdd(scrollViewer, scrollViewer.Offset.Y - e.OffsetDelta.Y);
+        UpdateFixedSurfaceTransforms(scrollViewer);
+        UpdateStickyAlbumPhotoGroupHeader();
+        QueueVisibleAlbumPhotoPriorityUpdate();
     }
 
     private void AlbumPhotoScrollViewer_ScrollChanged(object? sender, ScrollChangedEventArgs e)
@@ -979,18 +1032,20 @@ public partial class MainView : UserControl
 
         if (viewModel.FixedHeader)
         {
-            SetSurfaceTranslateY(MainHeader, 0);
+            _mainHeaderHiddenHeight = 0;
         }
 
         if (viewModel.FixedTabs)
         {
-            SetSurfaceTranslateY(AlbumReviewTabHeader, 0);
+            _albumReviewTabHeaderHiddenHeight = 0;
         }
 
         if (viewModel.FixedActionPanel)
         {
-            SetSurfaceTranslateY(ImageListFooter, 0);
+            _imageListFooterHiddenHeight = 0;
         }
+
+        ApplyChromeState(viewModel);
     }
 
     private void UpdateFixedSurfaceTransforms(ScrollViewer scrollViewer)
@@ -1013,54 +1068,132 @@ public partial class MainView : UserControl
             return;
         }
 
+        var mainHeaderHeight = GetChromeSurfaceHeight(MainHeader, MainHeaderRow());
+        var tabHeaderHeight = GetChromeSurfaceHeight(AlbumReviewTabHeader, AlbumReviewTabHeaderRow());
+        var footerHeight = GetChromeSurfaceHeight(ImageListFooter, ImageListFooterRow());
+
+        UpdateHeaderChromeState(delta, viewModel, mainHeaderHeight, tabHeaderHeight);
+
+        if (!viewModel.FixedActionPanel)
+        {
+            _imageListFooterHiddenHeight = Math.Clamp(_imageListFooterHiddenHeight - delta, 0, footerHeight);
+        }
+
+        var maxOffset = Math.Max(0, scrollViewer.Extent.Height - scrollViewer.Viewport.Height);
+        if (currentOffset <= 0.5 && delta < 0)
+        {
+            _mainHeaderHiddenHeight = viewModel.FixedHeader ? 0 : 0;
+            _albumReviewTabHeaderHiddenHeight = viewModel.FixedTabs ? 0 : 0;
+            _imageListFooterHiddenHeight = viewModel.FixedActionPanel ? 0 : footerHeight;
+        }
+        else if (currentOffset >= maxOffset - 0.5 && delta > 0)
+        {
+            _mainHeaderHiddenHeight = viewModel.FixedHeader ? 0 : mainHeaderHeight;
+            _albumReviewTabHeaderHiddenHeight = viewModel.FixedTabs ? 0 : tabHeaderHeight;
+            _imageListFooterHiddenHeight = 0;
+        }
+
+        ApplyChromeState(viewModel);
+    }
+
+    private RowDefinition MainHeaderRow() => RootLayout.RowDefinitions[0];
+
+    private RowDefinition ImageListFooterRow() => RootLayout.RowDefinitions[2];
+
+    private RowDefinition AlbumReviewTabHeaderRow() => OpenAlbumLayout.RowDefinitions[0];
+
+    private void UpdateHeaderChromeState(
+        double delta,
+        MainViewModel viewModel,
+        double mainHeaderHeight,
+        double tabHeaderHeight)
+    {
         if (delta > 0)
         {
-            SetSurfaceTranslateY(MainHeader, viewModel.FixedHeader ? 0 : -MainHeader.Bounds.Height);
-            SetSurfaceTranslateY(AlbumReviewTabHeader, viewModel.FixedTabs ? 0 : -AlbumReviewTabHeader.Bounds.Height);
-            SetSurfaceTranslateY(ImageListFooter, 0);
+            var remaining = delta;
+            if (!viewModel.FixedHeader)
+            {
+                var nextMainHeaderHiddenHeight = Math.Clamp(_mainHeaderHiddenHeight + remaining, 0, mainHeaderHeight);
+                remaining -= nextMainHeaderHiddenHeight - _mainHeaderHiddenHeight;
+                _mainHeaderHiddenHeight = nextMainHeaderHiddenHeight;
+            }
+
+            if (!viewModel.FixedTabs)
+            {
+                _albumReviewTabHeaderHiddenHeight = Math.Clamp(
+                    _albumReviewTabHeaderHiddenHeight + remaining,
+                    0,
+                    tabHeaderHeight);
+            }
         }
         else
         {
-            SetSurfaceTranslateY(MainHeader, 0);
-            SetSurfaceTranslateY(AlbumReviewTabHeader, 0);
-            SetSurfaceTranslateY(ImageListFooter, viewModel.FixedActionPanel ? 0 : ImageListFooter.Bounds.Height);
+            var remaining = -delta;
+            if (!viewModel.FixedTabs)
+            {
+                var nextTabHeaderHiddenHeight = Math.Clamp(_albumReviewTabHeaderHiddenHeight - remaining, 0, tabHeaderHeight);
+                remaining -= _albumReviewTabHeaderHiddenHeight - nextTabHeaderHiddenHeight;
+                _albumReviewTabHeaderHiddenHeight = nextTabHeaderHiddenHeight;
+            }
+
+            if (!viewModel.FixedHeader)
+            {
+                _mainHeaderHiddenHeight = Math.Clamp(
+                    _mainHeaderHiddenHeight - remaining,
+                    0,
+                    mainHeaderHeight);
+            }
         }
     }
 
-    private void SetSurfaceTranslateY(Control surface, double targetY)
+    private void ApplyChromeState(MainViewModel viewModel)
+    {
+        ApplyChromeSurface(MainHeader, MainHeaderRow(), viewModel.FixedHeader ? 0 : _mainHeaderHiddenHeight, topSurface: true);
+        ApplyTabHeaderChromeSurface(viewModel);
+        ApplyChromeSurface(ImageListFooter, ImageListFooterRow(), viewModel.FixedActionPanel ? 0 : _imageListFooterHiddenHeight, topSurface: false);
+    }
+
+    private void ApplyTabHeaderChromeSurface(MainViewModel viewModel)
+    {
+        var row = AlbumReviewTabHeaderRow();
+        var tabHeaderHeight = GetChromeSurfaceHeight(AlbumReviewTabHeader, row);
+        var tabHiddenHeight = viewModel.FixedTabs ? 0 : Math.Clamp(_albumReviewTabHeaderHiddenHeight, 0, tabHeaderHeight);
+        SetSurfaceTranslateY(AlbumReviewTabHeader, -tabHiddenHeight);
+        SetChromeRowHeight(row, tabHeaderHeight - tabHiddenHeight);
+    }
+
+    private static void ApplyChromeSurface(Control surface, RowDefinition row, double hiddenHeight, bool topSurface)
+    {
+        var surfaceHeight = GetChromeSurfaceHeight(surface, row);
+        var clampedHiddenHeight = Math.Clamp(hiddenHeight, 0, surfaceHeight);
+        SetSurfaceTranslateY(surface, topSurface ? -clampedHiddenHeight : clampedHiddenHeight);
+        SetChromeRowHeight(row, surfaceHeight - clampedHiddenHeight);
+    }
+
+    private static double GetChromeSurfaceHeight(Control surface, RowDefinition row)
+    {
+        var rowHeight = row.Height.IsAbsolute ? row.Height.Value : 0;
+        return Math.Max(ChromeSurfaceHeight, Math.Max(surface.Bounds.Height, rowHeight));
+    }
+
+    private static void SetChromeRowHeight(RowDefinition row, double height)
+    {
+        if (row.Height.IsAbsolute && Math.Abs(row.Height.Value - height) < 0.5)
+        {
+            return;
+        }
+
+        row.Height = new GridLength(height, GridUnitType.Pixel);
+    }
+
+    private static void SetSurfaceTranslateY(Control surface, double targetY)
     {
         if (surface.RenderTransform is not TranslateTransform transform)
         {
             return;
         }
 
-        if (Math.Abs(transform.Y - targetY) < 0.5)
-        {
-            transform.Y = targetY;
-            return;
-        }
-
-        var version = _translateAnimationVersions.TryGetValue(transform, out var currentVersion)
-            ? currentVersion + 1
-            : 1;
-        _translateAnimationVersions[transform] = version;
-        var startY = transform.Y;
-        const int steps = 8;
-        for (var step = 1; step <= steps; step++)
-        {
-            var capturedStep = step;
-            _ = Dispatcher.UIThread.InvokeAsync(() =>
-            {
-                if (!_translateAnimationVersions.TryGetValue(transform, out var activeVersion) || activeVersion != version)
-                {
-                    return;
-                }
-
-                var progress = capturedStep / (double)steps;
-                var eased = 1 - Math.Pow(1 - progress, 3);
-                transform.Y = startY + (targetY - startY) * eased;
-            }, DispatcherPriority.Render);
-        }
+        transform.Y = targetY;
     }
 
     private void UpdateStickyAlbumPhotoGroupHeader()

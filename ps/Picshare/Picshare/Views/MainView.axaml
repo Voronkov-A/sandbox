@@ -315,7 +315,13 @@
     </Style>
   </UserControl.Styles>
 
-  <Grid RowDefinitions="56,*,56,Auto" Background="#F7F7F4">
+  <Grid x:Name="RootLayout" Background="#F7F7F4" ClipToBounds="True">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="56"/>
+      <RowDefinition Height="*"/>
+      <RowDefinition Height="56"/>
+      <RowDefinition Height="Auto"/>
+    </Grid.RowDefinitions>
     <Border x:Name="MainHeader"
             Grid.Row="0"
             Background="White"
@@ -938,8 +944,13 @@
           </Grid>
       </Grid>
 
-      <Grid IsVisible="{Binding IsOpenViewVisible}"
-            RowDefinitions="56,*">
+      <Grid x:Name="OpenAlbumLayout"
+            IsVisible="{Binding IsOpenViewVisible}"
+            ClipToBounds="True">
+        <Grid.RowDefinitions>
+          <RowDefinition Height="56"/>
+          <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
         <Border x:Name="AlbumReviewTabHeader"
                 Grid.Row="0"
                 Background="White"
