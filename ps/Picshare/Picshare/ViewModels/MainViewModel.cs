@@ -24,6 +24,7 @@ public partial class MainViewModel : ViewModelBase
     private const int MaxRecentAlbumCount = 10;
     private const int RecentPhotoCapacity = 5;
     private const int FeedbackUndoCapacity = 10;
+    private const int SelectionHistoryCapacity = 20;
 
     [ObservableProperty]
     private AlbumTypeOptionViewModel? _selectedAlbumType;
@@ -159,6 +160,15 @@ public partial class MainViewModel : ViewModelBase
 
     [ObservableProperty]
     private bool _cacheOriginalImages = true;
+
+    [ObservableProperty]
+    private bool _fixedHeader = true;
+
+    [ObservableProperty]
+    private bool _fixedTabs = true;
+
+    [ObservableProperty]
+    private bool _fixedActionPanel = true;
 
     [ObservableProperty]
     private int _albumFastThumbnailMemoryCacheSizeMb = 256;
@@ -538,7 +548,66 @@ public partial class MainViewModel : ViewModelBase
 
     public bool HasCurrentSidebarAlbum => CurrentSidebarAlbum is not null;
 
+    public string ActiveReviewTabId => _activeReviewTabId;
+
+    public bool IsUncategorizedReviewTabSelected => string.Equals(_activeReviewTabId, UncategorizedReviewTabId, StringComparison.Ordinal);
+
+    public bool IsNiceReviewTabSelected => string.Equals(_activeReviewTabId, NiceReviewTabId, StringComparison.Ordinal);
+
+    public bool IsOkReviewTabSelected => string.Equals(_activeReviewTabId, OkReviewTabId, StringComparison.Ordinal);
+
+    public bool IsTrashReviewTabSelected => string.Equals(_activeReviewTabId, TrashReviewTabId, StringComparison.Ordinal);
+
+    public bool IsUnresolvedDuplicatesReviewTabSelected => string.Equals(_activeReviewTabId, UnresolvedDuplicatesReviewTabId, StringComparison.Ordinal);
+
+    public bool IsFlowReviewTabSelected => string.Equals(_activeReviewTabId, FlowReviewTabId, StringComparison.Ordinal);
+
+    public bool IsFlowReviewTabVisible => IsAuthorFlowVisible;
+
+    public bool IsFooterTodoActionVisible => !IsUncategorizedReviewTabSelected;
+
+    public bool IsFooterNiceActionVisible => !IsNiceReviewTabSelected;
+
+    public bool IsFooterOkActionVisible => !IsOkReviewTabSelected;
+
     public bool CanOpenAlbumLink => IsSupportedAlbumLink(OpenAlbumLink);
+
+    public bool IsAlbumHeaderActionsVisible => Photos.Count > 0;
+
+    public bool IsOpenAlbumHeaderActionsVisible => IsOpenViewVisible && IsAlbumHeaderActionsVisible;
+
+    public bool IsOpenAlbumWorkflowStatusVisible => IsOpenViewVisible && IsAlbumWorkflowStatusVisible;
+
+    public bool IsCommitFeedbackMenuItemVisible => _feedbackSession is not null && !_isFeedbackFinalized;
+
+    public string CommitFeedbackMenuComment
+    {
+        get
+        {
+            if (CanCommitFeedback || !IsCommitFeedbackMenuItemVisible)
+            {
+                return "";
+            }
+
+            var visiblePhotos = GetVisiblePhotos().ToList();
+            var targetNiceCount = _currentManifest?.TargetNicePhotoCount ?? Math.Max(0, TargetNicePhotoCount);
+            var niceCount = visiblePhotos.Count(photo => string.Equals(photo.Category, "nice", StringComparison.Ordinal));
+            if (niceCount != targetNiceCount)
+            {
+                return $"Expecting {targetNiceCount} nice pictures";
+            }
+
+            var uncategorizedCount = visiblePhotos.Count(photo => !photo.IsFrozen && string.IsNullOrWhiteSpace(photo.Category));
+            if (uncategorizedCount > 0)
+            {
+                return "Expecting 0 Todo pictures";
+            }
+
+            return "Waiting for the author to proceed";
+        }
+    }
+
+    public bool HasCommitFeedbackMenuComment => !string.IsNullOrWhiteSpace(CommitFeedbackMenuComment);
 
     public bool IsAlbumDownloadProgressWarningVisible => !string.IsNullOrWhiteSpace(AlbumDownloadProgressWarning);
 
@@ -622,11 +691,11 @@ public partial class MainViewModel : ViewModelBase
 
     public ObservableCollection<AlbumDownloadCategoryViewModel> AlbumDownloadCategories { get; } = new();
 
-    public string UncategorizedTabHeader => $"Uncategorized ({GetVisiblePhotos().Count(photo => string.IsNullOrWhiteSpace(photo.Category))})";
+    public string UncategorizedTabHeader => $"Todo ({GetVisiblePhotos().Count(photo => string.IsNullOrWhiteSpace(photo.Category))})";
 
     public string NiceTabHeader => $"Nice ({GetVisiblePhotos().Count(photo => string.Equals(photo.Category, "nice", StringComparison.Ordinal))})";
 
-    public string OkTabHeader => $"Ok ({GetVisiblePhotos().Count(photo => string.Equals(photo.Category, "ok", StringComparison.Ordinal))})";
+    public string OkTabHeader => $"Okay ({GetVisiblePhotos().Count(photo => string.Equals(photo.Category, "ok", StringComparison.Ordinal))})";
 
     public string TrashTabHeader => $"Trash ({GetVisiblePhotos().Count(photo => string.Equals(photo.Category, "trash", StringComparison.Ordinal))})";
 
@@ -664,6 +733,9 @@ public partial class MainViewModel : ViewModelBase
     private readonly HttpClient _imageHttpClient = new();
     private readonly List<IStorageFolder> _folderDateImportFolders = new();
     private readonly List<DriveFolderLocation> _driveFolderPath = new();
+    private readonly List<SelectionHistoryEntry> _selectionUndoHistory = new();
+    private readonly List<SelectionHistoryEntry> _selectionRedoHistory = new();
+    private readonly List<FeedbackUndoEntry> _feedbackRedoHistory = new();
     private GoogleOAuthTokenSet? _googleTokenSet;
     private CancellationTokenSource? _googleSignInCancellation;
     private CancellationTokenSource? _photoViewerCancellation;
@@ -709,13 +781,27 @@ public partial class MainViewModel : ViewModelBase
 
     public bool CanUndoFeedbackAction => CanModifyFeedback && _feedbackUndoHistory.Count > 0;
 
+    public bool CanRedoFeedbackAction => CanModifyFeedback && _feedbackRedoHistory.Count > 0;
+
     public string UndoFeedbackActionDescription => _feedbackUndoHistory.LastOrDefault()?.Description ?? "";
+
+    public string RedoFeedbackActionDescription => _feedbackRedoHistory.LastOrDefault()?.Description ?? "";
+
+    public string SelectedPhotoCountText => $"({SelectedPhotoCount})";
 
     public bool HasRecentPhotos => RecentPhotos.Count > 0;
 
     public bool CanOpenPreviousRecentPhoto => RecentPhotos.Count > 1;
 
-    public bool IsBulkPhotoActionPanelToggleVisible => !_isFlowTabActive;
+    public bool IsBulkPhotoActionPanelToggleVisible => false;
+
+    public bool IsImageListFooterVisible => IsOpenViewVisible && !_isFlowTabActive;
+
+    public bool CanUndoSelection => _selectionUndoHistory.Count > 0;
+
+    public bool CanRedoSelection => _selectionRedoHistory.Count > 0;
+
+    public bool CanClearSelection => SelectedPhotoCount > 0;
 
     public bool HasBookmarkedPhoto => ResolveBookmarkedPhoto() is not null;
 
@@ -759,6 +845,9 @@ public partial class MainViewModel : ViewModelBase
             MaximumParallelism = NormalizeMaximumParallelism(localSettings.MaximumParallelism);
             CacheThumbnails = localSettings.CacheThumbnails;
             CacheOriginalImages = localSettings.CacheOriginalImages;
+            FixedHeader = localSettings.FixedHeader ?? _settingsProvider.DefaultSettings.FixedHeader ?? true;
+            FixedTabs = localSettings.FixedTabs ?? _settingsProvider.DefaultSettings.FixedTabs ?? true;
+            FixedActionPanel = localSettings.FixedActionPanel ?? _settingsProvider.DefaultSettings.FixedActionPanel ?? true;
             AlbumFastThumbnailMemoryCacheSizeMb = NormalizeCacheSizeMb(localSettings.AlbumFastThumbnailMemoryCacheSizeMb, 256);
             AlbumDetailedThumbnailMemoryCacheSizeMb = NormalizeCacheSizeMb(localSettings.AlbumDetailedThumbnailMemoryCacheSizeMb, 512);
             AlbumOriginalImageMemoryCacheSizeMb = NormalizeCacheSizeMb(localSettings.AlbumOriginalImageMemoryCacheSizeMb, 256);
@@ -898,6 +987,12 @@ public partial class MainViewModel : ViewModelBase
         await UndoFeedbackActionCoreAsync();
     }
 
+    [RelayCommand(CanExecute = nameof(CanRedoFeedbackAction))]
+    private async Task RedoFeedbackActionAsync()
+    {
+        await RedoFeedbackActionCoreAsync();
+    }
+
     [RelayCommand]
     private void ToggleBulkPhotoActionPanel()
     {
@@ -918,15 +1013,18 @@ public partial class MainViewModel : ViewModelBase
         UpdateBulkPhotoSelectionState();
     }
 
-    [RelayCommand]
+    [RelayCommand(CanExecute = nameof(CanClearSelection))]
     private void ClearSelectedPhotos()
     {
+        var before = CaptureSelectionIds();
         ClearBulkPhotoSelection();
+        RecordSelectionChange(before, CaptureSelectionIds());
     }
 
     [RelayCommand]
     private void SelectAllPhotosInCurrentTab()
     {
+        var before = CaptureSelectionIds();
         foreach (var photo in GetPhotosForReviewTab(_activeReviewTabId))
         {
             photo.IsSelectedForBulk = true;
@@ -934,6 +1032,50 @@ public partial class MainViewModel : ViewModelBase
 
         _isBulkPhotoActionPanelCollapsed = false;
         UpdateBulkPhotoSelectionState();
+        RecordSelectionChange(before, CaptureSelectionIds());
+    }
+
+    [RelayCommand]
+    private void InvertSelectionInCurrentTab()
+    {
+        var before = CaptureSelectionIds();
+        foreach (var photo in GetPhotosForReviewTab(_activeReviewTabId))
+        {
+            photo.IsSelectedForBulk = !photo.IsSelectedForBulk;
+        }
+
+        UpdateBulkPhotoSelectionState();
+        RecordSelectionChange(before, CaptureSelectionIds());
+    }
+
+    [RelayCommand(CanExecute = nameof(CanUndoSelection))]
+    private void UndoSelection()
+    {
+        if (_selectionUndoHistory.Count == 0)
+        {
+            return;
+        }
+
+        var entry = _selectionUndoHistory[^1];
+        _selectionUndoHistory.RemoveAt(_selectionUndoHistory.Count - 1);
+        _selectionRedoHistory.Add(entry);
+        ApplySelectionIds(entry.BeforeSelectedPhotoIds);
+        NotifySelectionHistoryStateChanged();
+    }
+
+    [RelayCommand(CanExecute = nameof(CanRedoSelection))]
+    private void RedoSelection()
+    {
+        if (_selectionRedoHistory.Count == 0)
+        {
+            return;
+        }
+
+        var entry = _selectionRedoHistory[^1];
+        _selectionRedoHistory.RemoveAt(_selectionRedoHistory.Count - 1);
+        _selectionUndoHistory.Add(entry);
+        ApplySelectionIds(entry.AfterSelectedPhotoIds);
+        NotifySelectionHistoryStateChanged();
     }
 
     [RelayCommand]
@@ -1081,9 +1223,9 @@ public partial class MainViewModel : ViewModelBase
         }
 
         AlbumDownloadCategories.Clear();
-        AddAlbumDownloadCategory("", "Uncategorized", UncategorizedDefaultDownloadDirectoryPath, "exclude");
+        AddAlbumDownloadCategory("", "Todo", UncategorizedDefaultDownloadDirectoryPath, "exclude");
         AddAlbumDownloadCategory("nice", "Nice", NiceDefaultDownloadDirectoryPath, "include");
-        AddAlbumDownloadCategory("ok", "Ok", OkDefaultDownloadDirectoryPath, IsAuthorFlowVisible ? "archive" : "exclude");
+        AddAlbumDownloadCategory("ok", "Okay", OkDefaultDownloadDirectoryPath, IsAuthorFlowVisible ? "archive" : "exclude");
         AddAlbumDownloadCategory("trash", "Trash", TrashDefaultDownloadDirectoryPath, "exclude");
         IsAlbumDownloadDialogVisible = true;
     }
@@ -1367,7 +1509,7 @@ public partial class MainViewModel : ViewModelBase
 
         var missingNiceCount = GetMissingCommittedNicePhotoCount();
         RandomVerdictConfirmationMessage =
-            $"Randomly mark {missingNiceCount} uncommitted picture(s) as nice, mark the other uncommitted pictures as ok, and freeze all pictures?";
+            $"Randomly mark {missingNiceCount} uncommitted picture(s) as nice, mark the other uncommitted pictures as okay, and freeze all pictures?";
         IsRandomVerdictConfirmationVisible = true;
     }
 
@@ -1406,7 +1548,7 @@ public partial class MainViewModel : ViewModelBase
             _unfrozenCollectedPhotoCount = 0;
             UpdateFeedbackControlState();
             UpdateCurrentPhotoActionVisibility();
-            Status = $"Random verdict applied: {result.NicePhotoCount} nice and {result.OkPhotoCount} ok picture(s).";
+            Status = $"Random verdict applied: {result.NicePhotoCount} nice and {result.OkPhotoCount} okay picture(s).";
         }
         catch (Exception ex)
         {
@@ -1677,7 +1819,7 @@ public partial class MainViewModel : ViewModelBase
         }
     }
 
-    public async Task OpenPhotoViewerAsync(AlbumPhotoViewModel photo)
+    public async Task OpenPhotoViewerAsync(AlbumPhotoViewModel photo, bool updateRecentPhotos = true)
     {
         CancelPhotoViewerLoad();
         _albumImageListLoader.ClearPriorityPhotos();
@@ -1689,7 +1831,10 @@ public partial class MainViewModel : ViewModelBase
         {
             IsPhotoViewerVisible = true;
             SelectViewedPhoto(photo);
-            AddRecentPhoto(photo);
+            if (updateRecentPhotos)
+            {
+                AddRecentPhoto(photo);
+            }
             IsPhotoViewerActionsVisible = true;
             UpdatePhotoViewerDuplicateStripVisibility();
             PhotoViewerTitle = photo.FileName;
@@ -1728,6 +1873,7 @@ public partial class MainViewModel : ViewModelBase
         }
     }
 
+    [RelayCommand]
     public async Task OpenRecentPhotoAsync(RecentPhotoViewModel recentPhoto)
     {
         var photo = ResolveRecentPhoto(recentPhoto);
@@ -1738,7 +1884,8 @@ public partial class MainViewModel : ViewModelBase
             return;
         }
 
-        await OpenPhotoViewerAsync(photo);
+        await OpenPhotoViewerAsync(photo, updateRecentPhotos: false);
+        _ = AddRecentPhotoAfterCurrentUiTurnAsync(photo);
     }
 
     [RelayCommand(CanExecute = nameof(CanOpenPreviousRecentPhoto))]
@@ -2570,7 +2717,7 @@ public partial class MainViewModel : ViewModelBase
 
     public void SetUncategorizedDefaultDownloadDirectory(IStorageFolder folder)
     {
-        SetDefaultDownloadDirectory(folder, value => UncategorizedDefaultDownloadDirectoryPath = value, "Uncategorized default download directory");
+        SetDefaultDownloadDirectory(folder, value => UncategorizedDefaultDownloadDirectoryPath = value, "Todo default download directory");
     }
 
     public void SetNiceDefaultDownloadDirectory(IStorageFolder folder)
@@ -2580,7 +2727,7 @@ public partial class MainViewModel : ViewModelBase
 
     public void SetOkDefaultDownloadDirectory(IStorageFolder folder)
     {
-        SetDefaultDownloadDirectory(folder, value => OkDefaultDownloadDirectoryPath = value, "Ok default download directory");
+        SetDefaultDownloadDirectory(folder, value => OkDefaultDownloadDirectoryPath = value, "Okay default download directory");
     }
 
     public void SetTrashDefaultDownloadDirectory(IStorageFolder folder)
@@ -2597,7 +2744,7 @@ public partial class MainViewModel : ViewModelBase
     [RelayCommand]
     private void SetUncategorizedDefaultDownloadDirectoryToDefault()
     {
-        SetDefaultDownloadDirectory(value => UncategorizedDefaultDownloadDirectoryPath = value, "Uncategorized default download directory");
+        SetDefaultDownloadDirectory(value => UncategorizedDefaultDownloadDirectoryPath = value, "Todo default download directory");
     }
 
     [RelayCommand]
@@ -2609,7 +2756,7 @@ public partial class MainViewModel : ViewModelBase
     [RelayCommand]
     private void SetOkDefaultDownloadDirectoryToDefault()
     {
-        SetDefaultDownloadDirectory(value => OkDefaultDownloadDirectoryPath = value, "Ok default download directory");
+        SetDefaultDownloadDirectory(value => OkDefaultDownloadDirectoryPath = value, "Okay default download directory");
     }
 
     [RelayCommand]
@@ -3245,8 +3392,10 @@ public partial class MainViewModel : ViewModelBase
 
     public void TogglePhotoSelection(AlbumPhotoViewModel photo)
     {
+        var before = CaptureSelectionIds();
         photo.IsSelectedForBulk = !photo.IsSelectedForBulk;
         UpdateBulkPhotoSelectionState();
+        RecordSelectionChange(before, CaptureSelectionIds());
     }
 
     public async Task ShowDuplicatePhotoInViewerAsync(AlbumPhotoViewModel photo)
@@ -3466,6 +3615,7 @@ public partial class MainViewModel : ViewModelBase
 
         var entry = _feedbackUndoHistory[^1];
         _feedbackUndoHistory.RemoveAt(_feedbackUndoHistory.Count - 1);
+        _feedbackRedoHistory.Add(entry);
         NotifyFeedbackUndoStateChanged();
 
         var shouldRestoreView = IsCurrentViewState(entry.AfterView);
@@ -3487,6 +3637,39 @@ public partial class MainViewModel : ViewModelBase
         }
 
         Status = $"Undid: {entry.Description}.";
+    }
+
+    private async Task RedoFeedbackActionCoreAsync()
+    {
+        if (!CanRedoFeedbackAction || _feedbackSession is null || _feedbackDatabase is null)
+        {
+            return;
+        }
+
+        var entry = _feedbackRedoHistory[^1];
+        _feedbackRedoHistory.RemoveAt(_feedbackRedoHistory.Count - 1);
+        _feedbackUndoHistory.Add(entry);
+        NotifyFeedbackUndoStateChanged();
+
+        var shouldRestoreView = IsCurrentViewState(entry.BeforeView);
+        RestoreFeedbackUndoRegion(_feedbackDatabase, entry.RegionAfter);
+        await _reviewerFeedbackService.RestoreLocalDatabaseAsync(
+            _feedbackSession,
+            _feedbackDatabase,
+            CancellationToken.None);
+
+        ApplyFeedbackDatabaseToPhotos();
+        UpdateFeedbackControlState();
+        UpdateCurrentPhotoActionVisibility();
+        UpdateBulkPhotoSelectionState();
+        _ = SyncFeedbackAsync();
+
+        if (shouldRestoreView)
+        {
+            await RestoreViewStateAsync(entry.AfterView);
+        }
+
+        Status = $"Redid: {entry.Description}.";
     }
 
     private FeedbackUndoScope? BeginFeedbackUndo(string description, IEnumerable<string> affectedPhotoIds)
@@ -3518,6 +3701,7 @@ public partial class MainViewModel : ViewModelBase
         _feedbackUndoHistory.Add(new FeedbackUndoEntry(
             scope.Description,
             scope.RegionBefore,
+            CaptureFeedbackUndoRegion(scope.RegionBefore.AffectedPhotoIds),
             scope.BeforeView,
             CaptureViewState()));
         if (_feedbackUndoHistory.Count > FeedbackUndoCapacity)
@@ -3525,6 +3709,7 @@ public partial class MainViewModel : ViewModelBase
             _feedbackUndoHistory.RemoveAt(0);
         }
 
+        _feedbackRedoHistory.Clear();
         NotifyFeedbackUndoStateChanged();
     }
 
@@ -3587,14 +3772,18 @@ public partial class MainViewModel : ViewModelBase
         }
 
         _feedbackUndoHistory.Clear();
+        _feedbackRedoHistory.Clear();
         NotifyFeedbackUndoStateChanged();
     }
 
     private void NotifyFeedbackUndoStateChanged()
     {
         OnPropertyChanged(nameof(CanUndoFeedbackAction));
+        OnPropertyChanged(nameof(CanRedoFeedbackAction));
         OnPropertyChanged(nameof(UndoFeedbackActionDescription));
+        OnPropertyChanged(nameof(RedoFeedbackActionDescription));
         UndoFeedbackActionCommand.NotifyCanExecuteChanged();
+        RedoFeedbackActionCommand.NotifyCanExecuteChanged();
     }
 
     private FeedbackUndoViewState CaptureViewState()
@@ -3745,8 +3934,8 @@ public partial class MainViewModel : ViewModelBase
         RebuildCategoryRows();
         UpdateCurrentPhotoActionVisibility();
         Status = string.IsNullOrWhiteSpace(category)
-            ? $"{changedPhoto.FileName} moved to uncategorized."
-            : $"{changedPhoto.FileName} marked as {category}.";
+            ? $"{changedPhoto.FileName} moved to Todo."
+            : $"{changedPhoto.FileName} marked as {GetCategoryDisplayName(category)}.";
 
         if (string.Equals(sourceReviewTabId, UnresolvedDuplicatesReviewTabId, StringComparison.Ordinal))
         {
@@ -3840,8 +4029,8 @@ public partial class MainViewModel : ViewModelBase
         RebuildCategoryRows();
         UpdateCurrentPhotoActionVisibility();
         Status = string.IsNullOrWhiteSpace(category)
-            ? $"{photos.Count} photo(s) moved to uncategorized."
-            : $"{photos.Count} photo(s) marked as {category}.";
+            ? $"{photos.Count} photo(s) moved to Todo."
+            : $"{photos.Count} photo(s) marked as {GetCategoryDisplayName(category)}.";
         CompleteFeedbackUndo(undo);
     }
 
@@ -4805,6 +4994,7 @@ public partial class MainViewModel : ViewModelBase
         _feedbackStatus = null;
         _currentReviewerIdentity = null;
         ClearFeedbackUndoHistory();
+        ClearSelectionHistory();
         ClearRecentPhotos();
         NotifyBookmarkStateChanged();
         AlbumWorkflowStatus = "";
@@ -5059,7 +5249,7 @@ public partial class MainViewModel : ViewModelBase
         groups.Add(new AlbumPhotoGroupHeaderViewModel(header));
         foreach (var row in materialized.Chunk(PhotosPerRow))
         {
-            groups.Add(new AlbumPhotoRowViewModel(row));
+            groups.Add(new AlbumPhotoRowViewModel(header, row));
         }
     }
 
@@ -5184,8 +5374,14 @@ public partial class MainViewModel : ViewModelBase
 
     public void SetActiveReviewTab(string tabId)
     {
+        var previousTabId = _activeReviewTabId;
         _activeReviewTabId = string.IsNullOrWhiteSpace(tabId) ? UncategorizedReviewTabId : tabId;
         _isFlowTabActive = string.Equals(_activeReviewTabId, FlowReviewTabId, StringComparison.Ordinal);
+        if (!string.Equals(previousTabId, _activeReviewTabId, StringComparison.Ordinal))
+        {
+            NotifyReviewTabStateChanged();
+        }
+
         UpdateBulkPhotoSelectionState();
         if (_isFlowTabActive && IsAuthorFlowVisible)
         {
@@ -5195,6 +5391,21 @@ public partial class MainViewModel : ViewModelBase
         {
             StopFlowMonitor();
         }
+    }
+
+    private void NotifyReviewTabStateChanged()
+    {
+        OnPropertyChanged(nameof(ActiveReviewTabId));
+        OnPropertyChanged(nameof(IsUncategorizedReviewTabSelected));
+        OnPropertyChanged(nameof(IsNiceReviewTabSelected));
+        OnPropertyChanged(nameof(IsOkReviewTabSelected));
+        OnPropertyChanged(nameof(IsTrashReviewTabSelected));
+        OnPropertyChanged(nameof(IsUnresolvedDuplicatesReviewTabSelected));
+        OnPropertyChanged(nameof(IsFlowReviewTabSelected));
+        OnPropertyChanged(nameof(IsFooterTodoActionVisible));
+        OnPropertyChanged(nameof(IsFooterNiceActionVisible));
+        OnPropertyChanged(nameof(IsFooterOkActionVisible));
+        OnPropertyChanged(nameof(IsImageListFooterVisible));
     }
 
     private void StartFlowMonitor()
@@ -5519,7 +5730,23 @@ public partial class MainViewModel : ViewModelBase
             selectedPhotosWithDuplicateMembers.All(photo => !photo.IsFrozen);
         _lastBulkSelectedPhotoCount = selectedPhotos.Count;
         OnPropertyChanged(nameof(IsBulkPhotoActionPanelToggleVisible));
+        OnPropertyChanged(nameof(IsImageListFooterVisible));
+        OnPropertyChanged(nameof(SelectedPhotoCountText));
+        OnPropertyChanged(nameof(CanClearSelection));
+        ClearSelectedPhotosCommand.NotifyCanExecuteChanged();
+        NotifyAlbumHeaderActionStateChanged();
+        NotifySelectionHistoryStateChanged();
         NotifyBookmarkStateChanged();
+    }
+
+    private void NotifyAlbumHeaderActionStateChanged()
+    {
+        OnPropertyChanged(nameof(IsAlbumHeaderActionsVisible));
+        OnPropertyChanged(nameof(IsOpenAlbumHeaderActionsVisible));
+        OnPropertyChanged(nameof(IsOpenAlbumWorkflowStatusVisible));
+        OnPropertyChanged(nameof(IsCommitFeedbackMenuItemVisible));
+        OnPropertyChanged(nameof(CommitFeedbackMenuComment));
+        OnPropertyChanged(nameof(HasCommitFeedbackMenuComment));
     }
 
     private bool CanApplyBulkCategory(string category, IReadOnlyList<AlbumPhotoViewModel> selectedPhotos)
@@ -5578,6 +5805,7 @@ public partial class MainViewModel : ViewModelBase
             IsLeaveFeedbackVisible = false;
             IsLeaveFeedbackMenuItemVisible = false;
             CommitFeedbackStatus = "";
+            NotifyAlbumHeaderActionStateChanged();
             UpdateBulkPhotoSelectionState();
             return;
         }
@@ -5586,6 +5814,7 @@ public partial class MainViewModel : ViewModelBase
         {
             CanCommitFeedback = false;
             CommitFeedbackStatus = IsFeedbackLeft ? "you left the album" : "album finalized";
+            NotifyAlbumHeaderActionStateChanged();
             UpdateBulkPhotoSelectionState();
             return;
         }
@@ -5594,6 +5823,7 @@ public partial class MainViewModel : ViewModelBase
         {
             CanCommitFeedback = false;
             CommitFeedbackStatus = "feedback sent";
+            NotifyAlbumHeaderActionStateChanged();
             UpdateBulkPhotoSelectionState();
             return;
         }
@@ -5602,6 +5832,7 @@ public partial class MainViewModel : ViewModelBase
         {
             CanCommitFeedback = false;
             CommitFeedbackStatus = "feedback passed";
+            NotifyAlbumHeaderActionStateChanged();
             UpdateBulkPhotoSelectionState();
             return;
         }
@@ -5610,6 +5841,7 @@ public partial class MainViewModel : ViewModelBase
         {
             CanCommitFeedback = false;
             CommitFeedbackStatus = "feedback collected";
+            NotifyAlbumHeaderActionStateChanged();
             UpdateBulkPhotoSelectionState();
             return;
         }
@@ -5623,6 +5855,7 @@ public partial class MainViewModel : ViewModelBase
         {
             CanCommitFeedback = false;
             CommitFeedbackStatus = $"expecting {targetNiceCount} nice pictures";
+            NotifyAlbumHeaderActionStateChanged();
             UpdateBulkPhotoSelectionState();
             return;
         }
@@ -5630,13 +5863,15 @@ public partial class MainViewModel : ViewModelBase
         if (uncategorizedCount > 0)
         {
             CanCommitFeedback = false;
-            CommitFeedbackStatus = $"{uncategorizedCount} uncategorized pictures left";
+            CommitFeedbackStatus = $"{uncategorizedCount} Todo pictures left";
+            NotifyAlbumHeaderActionStateChanged();
             UpdateBulkPhotoSelectionState();
             return;
         }        
 
         CanCommitFeedback = true;
         CommitFeedbackStatus = "ready to send";
+        NotifyAlbumHeaderActionStateChanged();
         UpdateBulkPhotoSelectionState();
     }
 
@@ -5663,7 +5898,7 @@ public partial class MainViewModel : ViewModelBase
 
         AlbumWorkflowStatus = _feedbackDatabase.RoundUncategorizedBefore is { } before &&
             _feedbackDatabase.RoundUncategorizedAfter is { } after
-                ? $"round {roundNumber} has finished: {before} -> {after} uncategorized"
+                ? $"round {roundNumber} has finished: {before} -> {after} Todo"
                 : $"round {roundNumber} has finished";
     }
 
@@ -5834,7 +6069,8 @@ public partial class MainViewModel : ViewModelBase
             key,
             recentPhoto.PhotoId,
             duplicateGroupId,
-            recentPhoto.FileName));
+            recentPhoto.FileName,
+            OpenRecentPhotoAsync));
 
         while (RecentPhotos.Count > RecentPhotoCapacity)
         {
@@ -5842,6 +6078,15 @@ public partial class MainViewModel : ViewModelBase
         }
 
         NotifyRecentPhotosChanged();
+    }
+
+    private async Task AddRecentPhotoAfterCurrentUiTurnAsync(AlbumPhotoViewModel photo)
+    {
+        await Task.Yield();
+        if (IsPhotoViewerVisible && ReferenceEquals(_selectedViewedPhoto, photo))
+        {
+            AddRecentPhoto(photo);
+        }
     }
 
     private AlbumPhotoViewModel GetRecentPhotoAnchor(AlbumPhotoViewModel photo)
@@ -5989,7 +6234,14 @@ public partial class MainViewModel : ViewModelBase
 
     private static string GetCategoryDisplayName(string category)
     {
-        return string.IsNullOrWhiteSpace(category) ? "uncategorized" : category;
+        if (string.IsNullOrWhiteSpace(category))
+        {
+            return "Todo";
+        }
+
+        return string.Equals(category, "ok", StringComparison.Ordinal)
+            ? "okay"
+            : category;
     }
 
     private void ClearBulkPhotoSelection()
@@ -6002,6 +6254,58 @@ public partial class MainViewModel : ViewModelBase
         _isBulkPhotoActionPanelPinned = false;
         _isBulkPhotoActionPanelCollapsed = false;
         UpdateBulkPhotoSelectionState();
+    }
+
+    private IReadOnlyList<string> CaptureSelectionIds()
+    {
+        return GetSelectedPhotos()
+            .Select(photo => photo.PhotoId)
+            .Order(StringComparer.Ordinal)
+            .ToList();
+    }
+
+    private void ApplySelectionIds(IReadOnlyCollection<string> selectedPhotoIds)
+    {
+        foreach (var photo in Photos)
+        {
+            photo.IsSelectedForBulk = selectedPhotoIds.Contains(photo.PhotoId, StringComparer.Ordinal);
+        }
+
+        UpdateBulkPhotoSelectionState();
+    }
+
+    private void RecordSelectionChange(IReadOnlyList<string> before, IReadOnlyList<string> after)
+    {
+        if (before.SequenceEqual(after, StringComparer.Ordinal))
+        {
+            return;
+        }
+
+        _selectionUndoHistory.Add(new SelectionHistoryEntry(before, after));
+        if (_selectionUndoHistory.Count > SelectionHistoryCapacity)
+        {
+            _selectionUndoHistory.RemoveAt(0);
+        }
+
+        _selectionRedoHistory.Clear();
+        NotifySelectionHistoryStateChanged();
+    }
+
+    private void ClearSelectionHistory()
+    {
+        _selectionUndoHistory.Clear();
+        _selectionRedoHistory.Clear();
+        NotifySelectionHistoryStateChanged();
+    }
+
+    private void NotifySelectionHistoryStateChanged()
+    {
+        OnPropertyChanged(nameof(CanUndoSelection));
+        OnPropertyChanged(nameof(CanRedoSelection));
+        OnPropertyChanged(nameof(CanClearSelection));
+        UndoSelectionCommand.NotifyCanExecuteChanged();
+        RedoSelectionCommand.NotifyCanExecuteChanged();
+        ClearSelectedPhotosCommand.NotifyCanExecuteChanged();
     }
 
     private static bool UsesGoogleDriveBackend(AlbumManifest manifest)
@@ -6191,6 +6495,9 @@ public partial class MainViewModel : ViewModelBase
             MaximumParallelism = GetMaximumParallelism(),
             CacheThumbnails = CacheThumbnails,
             CacheOriginalImages = CacheOriginalImages,
+            FixedHeader = FixedHeader,
+            FixedTabs = FixedTabs,
+            FixedActionPanel = FixedActionPanel,
             AlbumFastThumbnailMemoryCacheSizeMb = GetCacheSizeMb(AlbumFastThumbnailMemoryCacheSizeMb, 256),
             AlbumDetailedThumbnailMemoryCacheSizeMb = GetCacheSizeMb(AlbumDetailedThumbnailMemoryCacheSizeMb, 512),
             AlbumOriginalImageMemoryCacheSizeMb = GetCacheSizeMb(AlbumOriginalImageMemoryCacheSizeMb, 256),
@@ -6324,6 +6631,9 @@ public partial class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(IsCreateViewVisible));
         OnPropertyChanged(nameof(IsOpenViewVisible));
         OnPropertyChanged(nameof(IsSettingsViewVisible));
+        OnPropertyChanged(nameof(IsOpenAlbumHeaderActionsVisible));
+        OnPropertyChanged(nameof(IsOpenAlbumWorkflowStatusVisible));
+        OnPropertyChanged(nameof(IsImageListFooterVisible));
     }
 
     partial void OnCurrentSidebarAlbumChanged(RecentAlbumViewModel? value)
@@ -6354,6 +6664,21 @@ public partial class MainViewModel : ViewModelBase
     }
 
     partial void OnCacheOriginalImagesChanged(bool value)
+    {
+        PersistLocalUserSettingsIfReady();
+    }
+
+    partial void OnFixedHeaderChanged(bool value)
+    {
+        PersistLocalUserSettingsIfReady();
+    }
+
+    partial void OnFixedTabsChanged(bool value)
+    {
+        PersistLocalUserSettingsIfReady();
+    }
+
+    partial void OnFixedActionPanelChanged(bool value)
     {
         PersistLocalUserSettingsIfReady();
     }
@@ -6430,6 +6755,8 @@ public partial class MainViewModel : ViewModelBase
 
     partial void OnIsAuthorFlowVisibleChanged(bool value)
     {
+        OnPropertyChanged(nameof(IsFlowReviewTabVisible));
+        OnPropertyChanged(nameof(IsFlowReviewTabSelected));
         if (value && _isFlowTabActive)
         {
             StartFlowMonitor();
@@ -6460,6 +6787,7 @@ public partial class MainViewModel : ViewModelBase
     partial void OnAlbumWorkflowStatusChanged(string value)
     {
         OnPropertyChanged(nameof(IsAlbumWorkflowStatusVisible));
+        OnPropertyChanged(nameof(IsOpenAlbumWorkflowStatusVisible));
     }
 
     partial void OnAlbumDownloadProgressWarningChanged(string value)
@@ -6600,8 +6928,13 @@ public partial class MainViewModel : ViewModelBase
     private sealed record FeedbackUndoEntry(
         string Description,
         FeedbackUndoRegion RegionBefore,
+        FeedbackUndoRegion RegionAfter,
         FeedbackUndoViewState BeforeView,
         FeedbackUndoViewState AfterView);
+
+    private sealed record SelectionHistoryEntry(
+        IReadOnlyList<string> BeforeSelectedPhotoIds,
+        IReadOnlyList<string> AfterSelectedPhotoIds);
 
     private sealed record FeedbackUndoRegion(
         IReadOnlyList<string> AffectedPhotoIds,

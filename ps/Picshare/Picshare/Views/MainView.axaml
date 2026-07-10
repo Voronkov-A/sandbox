@@ -163,7 +163,8 @@
     </DataTemplate>
 
     <DataTemplate DataType="{x:Type vm:AlbumPhotoGroupHeaderViewModel}" x:DataType="vm:AlbumPhotoGroupHeaderViewModel">
-      <TextBlock Text="{Binding Header}"
+      <TextBlock x:Name="AlbumPhotoGroupHeader"
+                 Text="{Binding Header}"
                  FontSize="14"
                  FontWeight="SemiBold"
                  Foreground="#27343B"
@@ -272,6 +273,32 @@
   </UserControl.Resources>
 
   <UserControl.Styles>
+    <Style Selector="Button.compact-footer-action TextBlock.footer-action-label">
+      <Setter Property="IsVisible" Value="False"/>
+    </Style>
+    <Style Selector="Button.review-tab-header">
+      <Setter Property="MinHeight" Value="36"/>
+      <Setter Property="Padding" Value="14,8"/>
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="BorderBrush" Value="Transparent"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="Foreground" Value="#27343B"/>
+      <Setter Property="FontSize" Value="13"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="CornerRadius" Value="6"/>
+      <Setter Property="VerticalAlignment" Value="Center"/>
+      <Setter Property="HorizontalContentAlignment" Value="Center"/>
+      <Setter Property="VerticalContentAlignment" Value="Center"/>
+    </Style>
+    <Style Selector="Button.review-tab-header:pointerover">
+      <Setter Property="Background" Value="#EDF0ED"/>
+      <Setter Property="BorderBrush" Value="#D6D8D1"/>
+    </Style>
+    <Style Selector="Button.review-tab-header.selected-review-tab">
+      <Setter Property="Background" Value="#27343B"/>
+      <Setter Property="Foreground" Value="White"/>
+      <Setter Property="BorderBrush" Value="#27343B"/>
+    </Style>
     <Style Selector="ListBox.album-photo-list ListBoxItem">
       <Setter Property="Background" Value="Transparent"/>
       <Setter Property="Padding" Value="0"/>
@@ -288,12 +315,16 @@
     </Style>
   </UserControl.Styles>
 
-  <Grid RowDefinitions="56,*,Auto" Background="#F7F7F4">
-    <Border Grid.Row="0"
+  <Grid RowDefinitions="56,*,56,Auto" Background="#F7F7F4">
+    <Border x:Name="MainHeader"
+            Grid.Row="0"
             Background="White"
             BorderBrush="#D6D8D1"
             BorderThickness="0,0,0,1">
-      <Grid ColumnDefinitions="Auto,*" Margin="12,0">
+      <Border.RenderTransform>
+        <TranslateTransform/>
+      </Border.RenderTransform>
+      <Grid ColumnDefinitions="Auto,*,Auto" Margin="12,0">
         <Button Width="42"
                 Height="42"
                 Padding="0"
@@ -308,11 +339,73 @@
                   StrokeLineCap="Round"/>
           </Grid>
         </Button>
+        <TextBlock Grid.Column="1"
+                   Text="{Binding AlbumWorkflowStatus}"
+                   IsVisible="{Binding IsOpenAlbumWorkflowStatusVisible}"
+                   FontSize="15"
+                   FontWeight="SemiBold"
+                   Foreground="#27343B"
+                   HorizontalAlignment="Center"
+                   VerticalAlignment="Center"
+                   TextTrimming="CharacterEllipsis"/>
+        <Button Grid.Column="2"
+                Width="42"
+                Height="42"
+                Padding="0"
+                IsVisible="{Binding IsOpenAlbumHeaderActionsVisible}"
+                IsEnabled="{Binding CanUseAlbumMoreMenu}"
+                ToolTip.Tip="Album actions"
+                HorizontalAlignment="Right"
+                VerticalAlignment="Center">
+          <Grid Width="22" Height="22">
+            <Ellipse Width="4" Height="4" Fill="#27343B" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,2,0,0"/>
+            <Ellipse Width="4" Height="4" Fill="#27343B" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            <Ellipse Width="4" Height="4" Fill="#27343B" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,2"/>
+          </Grid>
+          <Button.Flyout>
+            <MenuFlyout>
+              <MenuItem IsHitTestVisible="False">
+                <MenuItem.Header>
+                  <Border Background="#27343B"
+                          Padding="12,7"
+                          MinWidth="180">
+                    <TextBlock Text="Album actions"
+                               Foreground="White"
+                               FontWeight="Bold"/>
+                  </Border>
+                </MenuItem.Header>
+              </MenuItem>
+              <MenuItem Command="{Binding CommitFeedbackCommand}"
+                        IsVisible="{Binding IsCommitFeedbackMenuItemVisible}"
+                        IsEnabled="{Binding CanCommitFeedback}">
+                <MenuItem.Header>
+                  <StackPanel Spacing="1">
+                    <TextBlock Text="Commit feedback"/>
+                    <TextBlock Text="{Binding CommitFeedbackMenuComment}"
+                               FontSize="11"
+                               Foreground="#6C756F"
+                               IsVisible="{Binding HasCommitFeedbackMenuComment}"/>
+                  </StackPanel>
+                </MenuItem.Header>
+              </MenuItem>
+              <MenuItem Header="Leave"
+                        Command="{Binding LeaveFeedbackCommand}"
+                        IsVisible="{Binding IsLeaveFeedbackVisible}"
+                        IsEnabled="{Binding CanLeaveFeedback}"/>
+              <MenuItem Header="Pass"
+                        Command="{Binding PassFeedbackCommand}"
+                        IsEnabled="{Binding CanPassFeedback}"/>
+              <MenuItem Header="Download the album..."
+                        Command="{Binding OpenAlbumDownloadDialogCommand}"
+                        IsEnabled="{Binding CanUseAlbumMoreMenu}"/>
+            </MenuFlyout>
+          </Button.Flyout>
+        </Button>
       </Grid>
     </Border>
 
-    <Grid Grid.Row="1" Margin="20">
-      <Grid IsVisible="{Binding IsCreateViewVisible}">
+    <Grid Grid.Row="1">
+      <Grid IsVisible="{Binding IsCreateViewVisible}" Margin="20">
           <ScrollViewer>
             <Grid ColumnDefinitions="440,*"
                   RowDefinitions="Auto,Auto">
@@ -845,76 +938,95 @@
           </Grid>
       </Grid>
 
-      <Grid IsVisible="{Binding IsOpenViewVisible}">
-        <Grid RowDefinitions="Auto,*">
-          <Grid Grid.Row="1" RowDefinitions="Auto,*">
-              <Grid Grid.Row="0" ColumnDefinitions="*,Auto,Auto,Auto" Margin="0,0,0,14">
-                <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
-                  <Border Background="#E8EEF0"
-                          BorderBrush="#C8D2D6"
-                          BorderThickness="1"
-                          CornerRadius="6"
-                          Padding="8,4"
-                          IsVisible="{Binding IsAlbumWorkflowStatusVisible}"
+      <Grid IsVisible="{Binding IsOpenViewVisible}"
+            RowDefinitions="56,*">
+        <Border x:Name="AlbumReviewTabHeader"
+                Grid.Row="0"
+                Background="White"
+                BorderBrush="#D6D8D1"
+                BorderThickness="0,0,0,1">
+          <Border.RenderTransform>
+            <TranslateTransform/>
+          </Border.RenderTransform>
+          <Grid ColumnDefinitions="Auto,*,Auto" Margin="12,0">
+            <Button x:Name="AlbumReviewTabsScrollLeftButton"
+                    Grid.Column="0"
+                    Width="42"
+                    Height="42"
+                    Padding="0"
+                    Margin="0,0,8,0"
+                    Click="ScrollAlbumReviewTabsLeft_Click"
+                    ToolTip.Tip="Scroll tabs left"
+                    VerticalAlignment="Center">
+              <TextBlock Text="&lt;"
+                         FontSize="18"
+                         FontWeight="SemiBold"
+                         HorizontalAlignment="Center"
+                         VerticalAlignment="Center"/>
+            </Button>
+            <ScrollViewer x:Name="AlbumReviewTabHeaderScrollViewer"
+                          Grid.Column="1"
+                          HorizontalScrollBarVisibility="Hidden"
+                          VerticalScrollBarVisibility="Disabled"
+                          ScrollChanged="AlbumReviewTabHeaderScrollViewer_ScrollChanged"
+                          SizeChanged="AlbumReviewTabHeaderScrollViewer_SizeChanged"
                           VerticalAlignment="Center">
-                    <TextBlock Text="{Binding AlbumWorkflowStatus}"
-                               FontSize="12"
-                               FontWeight="SemiBold"
-                               Foreground="#27343B"/>
-                  </Border>
-                </StackPanel>
-                <TextBlock Grid.Column="1"
-                           Text="{Binding CommitFeedbackStatus}"
-                           IsVisible="{Binding IsStandardFeedbackActionsVisible}"
-                           Foreground="#6C756F"
-                           VerticalAlignment="Center"
-                           Margin="0,0,10,0"/>
-                <Button Grid.Column="2"
-                        Command="{Binding CommitFeedbackCommand}"
-                        IsVisible="{Binding IsStandardFeedbackActionsVisible}"
-                        IsEnabled="{Binding CanCommitFeedback}"
-                        Margin="0,0,8,0"
-                        Padding="12,8">
-                  Commit feedback
-                </Button>
-                <Button Grid.Column="3"
-                        IsEnabled="{Binding CanUseAlbumMoreMenu}"
-                        Padding="12,8">
-                  More
-                  <Button.Flyout>
-                    <MenuFlyout>
-                      <MenuItem Header="pass"
-                                Command="{Binding PassFeedbackCommand}"
-                                IsVisible="{Binding CanPassFeedback}"
-                                IsEnabled="{Binding CanPassFeedback}"/>
-                      <MenuItem Header="Leave"
-                                Command="{Binding LeaveFeedbackCommand}"
-                                IsVisible="{Binding IsLeaveFeedbackMenuItemVisible}"
-                                IsEnabled="{Binding CanLeaveFeedback}"/>
-                      <MenuItem Header="Download the album..."
-                                Command="{Binding OpenAlbumDownloadDialogCommand}"
-                                IsEnabled="{Binding CanUseAlbumMoreMenu}"/>
-                    </MenuFlyout>
-                  </Button.Flyout>
-                </Button>
-                <TextBlock Grid.Column="1"
-                           Text="{Binding FinalizedFeedbackMessage}"
-                           IsVisible="{Binding IsLeaveFeedbackVisible}"
-                           Foreground="#6C756F"
-                           VerticalAlignment="Center"
-                           TextWrapping="Wrap"
-                           MaxWidth="520"
-                           Margin="0,0,10,0"/>
-                <Button Grid.Column="2"
-                        Command="{Binding LeaveFeedbackCommand}"
-                        IsVisible="{Binding IsLeaveFeedbackVisible}"
-                        IsEnabled="{Binding CanLeaveFeedback}"
-                        Padding="12,8">
-                  Leave
-                </Button>
-              </Grid>
-              <TabControl x:Name="AlbumReviewTabs" Grid.Row="1" SelectionChanged="AlbumReviewTabs_SelectionChanged">
-                <TabItem Header="{Binding UncategorizedTabHeader}" Tag="uncategorized">
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <Button Classes="review-tab-header"
+                        Classes.selected-review-tab="{Binding IsUncategorizedReviewTabSelected}"
+                        Content="{Binding UncategorizedTabHeader}"
+                        Tag="uncategorized"
+                        Click="AlbumReviewTabHeader_Click"/>
+                <Button Classes="review-tab-header"
+                        Classes.selected-review-tab="{Binding IsNiceReviewTabSelected}"
+                        Content="{Binding NiceTabHeader}"
+                        Tag="nice"
+                        Click="AlbumReviewTabHeader_Click"/>
+                <Button Classes="review-tab-header"
+                        Classes.selected-review-tab="{Binding IsOkReviewTabSelected}"
+                        Content="{Binding OkTabHeader}"
+                        Tag="ok"
+                        Click="AlbumReviewTabHeader_Click"/>
+                <Button Classes="review-tab-header"
+                        Classes.selected-review-tab="{Binding IsTrashReviewTabSelected}"
+                        Content="{Binding TrashTabHeader}"
+                        Tag="trash"
+                        Click="AlbumReviewTabHeader_Click"/>
+                <Button Classes="review-tab-header"
+                        Classes.selected-review-tab="{Binding IsUnresolvedDuplicatesReviewTabSelected}"
+                        Content="{Binding UnresolvedDuplicatesTabHeader}"
+                        Tag="unresolved-duplicates"
+                        IsVisible="{Binding HasUnresolvedDuplicatePhotos}"
+                        Click="AlbumReviewTabHeader_Click"/>
+                <Button Classes="review-tab-header"
+                        Classes.selected-review-tab="{Binding IsFlowReviewTabSelected}"
+                        Content="{Binding FlowTabHeader}"
+                        Tag="flow"
+                        IsVisible="{Binding IsFlowReviewTabVisible}"
+                        Click="AlbumReviewTabHeader_Click"/>
+              </StackPanel>
+            </ScrollViewer>
+            <Button x:Name="AlbumReviewTabsScrollRightButton"
+                    Grid.Column="2"
+                    Width="42"
+                    Height="42"
+                    Padding="0"
+                    Margin="8,0,0,0"
+                    Click="ScrollAlbumReviewTabsRight_Click"
+                    ToolTip.Tip="Scroll tabs right"
+                    VerticalAlignment="Center">
+              <TextBlock Text="&gt;"
+                         FontSize="18"
+                         FontWeight="SemiBold"
+                         HorizontalAlignment="Center"
+                         VerticalAlignment="Center"/>
+            </Button>
+          </Grid>
+        </Border>
+        <Grid x:Name="AlbumReviewContentHost"
+              Grid.Row="1"
+              Margin="20,0,20,20">
+          <Grid IsVisible="{Binding IsUncategorizedReviewTabSelected}">
                   <ListBox ItemsSource="{Binding UncategorizedPhotoGroups}"
                            Classes="album-photo-list"
                            Loaded="AlbumPhotoList_Loaded"
@@ -929,8 +1041,8 @@
                       </ItemsPanelTemplate>
                     </ListBox.ItemsPanel>
                   </ListBox>
-                </TabItem>
-                <TabItem Header="{Binding NiceTabHeader}" Tag="nice">
+          </Grid>
+          <Grid IsVisible="{Binding IsNiceReviewTabSelected}">
                   <ListBox ItemsSource="{Binding NicePhotoGroups}"
                            Classes="album-photo-list"
                            Loaded="AlbumPhotoList_Loaded"
@@ -945,8 +1057,8 @@
                       </ItemsPanelTemplate>
                     </ListBox.ItemsPanel>
                   </ListBox>
-                </TabItem>
-                <TabItem Header="{Binding OkTabHeader}" Tag="ok">
+          </Grid>
+          <Grid IsVisible="{Binding IsOkReviewTabSelected}">
                   <ListBox ItemsSource="{Binding OkPhotoGroups}"
                            Classes="album-photo-list"
                            Loaded="AlbumPhotoList_Loaded"
@@ -961,8 +1073,8 @@
                       </ItemsPanelTemplate>
                     </ListBox.ItemsPanel>
                   </ListBox>
-                </TabItem>
-                <TabItem Header="{Binding TrashTabHeader}" Tag="trash">
+          </Grid>
+          <Grid IsVisible="{Binding IsTrashReviewTabSelected}">
                   <ListBox ItemsSource="{Binding TrashPhotoGroups}"
                            Classes="album-photo-list"
                            Loaded="AlbumPhotoList_Loaded"
@@ -977,10 +1089,8 @@
                       </ItemsPanelTemplate>
                     </ListBox.ItemsPanel>
                   </ListBox>
-                </TabItem>
-                <TabItem Header="{Binding UnresolvedDuplicatesTabHeader}"
-                         Tag="unresolved-duplicates"
-                         IsVisible="{Binding HasUnresolvedDuplicatePhotos}">
+          </Grid>
+          <Grid IsVisible="{Binding IsUnresolvedDuplicatesReviewTabSelected}">
                   <ListBox ItemsSource="{Binding UnresolvedDuplicatePhotoGroups}"
                            Classes="album-photo-list"
                            Loaded="AlbumPhotoList_Loaded"
@@ -995,8 +1105,22 @@
                       </ItemsPanelTemplate>
                     </ListBox.ItemsPanel>
                   </ListBox>
-                </TabItem>
-                <TabItem Header="{Binding FlowTabHeader}" IsVisible="{Binding IsAuthorFlowVisible}" Tag="flow">
+          </Grid>
+          <Border x:Name="StickyAlbumPhotoGroupHeader"
+                  Background="#F7F7F4"
+                  BorderBrush="#D6D8D1"
+                  BorderThickness="0,0,0,1"
+                  Padding="0,0,0,8"
+                  HorizontalAlignment="Stretch"
+                  VerticalAlignment="Top"
+                  IsVisible="False"
+                  ZIndex="5">
+            <TextBlock x:Name="StickyAlbumPhotoGroupHeaderText"
+                       FontSize="14"
+                       FontWeight="SemiBold"
+                       Foreground="#27343B"/>
+          </Border>
+          <Grid IsVisible="{Binding IsFlowReviewTabSelected}">
                   <ScrollViewer>
                     <StackPanel Spacing="16">
                       <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto">
@@ -1169,8 +1293,7 @@
                       </StackPanel>
                     </StackPanel>
                   </ScrollViewer>
-                </TabItem>
-              </TabControl>
+          </Grid>
               <Button Grid.Row="1"
                       Width="38"
                       Height="34"
@@ -1198,7 +1321,7 @@
                       Margin="12"
                       HorizontalAlignment="Center"
                       VerticalAlignment="Bottom"
-                      IsVisible="{Binding IsBulkPhotoActionPanelVisible}">
+                      IsVisible="False">
                 <WrapPanel Orientation="Horizontal">
                   <TextBlock Text="{Binding BulkSelectionStatus}"
                              Foreground="White"
@@ -1234,11 +1357,11 @@
                           BorderBrush="Black"
                           BorderThickness="2">
                     <Grid>
-                      <TextBlock Text="uncategorized 👻" FontWeight="SemiBold" Foreground="White" Margin="-1,-1,0,0"/>
-                      <TextBlock Text="uncategorized 👻" FontWeight="SemiBold" Foreground="White" Margin="1,-1,0,0"/>
-                      <TextBlock Text="uncategorized 👻" FontWeight="SemiBold" Foreground="White" Margin="-1,1,0,0"/>
-                      <TextBlock Text="uncategorized 👻" FontWeight="SemiBold" Foreground="White" Margin="1,1,0,0"/>
-                      <TextBlock Text="uncategorized 👻" FontWeight="SemiBold" Foreground="Black"/>
+                      <TextBlock Text="Todo 👻" FontWeight="SemiBold" Foreground="White" Margin="-1,-1,0,0"/>
+                      <TextBlock Text="Todo 👻" FontWeight="SemiBold" Foreground="White" Margin="1,-1,0,0"/>
+                      <TextBlock Text="Todo 👻" FontWeight="SemiBold" Foreground="White" Margin="-1,1,0,0"/>
+                      <TextBlock Text="Todo 👻" FontWeight="SemiBold" Foreground="White" Margin="1,1,0,0"/>
+                      <TextBlock Text="Todo 👻" FontWeight="SemiBold" Foreground="Black"/>
                     </Grid>
                   </Button>
                   <Button Padding="14,10"
@@ -1268,11 +1391,11 @@
                           BorderBrush="Black"
                           BorderThickness="2">
                     <Grid>
-                      <TextBlock Text="ok 🗿" FontWeight="SemiBold" Foreground="White" Margin="-1,-1,0,0"/>
-                      <TextBlock Text="ok 🗿" FontWeight="SemiBold" Foreground="White" Margin="1,-1,0,0"/>
-                      <TextBlock Text="ok 🗿" FontWeight="SemiBold" Foreground="White" Margin="-1,1,0,0"/>
-                      <TextBlock Text="ok 🗿" FontWeight="SemiBold" Foreground="White" Margin="1,1,0,0"/>
-                      <TextBlock Text="ok 🗿" FontWeight="SemiBold" Foreground="Black"/>
+                      <TextBlock Text="okay 🗿" FontWeight="SemiBold" Foreground="White" Margin="-1,-1,0,0"/>
+                      <TextBlock Text="okay 🗿" FontWeight="SemiBold" Foreground="White" Margin="1,-1,0,0"/>
+                      <TextBlock Text="okay 🗿" FontWeight="SemiBold" Foreground="White" Margin="-1,1,0,0"/>
+                      <TextBlock Text="okay 🗿" FontWeight="SemiBold" Foreground="White" Margin="1,1,0,0"/>
+                      <TextBlock Text="okay 🗿" FontWeight="SemiBold" Foreground="Black"/>
                     </Grid>
                   </Button>
                   <Button Padding="14,10"
@@ -1359,9 +1482,8 @@
                 </WrapPanel>
               </Border>
           </Grid>
-        </Grid>
       </Grid>
-      <Grid IsVisible="{Binding IsSettingsViewVisible}">
+      <Grid IsVisible="{Binding IsSettingsViewVisible}" Margin="20">
         <ScrollViewer>
           <Border Background="White"
                   BorderBrush="#D6D8D1"
@@ -1413,6 +1535,18 @@
                   <NumericUpDown Grid.Row="3" Grid.Column="3" Value="{Binding AlbumOriginalImageDiskCacheSizeMb}" Minimum="0" Maximum="65536" Increment="64"/>
                 </Grid>
               </StackPanel>
+              <StackPanel Spacing="6">
+                <TextBlock Text="Layout" FontWeight="SemiBold"/>
+                <CheckBox IsChecked="{Binding FixedHeader}">
+                  Fixed header
+                </CheckBox>
+                <CheckBox IsChecked="{Binding FixedTabs}">
+                  Fixed tabs
+                </CheckBox>
+                <CheckBox IsChecked="{Binding FixedActionPanel}">
+                  Fixed action panel
+                </CheckBox>
+              </StackPanel>
               <StackPanel Spacing="5">
                 <TextBlock Text="Default download directories" FontWeight="SemiBold"/>
                 <Grid ColumnDefinitions="150,*,Auto,Auto" RowDefinitions="Auto,Auto,Auto,Auto,Auto">
@@ -1421,7 +1555,7 @@
                   <Button Grid.Column="2" Click="ChoosePictureDefaultDownloadDirectory_Click" Padding="12,8" Margin="0,0,8,8">Select</Button>
                   <Button Grid.Column="3" Command="{Binding SetPictureDefaultDownloadDirectoryToDefaultCommand}" Padding="12,8" Margin="0,0,0,8">Set to default</Button>
 
-                  <TextBlock Grid.Row="1" Text="Uncategorized" VerticalAlignment="Center" Margin="0,0,8,8"/>
+                  <TextBlock Grid.Row="1" Text="Todo" VerticalAlignment="Center" Margin="0,0,8,8"/>
                   <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding UncategorizedDefaultDownloadDirectoryPath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,8,8"/>
                   <Button Grid.Row="1" Grid.Column="2" Click="ChooseUncategorizedDefaultDownloadDirectory_Click" Padding="12,8" Margin="0,0,8,8">Select</Button>
                   <Button Grid.Row="1" Grid.Column="3" Command="{Binding SetUncategorizedDefaultDownloadDirectoryToDefaultCommand}" Padding="12,8" Margin="0,0,0,8">Set to default</Button>
@@ -1431,7 +1565,7 @@
                   <Button Grid.Row="2" Grid.Column="2" Click="ChooseNiceDefaultDownloadDirectory_Click" Padding="12,8" Margin="0,0,8,8">Select</Button>
                   <Button Grid.Row="2" Grid.Column="3" Command="{Binding SetNiceDefaultDownloadDirectoryToDefaultCommand}" Padding="12,8" Margin="0,0,0,8">Set to default</Button>
 
-                  <TextBlock Grid.Row="3" Text="Ok" VerticalAlignment="Center" Margin="0,0,8,8"/>
+                  <TextBlock Grid.Row="3" Text="Okay" VerticalAlignment="Center" Margin="0,0,8,8"/>
                   <TextBox Grid.Row="3" Grid.Column="1" Text="{Binding OkDefaultDownloadDirectoryPath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,8,8"/>
                   <Button Grid.Row="3" Grid.Column="2" Click="ChooseOkDefaultDownloadDirectory_Click" Padding="12,8" Margin="0,0,8,8">Select</Button>
                   <Button Grid.Row="3" Grid.Column="3" Command="{Binding SetOkDefaultDownloadDirectoryToDefaultCommand}" Padding="12,8" Margin="0,0,0,8">Set to default</Button>
@@ -1480,7 +1614,291 @@
       </Grid>
     </Grid>
 
-    <Grid Grid.RowSpan="3"
+    <Border x:Name="ImageListFooter"
+            Grid.Row="2"
+            Background="White"
+            BorderBrush="#D6D8D1"
+            BorderThickness="0,1,0,0"
+            IsVisible="{Binding IsImageListFooterVisible}">
+      <Border.RenderTransform>
+        <TranslateTransform/>
+      </Border.RenderTransform>
+      <Grid x:Name="FooterActionPanelHost"
+            Margin="8,0"
+            SizeChanged="FooterActionPanelHost_SizeChanged"
+            HorizontalAlignment="Stretch"
+            VerticalAlignment="Center">
+      <StackPanel x:Name="FooterActionPanel"
+                  Orientation="Horizontal"
+                  Spacing="8"
+                  HorizontalAlignment="Center"
+                  VerticalAlignment="Center">
+        <Button Classes="footer-action"
+                MaxWidth="92"
+                Height="42"
+                Padding="0"
+                SizeChanged="FooterActionButton_SizeChanged"
+                HorizontalAlignment="Stretch"
+                HorizontalContentAlignment="Center"
+                VerticalContentAlignment="Center">
+          <Grid ColumnDefinitions="Auto,Auto" ColumnSpacing="6" HorizontalAlignment="Center">
+            <Grid Width="18" Height="18" VerticalAlignment="Center">
+              <Path Data="M3,4 L15,4 L15,15 L3,15 Z"
+                    Stroke="#27343B"
+                    StrokeThickness="1.6"
+                    Fill="Transparent"/>
+              <Path Data="M6,9 L8,12 L13,6"
+                    Stroke="#27343B"
+                    StrokeThickness="1.8"
+                    StrokeLineCap="Round"
+                    StrokeJoin="Round"/>
+            </Grid>
+            <TextBlock Grid.Column="1"
+                       Classes="footer-action-label"
+                       Text="{Binding SelectedPhotoCountText}"
+                       FontWeight="SemiBold"
+                       VerticalAlignment="Center"/>
+          </Grid>
+          <Button.Flyout>
+            <MenuFlyout>
+              <MenuItem IsHitTestVisible="False">
+                <MenuItem.Header>
+                  <Border Background="#27343B"
+                          Padding="12,7"
+                          MinWidth="180">
+                    <TextBlock Text="{Binding BulkSelectionStatus}"
+                               Foreground="White"
+                               FontWeight="Bold"/>
+                  </Border>
+                </MenuItem.Header>
+              </MenuItem>
+              <MenuItem Header="Select all"
+                        Command="{Binding SelectAllPhotosInCurrentTabCommand}"/>
+              <MenuItem Header="Invert selection"
+                        Command="{Binding InvertSelectionInCurrentTabCommand}"/>
+              <MenuItem Header="Undo selection"
+                        Command="{Binding UndoSelectionCommand}"
+                        IsEnabled="{Binding CanUndoSelection}"/>
+              <MenuItem Header="Redo selection"
+                        Command="{Binding RedoSelectionCommand}"
+                        IsEnabled="{Binding CanRedoSelection}"/>
+              <MenuItem Header="Clear selection"
+                        Command="{Binding ClearSelectedPhotosCommand}"
+                        IsEnabled="{Binding CanClearSelection}"/>
+            </MenuFlyout>
+          </Button.Flyout>
+        </Button>
+
+        <Button Classes="footer-action"
+                MaxWidth="92"
+                Height="42"
+                Padding="0"
+                SizeChanged="FooterActionButton_SizeChanged"
+                HorizontalAlignment="Stretch"
+                HorizontalContentAlignment="Center"
+                VerticalContentAlignment="Center"
+                Command="{Binding MarkSelectedPhotosUncategorizedCommand}"
+                IsEnabled="{Binding CanMarkSelectedPhotosUncategorized}"
+                IsVisible="{Binding IsFooterTodoActionVisible}"
+                ToolTip.Tip="Todo">
+          <Grid ColumnDefinitions="Auto,Auto" ColumnSpacing="6" HorizontalAlignment="Center">
+            <Canvas Width="20" Height="20">
+              <Path Data="M5,7 L9,3 L15,3 L18,8 L15,16 L8,18 L3,14 Z"
+                    Stroke="#27343B"
+                    StrokeThickness="1.5"
+                    Fill="Transparent"/>
+              <Path Data="M10,8 Q10,5.8 12,5.8 Q14,5.8 14,7.8 Q14,9.2 12.2,10.2 Q11,10.9 11,12.1"
+                    Stroke="#27343B"
+                    StrokeThickness="1.5"
+                    StrokeLineCap="Round"
+                    StrokeJoin="Round"
+                    Fill="Transparent"/>
+              <Path Data="M11,15 L11,15.1"
+                    Stroke="#27343B"
+                    StrokeThickness="2"
+                    StrokeLineCap="Round"/>
+            </Canvas>
+            <TextBlock Grid.Column="1"
+                       Classes="footer-action-label"
+                       Text="Todo"
+                       FontWeight="SemiBold"
+                       VerticalAlignment="Center"/>
+          </Grid>
+        </Button>
+
+        <Button Classes="footer-action"
+                MaxWidth="92"
+                Height="42"
+                Padding="0"
+                SizeChanged="FooterActionButton_SizeChanged"
+                HorizontalAlignment="Stretch"
+                HorizontalContentAlignment="Center"
+                VerticalContentAlignment="Center"
+                Command="{Binding MarkSelectedPhotosNiceCommand}"
+                IsEnabled="{Binding CanMarkSelectedPhotosNice}"
+                IsVisible="{Binding IsFooterNiceActionVisible}"
+                ToolTip.Tip="Nice">
+          <Grid ColumnDefinitions="Auto,Auto" ColumnSpacing="6" HorizontalAlignment="Center">
+            <Canvas Width="20" Height="20">
+              <Path Data="M5,7 L9,3 L15,3 L18,8 L15,16 L8,18 L3,14 Z"
+                    Stroke="#27343B"
+                    StrokeThickness="1.5"
+                    Fill="Transparent"/>
+              <Path Data="M8,8 L8,9 M14,8 L14,9 M8,13 Q11,16 15,13"
+                    Stroke="#27343B"
+                    StrokeThickness="1.5"
+                    StrokeLineCap="Round"
+                    Fill="Transparent"/>
+            </Canvas>
+            <TextBlock Grid.Column="1"
+                       Classes="footer-action-label"
+                       Text="Nice"
+                       FontWeight="SemiBold"
+                       VerticalAlignment="Center"/>
+          </Grid>
+        </Button>
+
+        <Button Classes="footer-action"
+                MaxWidth="92"
+                Height="42"
+                Padding="0"
+                SizeChanged="FooterActionButton_SizeChanged"
+                HorizontalAlignment="Stretch"
+                HorizontalContentAlignment="Center"
+                VerticalContentAlignment="Center"
+                Command="{Binding MarkSelectedPhotosOkCommand}"
+                IsEnabled="{Binding CanMarkSelectedPhotosOk}"
+                IsVisible="{Binding IsFooterOkActionVisible}"
+                ToolTip.Tip="Okay">
+          <Grid ColumnDefinitions="Auto,Auto" ColumnSpacing="6" HorizontalAlignment="Center">
+            <Canvas Width="20" Height="20">
+              <Path Data="M5,7 L9,3 L15,3 L18,8 L15,16 L8,18 L3,14 Z"
+                    Stroke="#27343B"
+                    StrokeThickness="1.5"
+                    Fill="Transparent"/>
+              <Path Data="M8,8 L8,9 M14,8 L14,9 M8,14 L15,14"
+                    Stroke="#27343B"
+                    StrokeThickness="1.5"
+                    StrokeLineCap="Round"
+                    Fill="Transparent"/>
+            </Canvas>
+            <TextBlock Grid.Column="1"
+                       Classes="footer-action-label"
+                       Text="Okay"
+                       FontWeight="SemiBold"
+                       VerticalAlignment="Center"/>
+          </Grid>
+        </Button>
+
+        <Button Classes="footer-action"
+                MaxWidth="92"
+                Height="42"
+                Padding="0"
+                SizeChanged="FooterActionButton_SizeChanged"
+                HorizontalAlignment="Stretch"
+                HorizontalContentAlignment="Center"
+                VerticalContentAlignment="Center"
+                ToolTip.Tip="More">
+          <Grid ColumnDefinitions="Auto,Auto" ColumnSpacing="6" HorizontalAlignment="Center">
+            <Grid Width="20" Height="20">
+              <Ellipse Width="4" Height="4" Fill="#27343B" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,2,0,0"/>
+              <Ellipse Width="4" Height="4" Fill="#27343B" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+              <Ellipse Width="4" Height="4" Fill="#27343B" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,2"/>
+            </Grid>
+            <TextBlock Grid.Column="1"
+                       Classes="footer-action-label"
+                       Text="More"
+                       FontWeight="SemiBold"
+                       VerticalAlignment="Center"/>
+          </Grid>
+          <Button.Flyout>
+            <MenuFlyout>
+              <MenuItem IsHitTestVisible="False">
+                <MenuItem.Header>
+                  <Border Background="#27343B"
+                          Padding="12,7"
+                          MinWidth="180">
+                    <TextBlock Text="{Binding BulkSelectionStatus}"
+                               Foreground="White"
+                               FontWeight="Bold"/>
+                  </Border>
+                </MenuItem.Header>
+              </MenuItem>
+              <MenuItem Header="Trash"
+                        Command="{Binding MarkSelectedPhotosTrashCommand}"
+                        IsEnabled="{Binding CanMarkSelectedPhotosTrash}"/>
+              <MenuItem Header="Mark as duplicates"
+                        Command="{Binding MarkSelectedPhotosAsDuplicatesCommand}"
+                        IsEnabled="{Binding CanMarkSelectedPhotosAsDuplicates}"/>
+              <MenuItem Command="{Binding UndoFeedbackActionCommand}"
+                        IsEnabled="{Binding CanUndoFeedbackAction}">
+                <MenuItem.Header>
+                  <StackPanel Spacing="1">
+                    <TextBlock Text="Undo"/>
+                    <TextBlock Text="{Binding UndoFeedbackActionDescription}"
+                               FontSize="11"
+                               Foreground="#6C756F"/>
+                  </StackPanel>
+                </MenuItem.Header>
+              </MenuItem>
+              <MenuItem Command="{Binding RedoFeedbackActionCommand}"
+                        IsEnabled="{Binding CanRedoFeedbackAction}">
+                <MenuItem.Header>
+                  <StackPanel Spacing="1">
+                    <TextBlock Text="Redo"/>
+                    <TextBlock Text="{Binding RedoFeedbackActionDescription}"
+                               FontSize="11"
+                               Foreground="#6C756F"/>
+                  </StackPanel>
+                </MenuItem.Header>
+              </MenuItem>
+              <MenuItem Header="Rotate left"
+                        Command="{Binding RotateSelectedPhotosLeftCommand}"
+                        IsEnabled="{Binding CanRotateSelectedPhotos}"/>
+              <MenuItem Header="Rotate right"
+                        Command="{Binding RotateSelectedPhotosRightCommand}"
+                        IsEnabled="{Binding CanRotateSelectedPhotos}"/>
+              <MenuItem Header="Recent..."
+                        ItemsSource="{Binding RecentPhotos}"
+                        IsEnabled="{Binding HasRecentPhotos}"
+                        x:CompileBindings="False">
+                <MenuItem.Styles>
+                  <Style Selector="MenuItem">
+                    <Setter Property="Header" Value="{Binding DisplayName}"/>
+                    <Setter Property="Command" Value="{Binding OpenCommand}"/>
+                  </Style>
+                </MenuItem.Styles>
+              </MenuItem>
+              <MenuItem Header="Bookmark...">
+                <MenuItem Header="Set"
+                          Command="{Binding SetSelectedPhotoBookmarkCommand}"
+                          IsEnabled="{Binding CanSetSelectedPhotoBookmark}"/>
+                <MenuItem Command="{Binding OpenBookmarkedPhotoCommand}"
+                          IsEnabled="{Binding CanOpenBookmarkedPhoto}">
+                  <MenuItem.Header>
+                    <StackPanel Spacing="1">
+                      <TextBlock Text="Open"/>
+                      <TextBlock Text="{Binding BookmarkedPhotoName}"
+                                 FontSize="11"
+                                 Foreground="#6C756F"/>
+                    </StackPanel>
+                  </MenuItem.Header>
+                </MenuItem>
+              </MenuItem>
+              <MenuItem Header="Download..."
+                        Click="DownloadSelectedPhotos_Click"
+                        IsEnabled="{Binding CanDownloadSelectedPhotos}"/>
+              <MenuItem Header="Download as archive..."
+                        Click="DownloadSelectedPhotosArchive_Click"
+                        IsEnabled="{Binding CanDownloadSelectedPhotos}"/>
+            </MenuFlyout>
+          </Button.Flyout>
+        </Button>
+      </StackPanel>
+      </Grid>
+    </Border>
+
+    <Grid Grid.RowSpan="4"
           IsVisible="{Binding IsSidebarOpen}"
           ZIndex="20">
       <Border Background="#66000000"
@@ -1654,7 +2072,7 @@
       </Border>
     </Grid>
 
-    <ProgressBar Grid.Row="2"
+    <ProgressBar Grid.Row="3"
                  IsIndeterminate="{Binding IsBusy}"
                  Height="3"
                  Minimum="0"
@@ -2612,11 +3030,11 @@
                         BorderBrush="Black"
                         BorderThickness="2">
                   <Grid>
-                    <TextBlock Text="uncategorized 👻" FontWeight="SemiBold" Foreground="White" Margin="-1,-1,0,0"/>
-                    <TextBlock Text="uncategorized 👻" FontWeight="SemiBold" Foreground="White" Margin="1,-1,0,0"/>
-                    <TextBlock Text="uncategorized 👻" FontWeight="SemiBold" Foreground="White" Margin="-1,1,0,0"/>
-                    <TextBlock Text="uncategorized 👻" FontWeight="SemiBold" Foreground="White" Margin="1,1,0,0"/>
-                    <TextBlock Text="uncategorized 👻" FontWeight="SemiBold" Foreground="Black"/>
+                    <TextBlock Text="Todo 👻" FontWeight="SemiBold" Foreground="White" Margin="-1,-1,0,0"/>
+                    <TextBlock Text="Todo 👻" FontWeight="SemiBold" Foreground="White" Margin="1,-1,0,0"/>
+                    <TextBlock Text="Todo 👻" FontWeight="SemiBold" Foreground="White" Margin="-1,1,0,0"/>
+                    <TextBlock Text="Todo 👻" FontWeight="SemiBold" Foreground="White" Margin="1,1,0,0"/>
+                    <TextBlock Text="Todo 👻" FontWeight="SemiBold" Foreground="Black"/>
                   </Grid>
                 </Button>
                 <Button Grid.Column="3"
@@ -2648,11 +3066,11 @@
                         BorderBrush="Black"
                         BorderThickness="2">
                   <Grid>
-                    <TextBlock Text="ok 🗿" FontWeight="SemiBold" Foreground="White" Margin="-1,-1,0,0"/>
-                    <TextBlock Text="ok 🗿" FontWeight="SemiBold" Foreground="White" Margin="1,-1,0,0"/>
-                    <TextBlock Text="ok 🗿" FontWeight="SemiBold" Foreground="White" Margin="-1,1,0,0"/>
-                    <TextBlock Text="ok 🗿" FontWeight="SemiBold" Foreground="White" Margin="1,1,0,0"/>
-                    <TextBlock Text="ok 🗿" FontWeight="SemiBold" Foreground="Black"/>
+                    <TextBlock Text="okay 🗿" FontWeight="SemiBold" Foreground="White" Margin="-1,-1,0,0"/>
+                    <TextBlock Text="okay 🗿" FontWeight="SemiBold" Foreground="White" Margin="1,-1,0,0"/>
+                    <TextBlock Text="okay 🗿" FontWeight="SemiBold" Foreground="White" Margin="-1,1,0,0"/>
+                    <TextBlock Text="okay 🗿" FontWeight="SemiBold" Foreground="White" Margin="1,1,0,0"/>
+                    <TextBlock Text="okay 🗿" FontWeight="SemiBold" Foreground="Black"/>
                   </Grid>
                 </Button>
                 <Button Grid.Column="5"
@@ -2684,13 +3102,14 @@
                       </MenuItem>
                       <MenuItem Header="Recent..."
                                 ItemsSource="{Binding RecentPhotos}"
-                                IsEnabled="{Binding HasRecentPhotos}">
-                        <MenuItem.ItemTemplate>
-                          <DataTemplate x:DataType="vm:RecentPhotoViewModel">
-                            <MenuItem Header="{Binding DisplayName}"
-                                      Click="RecentPhoto_Click"/>
-                          </DataTemplate>
-                        </MenuItem.ItemTemplate>
+                                IsEnabled="{Binding HasRecentPhotos}"
+                                x:CompileBindings="False">
+                        <MenuItem.Styles>
+                          <Style Selector="MenuItem">
+                            <Setter Property="Header" Value="{Binding DisplayName}"/>
+                            <Setter Property="Command" Value="{Binding OpenCommand}"/>
+                          </Style>
+                        </MenuItem.Styles>
                       </MenuItem>
                       <MenuItem Header="Rotate left"
                                 Command="{Binding RotateCurrentPhotoLeftCommand}"

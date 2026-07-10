@@ -9,7 +9,7 @@ public sealed class AlbumPhotoGroupViewModel
         Header = header;
         foreach (var row in photos.Chunk(photosPerRow))
         {
-            Rows.Add(new AlbumPhotoRowViewModel(row));
+            Rows.Add(new AlbumPhotoRowViewModel(header, row));
         }
     }
 

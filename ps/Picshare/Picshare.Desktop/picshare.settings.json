@@ -2,5 +2,10 @@
   "google": {
     "oauthClientId": "<oauthClientId>",
     "oauthClientSecret": "<oauthClientSecret>"
+  },
+  "defaultSettings": {
+    "fixedHeader": true,
+    "fixedTabs": true,
+    "fixedActionPanel": true
   }
 }

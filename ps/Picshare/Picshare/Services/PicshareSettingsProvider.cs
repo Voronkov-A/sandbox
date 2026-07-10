@@ -23,6 +23,8 @@ public sealed class PicshareSettingsProvider
 
     public string? LocalStorageRootPath => FirstNonWhiteSpace(Settings.LocalStorage?.RootPath, Settings.LocalStorageRootPath);
 
+    public DefaultUserSettings DefaultSettings => Settings.DefaultSettings ?? new DefaultUserSettings();
+
     public string MissingGoogleOAuthClientIdMessage =>
         $"Google OAuth client id is not configured. Add it to {string.Join(" or ", SettingsFilePaths)}, or package picshare.settings.json with the application.";
 
@@ -113,6 +115,7 @@ public sealed class PicshareSettingsProvider
             next?.LocalStorageRootPath,
             current.LocalStorage?.RootPath,
             current.LocalStorageRootPath);
+        var defaultSettings = MergeDefaultSettings(current.DefaultSettings, next?.DefaultSettings);
 
         return new PicshareSettings
         {
@@ -128,8 +131,24 @@ public sealed class PicshareSettingsProvider
                 : new LocalStorageSettings
                 {
                     RootPath = localStorageRootPath
-                }
+                },
+            DefaultSettings = defaultSettings
         };
+    }
+
+    private static DefaultUserSettings? MergeDefaultSettings(DefaultUserSettings? current, DefaultUserSettings? next)
+    {
+        var fixedHeader = next?.FixedHeader ?? current?.FixedHeader;
+        var fixedTabs = next?.FixedTabs ?? current?.FixedTabs;
+        var fixedActionPanel = next?.FixedActionPanel ?? current?.FixedActionPanel;
+        return fixedHeader is null && fixedTabs is null && fixedActionPanel is null
+            ? null
+            : new DefaultUserSettings
+            {
+                FixedHeader = fixedHeader,
+                FixedTabs = fixedTabs,
+                FixedActionPanel = fixedActionPanel
+            };
     }
 
     private static string? FirstNonWhiteSpace(params string?[] values)
@@ -143,6 +162,8 @@ public sealed record PicshareSettings
     public GoogleSettings? Google { get; init; }
 
     public LocalStorageSettings? LocalStorage { get; init; }
+
+    public DefaultUserSettings? DefaultSettings { get; init; }
 
     public string? GoogleOAuthClientId { get; init; }
 
@@ -162,4 +183,13 @@ public sealed record GoogleSettings
 public sealed record LocalStorageSettings
 {
     public string? RootPath { get; init; }
+}
+
+public sealed record DefaultUserSettings
+{
+    public bool? FixedHeader { get; init; }
+
+    public bool? FixedTabs { get; init; }
+
+    public bool? FixedActionPanel { get; init; }
 }

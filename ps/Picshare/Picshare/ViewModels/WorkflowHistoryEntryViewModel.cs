@@ -17,7 +17,7 @@ public sealed class WorkflowHistoryEntryViewModel
         Timestamp = entry.CreatedAt.ToLocalTime().ToString("g");
         Description = entry.Kind switch
         {
-            "feedback-collected" => $"{entry.FeedbackCount} feedback(s), uncategorized {entry.UncategorizedBefore} -> {entry.UncategorizedAfter}",
+            "feedback-collected" => $"{entry.FeedbackCount} feedback(s), Todo {entry.UncategorizedBefore} -> {entry.UncategorizedAfter}",
             "random-verdict" => $"{entry.FeedbackCount} random nice, uncommitted {entry.UncategorizedBefore} -> {entry.UncategorizedAfter}",
             _ => ""
         };

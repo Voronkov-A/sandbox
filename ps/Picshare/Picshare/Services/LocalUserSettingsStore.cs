@@ -66,6 +66,12 @@ public sealed class LocalUserSettings
 
     public bool CacheOriginalImages { get; set; } = true;
 
+    public bool? FixedHeader { get; set; }
+
+    public bool? FixedTabs { get; set; }
+
+    public bool? FixedActionPanel { get; set; }
+
     public int AlbumFastThumbnailMemoryCacheSizeMb { get; set; } = 256;
 
     public int AlbumDetailedThumbnailMemoryCacheSizeMb { get; set; } = 512;

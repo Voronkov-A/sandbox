@@ -3,6 +3,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.Media;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
@@ -14,6 +15,13 @@ public partial class MainView : UserControl
 {
     private const double MinimumPhotoViewerZoom = 1;
     private const double MaximumPhotoViewerZoom = 8;
+    private const double AlbumReviewHeaderScrollStep = 180;
+    private const double AlbumReviewHeaderDragThreshold = 6;
+    private const double AlbumReviewSwipeThreshold = 72;
+    private const double AlbumReviewSwipeDominance = 1.35;
+    private const double FooterActionButtonMaxWidth = 92;
+    private const double FooterActionButtonCompactThreshold = 70;
+    private const double FooterActionButtonSpacing = 8;
     private static readonly IReadOnlyList<FilePickerFileType> ZipFileTypeChoices =
     [
         new("Zip archive")
@@ -33,7 +41,15 @@ public partial class MainView : UserControl
     private bool _photoViewerPointerMoved;
     private bool _photoViewerPinchActive;
     private Point _photoViewerPointerStart;
+    private object? _albumReviewSwipePointer;
+    private Point _albumReviewSwipeStart;
+    private object? _albumReviewHeaderDragPointer;
+    private Point _albumReviewHeaderDragStart;
+    private Vector _albumReviewHeaderDragStartOffset;
+    private bool _albumReviewHeaderDragMoved;
     private INotifyPropertyChanged? _viewModelPropertyChanged;
+    private readonly Dictionary<ScrollViewer, double> _albumPhotoScrollOffsets = new();
+    private readonly Dictionary<TranslateTransform, int> _translateAnimationVersions = new();
     private readonly HashSet<ScrollViewer> _albumPhotoScrollViewers = new();
     private readonly Dictionary<ListBox, List<ScrollViewer>> _albumPhotoScrollViewersByList = new();
     private bool _isVisibleAlbumPhotoPriorityUpdateQueued;
@@ -42,6 +58,48 @@ public partial class MainView : UserControl
     public MainView()
     {
         InitializeComponent();
+        AlbumReviewContentHost.AddHandler(
+            InputElement.PointerPressedEvent,
+            AlbumReviewContent_PointerPressed,
+            RoutingStrategies.Tunnel,
+            handledEventsToo: true);
+        AlbumReviewContentHost.AddHandler(
+            InputElement.PointerMovedEvent,
+            AlbumReviewContent_PointerMoved,
+            RoutingStrategies.Tunnel,
+            handledEventsToo: true);
+        AlbumReviewContentHost.AddHandler(
+            InputElement.PointerReleasedEvent,
+            AlbumReviewContent_PointerReleased,
+            RoutingStrategies.Tunnel,
+            handledEventsToo: true);
+        AlbumReviewContentHost.AddHandler(
+            InputElement.PointerCaptureLostEvent,
+            AlbumReviewContent_PointerCaptureLost,
+            RoutingStrategies.Tunnel,
+            handledEventsToo: true);
+        AlbumReviewTabHeaderScrollViewer.AddHandler(
+            InputElement.PointerPressedEvent,
+            AlbumReviewTabHeader_PointerPressed,
+            RoutingStrategies.Tunnel,
+            handledEventsToo: true);
+        AlbumReviewTabHeaderScrollViewer.AddHandler(
+            InputElement.PointerMovedEvent,
+            AlbumReviewTabHeader_PointerMoved,
+            RoutingStrategies.Tunnel,
+            handledEventsToo: true);
+        AlbumReviewTabHeaderScrollViewer.AddHandler(
+            InputElement.PointerReleasedEvent,
+            AlbumReviewTabHeader_PointerReleased,
+            RoutingStrategies.Tunnel,
+            handledEventsToo: true);
+        AlbumReviewTabHeaderScrollViewer.AddHandler(
+            InputElement.PointerCaptureLostEvent,
+            AlbumReviewTabHeader_PointerCaptureLost,
+            RoutingStrategies.Tunnel,
+            handledEventsToo: true);
+        _ = Dispatcher.UIThread.InvokeAsync(UpdateAlbumReviewTabScrollButtonVisibility, DispatcherPriority.Loaded);
+        _ = Dispatcher.UIThread.InvokeAsync(UpdateFooterActionButtonWidths, DispatcherPriority.Loaded);
     }
 
     protected override void OnDataContextChanged(EventArgs e)
@@ -93,6 +151,25 @@ public partial class MainView : UserControl
         if (e.PropertyName is nameof(MainViewModel.PhotoViewerImage) or nameof(MainViewModel.PhotoViewerRotationDegrees))
         {
             _ = Dispatcher.UIThread.InvokeAsync(ResetPhotoViewerZoom, DispatcherPriority.Render);
+        }
+        else if (e.PropertyName is nameof(MainViewModel.ActiveReviewTabId)
+            or nameof(MainViewModel.UncategorizedTabHeader)
+            or nameof(MainViewModel.NiceTabHeader)
+            or nameof(MainViewModel.OkTabHeader)
+            or nameof(MainViewModel.TrashTabHeader)
+            or nameof(MainViewModel.UnresolvedDuplicatesTabHeader)
+            or nameof(MainViewModel.HasUnresolvedDuplicatePhotos)
+            or nameof(MainViewModel.IsFlowReviewTabVisible))
+        {
+            _ = Dispatcher.UIThread.InvokeAsync(UpdateAlbumReviewTabScrollButtonVisibility, DispatcherPriority.Render);
+            _ = Dispatcher.UIThread.InvokeAsync(UpdateFooterActionButtonWidths, DispatcherPriority.Render);
+            _ = Dispatcher.UIThread.InvokeAsync(UpdateStickyAlbumPhotoGroupHeader, DispatcherPriority.Render);
+        }
+        else if (e.PropertyName is nameof(MainViewModel.FixedHeader)
+            or nameof(MainViewModel.FixedTabs)
+            or nameof(MainViewModel.FixedActionPanel))
+        {
+            ApplyFixedSurfaceSettings();
         }
     }
 
@@ -167,7 +244,7 @@ public partial class MainView : UserControl
     private async void ChooseUncategorizedDefaultDownloadDirectory_Click(object? sender, RoutedEventArgs e)
     {
         await ChooseSettingsDownloadDirectoryAsync(
-            "Choose uncategorized default download directory",
+            "Choose Todo default download directory",
             viewModel => viewModel.UncategorizedDefaultDownloadDirectoryPath,
             (viewModel, folder) => viewModel.SetUncategorizedDefaultDownloadDirectory(folder));
     }
@@ -183,7 +260,7 @@ public partial class MainView : UserControl
     private async void ChooseOkDefaultDownloadDirectory_Click(object? sender, RoutedEventArgs e)
     {
         await ChooseSettingsDownloadDirectoryAsync(
-            "Choose ok default download directory",
+            "Choose okay default download directory",
             viewModel => viewModel.OkDefaultDownloadDirectoryPath,
             (viewModel, folder) => viewModel.SetOkDefaultDownloadDirectory(folder));
     }
@@ -230,6 +307,178 @@ public partial class MainView : UserControl
         {
             viewModel.CloseSidebarCommand.Execute(null);
             e.Handled = true;
+        }
+    }
+
+    private void AlbumReviewTabHeader_Click(object? sender, RoutedEventArgs e)
+    {
+        if (sender is Control { Tag: string tabId })
+        {
+            SelectAlbumReviewTab(tabId);
+            e.Handled = true;
+        }
+    }
+
+    private void ScrollAlbumReviewTabsLeft_Click(object? sender, RoutedEventArgs e)
+    {
+        ScrollAlbumReviewTabHeader(-AlbumReviewHeaderScrollStep);
+        e.Handled = true;
+    }
+
+    private void ScrollAlbumReviewTabsRight_Click(object? sender, RoutedEventArgs e)
+    {
+        ScrollAlbumReviewTabHeader(AlbumReviewHeaderScrollStep);
+        e.Handled = true;
+    }
+
+    private void AlbumReviewTabHeaderScrollViewer_ScrollChanged(object? sender, ScrollChangedEventArgs e)
+    {
+        UpdateAlbumReviewTabScrollButtonVisibility();
+    }
+
+    private void AlbumReviewTabHeaderScrollViewer_SizeChanged(object? sender, SizeChangedEventArgs e)
+    {
+        _ = Dispatcher.UIThread.InvokeAsync(UpdateAlbumReviewTabScrollButtonVisibility, DispatcherPriority.Render);
+    }
+
+    private void AlbumReviewTabHeader_PointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (_albumReviewHeaderDragPointer is not null)
+        {
+            return;
+        }
+
+        _albumReviewHeaderDragPointer = e.Pointer;
+        _albumReviewHeaderDragStart = e.GetPosition(AlbumReviewTabHeaderScrollViewer);
+        _albumReviewHeaderDragStartOffset = AlbumReviewTabHeaderScrollViewer.Offset;
+        _albumReviewHeaderDragMoved = false;
+    }
+
+    private void AlbumReviewTabHeader_PointerMoved(object? sender, PointerEventArgs e)
+    {
+        if (!ReferenceEquals(_albumReviewHeaderDragPointer, e.Pointer))
+        {
+            return;
+        }
+
+        var delta = e.GetPosition(AlbumReviewTabHeaderScrollViewer) - _albumReviewHeaderDragStart;
+        if (!_albumReviewHeaderDragMoved && Math.Abs(delta.X) < AlbumReviewHeaderDragThreshold)
+        {
+            return;
+        }
+
+        _albumReviewHeaderDragMoved = true;
+        SetAlbumReviewTabHeaderOffset(_albumReviewHeaderDragStartOffset.X - delta.X);
+        e.Handled = true;
+    }
+
+    private void AlbumReviewTabHeader_PointerReleased(object? sender, PointerReleasedEventArgs e)
+    {
+        if (!ReferenceEquals(_albumReviewHeaderDragPointer, e.Pointer))
+        {
+            return;
+        }
+
+        var handled = _albumReviewHeaderDragMoved;
+        _albumReviewHeaderDragPointer = null;
+        _albumReviewHeaderDragMoved = false;
+        e.Handled = handled;
+    }
+
+    private void AlbumReviewTabHeader_PointerCaptureLost(object? sender, PointerCaptureLostEventArgs e)
+    {
+        if (ReferenceEquals(_albumReviewHeaderDragPointer, e.Pointer))
+        {
+            _albumReviewHeaderDragPointer = null;
+            _albumReviewHeaderDragMoved = false;
+        }
+    }
+
+    private void ScrollAlbumReviewTabHeader(double delta)
+    {
+        SetAlbumReviewTabHeaderOffset(AlbumReviewTabHeaderScrollViewer.Offset.X + delta);
+    }
+
+    private void SetAlbumReviewTabHeaderOffset(double offset)
+    {
+        var maxOffset = Math.Max(0, AlbumReviewTabHeaderScrollViewer.Extent.Width - AlbumReviewTabHeaderScrollViewer.Viewport.Width);
+        var nextOffset = Math.Clamp(offset, 0, maxOffset);
+        AlbumReviewTabHeaderScrollViewer.Offset = new Vector(nextOffset, AlbumReviewTabHeaderScrollViewer.Offset.Y);
+        UpdateAlbumReviewTabScrollButtonVisibility();
+    }
+
+    private void UpdateAlbumReviewTabScrollButtonVisibility()
+    {
+        const double tolerance = 0.5;
+        var maxOffset = Math.Max(0, AlbumReviewTabHeaderScrollViewer.Extent.Width - AlbumReviewTabHeaderScrollViewer.Viewport.Width);
+        if (maxOffset <= tolerance)
+        {
+            AlbumReviewTabsScrollLeftButton.IsVisible = false;
+            AlbumReviewTabsScrollRightButton.IsVisible = false;
+            return;
+        }
+
+        AlbumReviewTabsScrollLeftButton.IsVisible = AlbumReviewTabHeaderScrollViewer.Offset.X > tolerance;
+        AlbumReviewTabsScrollRightButton.IsVisible = AlbumReviewTabHeaderScrollViewer.Offset.X < maxOffset - tolerance;
+    }
+
+    private void SelectAlbumReviewTab(string tabId)
+    {
+        if (DataContext is not MainViewModel viewModel)
+        {
+            return;
+        }
+
+        viewModel.SetActiveReviewTab(tabId);
+        QueueVisibleAlbumPhotoPriorityUpdate();
+        _ = Dispatcher.UIThread.InvokeAsync(BringSelectedAlbumReviewTabIntoView, DispatcherPriority.Render);
+    }
+
+    private void BringSelectedAlbumReviewTabIntoView()
+    {
+        if (DataContext is not MainViewModel viewModel)
+        {
+            return;
+        }
+
+        var selectedButton = AlbumReviewTabHeaderScrollViewer
+            .GetVisualDescendants()
+            .OfType<Button>()
+            .FirstOrDefault(button => string.Equals(button.Tag?.ToString(), viewModel.ActiveReviewTabId, StringComparison.Ordinal));
+        selectedButton?.BringIntoView();
+        _ = Dispatcher.UIThread.InvokeAsync(UpdateAlbumReviewTabScrollButtonVisibility, DispatcherPriority.Render);
+    }
+
+    private void FooterActionButton_SizeChanged(object? sender, SizeChangedEventArgs e)
+    {
+        if (sender is Button button)
+        {
+            button.Classes.Set("compact-footer-action", e.NewSize.Width < FooterActionButtonCompactThreshold);
+        }
+    }
+
+    private void FooterActionPanelHost_SizeChanged(object? sender, SizeChangedEventArgs e)
+    {
+        UpdateFooterActionButtonWidths();
+    }
+
+    private void UpdateFooterActionButtonWidths()
+    {
+        var visibleButtons = FooterActionPanel.Children
+            .OfType<Button>()
+            .Where(button => button.IsVisible)
+            .ToList();
+        if (visibleButtons.Count == 0)
+        {
+            return;
+        }
+
+        var availableWidth = Math.Max(0, FooterActionPanelHost.Bounds.Width);
+        var availableButtonWidth = (availableWidth - (visibleButtons.Count - 1) * FooterActionButtonSpacing) / visibleButtons.Count;
+        var buttonWidth = Math.Max(0, Math.Min(FooterActionButtonMaxWidth, availableButtonWidth));
+        foreach (var button in visibleButtons)
+        {
+            button.Width = buttonWidth;
         }
     }
 
@@ -624,6 +873,7 @@ public partial class MainView : UserControl
         {
             if (_albumPhotoScrollViewers.Add(scrollViewer))
             {
+                _albumPhotoScrollOffsets[scrollViewer] = scrollViewer.Offset.Y;
                 scrollViewer.ScrollChanged += AlbumPhotoScrollViewer_ScrollChanged;
                 scrollViewer.SizeChanged += AlbumPhotoScrollViewer_SizeChanged;
             }
@@ -661,15 +911,23 @@ public partial class MainView : UserControl
 
         scrollViewer.ScrollChanged -= AlbumPhotoScrollViewer_ScrollChanged;
         scrollViewer.SizeChanged -= AlbumPhotoScrollViewer_SizeChanged;
+        _albumPhotoScrollOffsets.Remove(scrollViewer);
     }
 
     private void AlbumPhotoScrollViewer_ScrollChanged(object? sender, ScrollChangedEventArgs e)
     {
+        if (sender is ScrollViewer scrollViewer)
+        {
+            UpdateFixedSurfaceTransforms(scrollViewer);
+        }
+
+        UpdateStickyAlbumPhotoGroupHeader();
         QueueVisibleAlbumPhotoPriorityUpdate();
     }
 
     private void AlbumPhotoScrollViewer_SizeChanged(object? sender, SizeChangedEventArgs e)
     {
+        UpdateStickyAlbumPhotoGroupHeader();
         QueueVisibleAlbumPhotoPriorityUpdate();
     }
 
@@ -700,6 +958,7 @@ public partial class MainView : UserControl
             }
 
             UpdateVisibleAlbumPhotoPriorities();
+            UpdateStickyAlbumPhotoGroupHeader();
         }, DispatcherPriority.Render);
     }
 
@@ -709,6 +968,141 @@ public partial class MainView : UserControl
         {
             listBox.SelectedItem = null;
         }
+    }
+
+    private void ApplyFixedSurfaceSettings()
+    {
+        if (DataContext is not MainViewModel viewModel)
+        {
+            return;
+        }
+
+        if (viewModel.FixedHeader)
+        {
+            SetSurfaceTranslateY(MainHeader, 0);
+        }
+
+        if (viewModel.FixedTabs)
+        {
+            SetSurfaceTranslateY(AlbumReviewTabHeader, 0);
+        }
+
+        if (viewModel.FixedActionPanel)
+        {
+            SetSurfaceTranslateY(ImageListFooter, 0);
+        }
+    }
+
+    private void UpdateFixedSurfaceTransforms(ScrollViewer scrollViewer)
+    {
+        if (DataContext is not MainViewModel viewModel)
+        {
+            return;
+        }
+
+        var currentOffset = scrollViewer.Offset.Y;
+        if (!_albumPhotoScrollOffsets.TryGetValue(scrollViewer, out var previousOffset))
+        {
+            previousOffset = currentOffset;
+        }
+
+        _albumPhotoScrollOffsets[scrollViewer] = currentOffset;
+        var delta = currentOffset - previousOffset;
+        if (Math.Abs(delta) < 0.5)
+        {
+            return;
+        }
+
+        if (delta > 0)
+        {
+            SetSurfaceTranslateY(MainHeader, viewModel.FixedHeader ? 0 : -MainHeader.Bounds.Height);
+            SetSurfaceTranslateY(AlbumReviewTabHeader, viewModel.FixedTabs ? 0 : -AlbumReviewTabHeader.Bounds.Height);
+            SetSurfaceTranslateY(ImageListFooter, 0);
+        }
+        else
+        {
+            SetSurfaceTranslateY(MainHeader, 0);
+            SetSurfaceTranslateY(AlbumReviewTabHeader, 0);
+            SetSurfaceTranslateY(ImageListFooter, viewModel.FixedActionPanel ? 0 : ImageListFooter.Bounds.Height);
+        }
+    }
+
+    private void SetSurfaceTranslateY(Control surface, double targetY)
+    {
+        if (surface.RenderTransform is not TranslateTransform transform)
+        {
+            return;
+        }
+
+        if (Math.Abs(transform.Y - targetY) < 0.5)
+        {
+            transform.Y = targetY;
+            return;
+        }
+
+        var version = _translateAnimationVersions.TryGetValue(transform, out var currentVersion)
+            ? currentVersion + 1
+            : 1;
+        _translateAnimationVersions[transform] = version;
+        var startY = transform.Y;
+        const int steps = 8;
+        for (var step = 1; step <= steps; step++)
+        {
+            var capturedStep = step;
+            _ = Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                if (!_translateAnimationVersions.TryGetValue(transform, out var activeVersion) || activeVersion != version)
+                {
+                    return;
+                }
+
+                var progress = capturedStep / (double)steps;
+                var eased = 1 - Math.Pow(1 - progress, 3);
+                transform.Y = startY + (targetY - startY) * eased;
+            }, DispatcherPriority.Render);
+        }
+    }
+
+    private void UpdateStickyAlbumPhotoGroupHeader()
+    {
+        var listBox = GetActiveAlbumPhotoListBox();
+        if (listBox is null)
+        {
+            StickyAlbumPhotoGroupHeader.IsVisible = false;
+            return;
+        }
+
+        var header = listBox.GetVisualDescendants()
+            .OfType<Control>()
+            .Where(control => control.DataContext is AlbumPhotoGroupHeaderViewModel or AlbumPhotoRowViewModel)
+            .Select(control => new
+            {
+                Header = control.DataContext is AlbumPhotoGroupHeaderViewModel groupHeader
+                    ? groupHeader.Header
+                    : ((AlbumPhotoRowViewModel)control.DataContext!).GroupHeader,
+                Bounds = TransformBounds(control, listBox)
+            })
+            .Where(item => item.Bounds.Bottom > 0 && item.Bounds.Top < listBox.Bounds.Height)
+            .OrderBy(item => Math.Max(0, item.Bounds.Top))
+            .FirstOrDefault()?.Header;
+
+        StickyAlbumPhotoGroupHeaderText.Text = header ?? "";
+        StickyAlbumPhotoGroupHeader.IsVisible = !string.IsNullOrWhiteSpace(header);
+    }
+
+    private ListBox? GetActiveAlbumPhotoListBox()
+    {
+        return this.GetVisualDescendants()
+            .OfType<ListBox>()
+            .FirstOrDefault(listBox => listBox.Classes.Contains("album-photo-list") && IsControlEffectivelyVisible(listBox));
+    }
+
+    private static bool IsControlEffectivelyVisible(Control control)
+    {
+        return control.IsVisible &&
+            control.GetVisualAncestors()
+                .OfType<Control>()
+                .All(ancestor => ancestor.IsVisible);
     }
 
     private void UpdateVisibleAlbumPhotoPriorities()
@@ -911,17 +1305,6 @@ public partial class MainView : UserControl
         }
     }
 
-    private async void RecentPhoto_Click(object? sender, RoutedEventArgs e)
-    {
-        if (DataContext is MainViewModel viewModel &&
-            sender is Control { DataContext: RecentPhotoViewModel recentPhoto })
-        {
-            await viewModel.OpenRecentPhotoAsync(recentPhoto);
-            await Dispatcher.UIThread.InvokeAsync(ResetPhotoViewerZoom, DispatcherPriority.Render);
-            e.Handled = true;
-        }
-    }
-
     private void AlbumReviewTabs_SelectionChanged(object? sender, SelectionChangedEventArgs e)
     {
         if (DataContext is MainViewModel viewModel &&
@@ -930,6 +1313,110 @@ public partial class MainView : UserControl
             viewModel.SetActiveReviewTab(selectedTab.Tag?.ToString() ?? "");
             QueueVisibleAlbumPhotoPriorityUpdate();
         }
+    }
+
+    private void AlbumReviewContent_PointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (_albumReviewSwipePointer is not null)
+        {
+            return;
+        }
+
+        _albumReviewSwipePointer = e.Pointer;
+        _albumReviewSwipeStart = e.GetPosition(AlbumReviewContentHost);
+    }
+
+    private void AlbumReviewContent_PointerMoved(object? sender, PointerEventArgs e)
+    {
+        if (!ReferenceEquals(_albumReviewSwipePointer, e.Pointer))
+        {
+            return;
+        }
+
+        var delta = e.GetPosition(AlbumReviewContentHost) - _albumReviewSwipeStart;
+        if (Math.Abs(delta.X) >= AlbumReviewSwipeThreshold &&
+            Math.Abs(delta.X) > Math.Abs(delta.Y) * AlbumReviewSwipeDominance)
+        {
+            e.Handled = true;
+        }
+    }
+
+    private void AlbumReviewContent_PointerReleased(object? sender, PointerReleasedEventArgs e)
+    {
+        if (!ReferenceEquals(_albumReviewSwipePointer, e.Pointer))
+        {
+            return;
+        }
+
+        var delta = e.GetPosition(AlbumReviewContentHost) - _albumReviewSwipeStart;
+        _albumReviewSwipePointer = null;
+        if (Math.Abs(delta.X) < AlbumReviewSwipeThreshold ||
+            Math.Abs(delta.X) <= Math.Abs(delta.Y) * AlbumReviewSwipeDominance)
+        {
+            return;
+        }
+
+        SwitchAlbumReviewTab(delta.X < 0 ? 1 : -1);
+        e.Handled = true;
+    }
+
+    private void AlbumReviewContent_PointerCaptureLost(object? sender, PointerCaptureLostEventArgs e)
+    {
+        if (ReferenceEquals(_albumReviewSwipePointer, e.Pointer))
+        {
+            _albumReviewSwipePointer = null;
+        }
+    }
+
+    private void SwitchAlbumReviewTab(int direction)
+    {
+        if (DataContext is not MainViewModel viewModel)
+        {
+            return;
+        }
+
+        var tabIds = GetVisibleAlbumReviewTabIds(viewModel);
+        if (tabIds.Count == 0)
+        {
+            return;
+        }
+
+        var currentIndex = tabIds.IndexOf(viewModel.ActiveReviewTabId);
+        if (currentIndex < 0)
+        {
+            currentIndex = 0;
+        }
+
+        var nextIndex = Math.Clamp(currentIndex + direction, 0, tabIds.Count - 1);
+        if (nextIndex == currentIndex)
+        {
+            return;
+        }
+
+        SelectAlbumReviewTab(tabIds[nextIndex]);
+    }
+
+    private static List<string> GetVisibleAlbumReviewTabIds(MainViewModel viewModel)
+    {
+        var tabIds = new List<string>
+        {
+            "uncategorized",
+            "nice",
+            "ok",
+            "trash"
+        };
+
+        if (viewModel.HasUnresolvedDuplicatePhotos)
+        {
+            tabIds.Add("unresolved-duplicates");
+        }
+
+        if (viewModel.IsAuthorFlowVisible)
+        {
+            tabIds.Add("flow");
+        }
+
+        return tabIds;
     }
 
     private void PhotoViewer_PointerWheelChanged(object? sender, PointerWheelEventArgs e)
