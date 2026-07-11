@@ -23,6 +23,7 @@ public partial class MainView : UserControl
     private const double FooterActionButtonMaxWidth = 92;
     private const double FooterActionButtonCompactThreshold = 70;
     private const double FooterActionButtonSpacing = 8;
+    private const double PhotoViewerDuplicateStripScrollStep = 180;
     private static readonly IReadOnlyList<FilePickerFileType> ZipFileTypeChoices =
     [
         new("Zip archive")
@@ -48,6 +49,10 @@ public partial class MainView : UserControl
     private Point _albumReviewHeaderDragStart;
     private Vector _albumReviewHeaderDragStartOffset;
     private bool _albumReviewHeaderDragMoved;
+    private object? _photoViewerDuplicateStripDragPointer;
+    private Point _photoViewerDuplicateStripDragStart;
+    private Vector _photoViewerDuplicateStripDragStartOffset;
+    private bool _photoViewerDuplicateStripDragMoved;
     private INotifyPropertyChanged? _viewModelPropertyChanged;
     private readonly Dictionary<ScrollViewer, double> _albumPhotoScrollOffsets = new();
     private readonly HashSet<ListBox> _albumPhotoLists = new();
@@ -102,7 +107,28 @@ public partial class MainView : UserControl
             AlbumReviewTabHeader_PointerCaptureLost,
             RoutingStrategies.Tunnel,
             handledEventsToo: true);
+        PhotoViewerDuplicateStripScrollViewer.AddHandler(
+            InputElement.PointerPressedEvent,
+            PhotoViewerDuplicateStrip_PointerPressed,
+            RoutingStrategies.Tunnel,
+            handledEventsToo: true);
+        PhotoViewerDuplicateStripScrollViewer.AddHandler(
+            InputElement.PointerMovedEvent,
+            PhotoViewerDuplicateStrip_PointerMoved,
+            RoutingStrategies.Tunnel,
+            handledEventsToo: true);
+        PhotoViewerDuplicateStripScrollViewer.AddHandler(
+            InputElement.PointerReleasedEvent,
+            PhotoViewerDuplicateStrip_PointerReleased,
+            RoutingStrategies.Tunnel,
+            handledEventsToo: true);
+        PhotoViewerDuplicateStripScrollViewer.AddHandler(
+            InputElement.PointerCaptureLostEvent,
+            PhotoViewerDuplicateStrip_PointerCaptureLost,
+            RoutingStrategies.Tunnel,
+            handledEventsToo: true);
         _ = Dispatcher.UIThread.InvokeAsync(UpdateAlbumReviewTabScrollButtonVisibility, DispatcherPriority.Loaded);
+        _ = Dispatcher.UIThread.InvokeAsync(UpdatePhotoViewerDuplicateStripScrollButtonVisibility, DispatcherPriority.Loaded);
         _ = Dispatcher.UIThread.InvokeAsync(UpdateFooterActionButtonWidths, DispatcherPriority.Loaded);
     }
 
@@ -179,6 +205,10 @@ public partial class MainView : UserControl
             or nameof(MainViewModel.FixedActionPanel))
         {
             ApplyFixedSurfaceSettings();
+        }
+        else if (e.PropertyName is nameof(MainViewModel.IsPhotoViewerDuplicateStripVisible))
+        {
+            _ = Dispatcher.UIThread.InvokeAsync(UpdatePhotoViewerDuplicateStripScrollButtonVisibility, DispatcherPriority.Render);
         }
     }
 
@@ -429,6 +459,109 @@ public partial class MainView : UserControl
 
         AlbumReviewTabsScrollLeftButton.IsVisible = AlbumReviewTabHeaderScrollViewer.Offset.X > tolerance;
         AlbumReviewTabsScrollRightButton.IsVisible = AlbumReviewTabHeaderScrollViewer.Offset.X < maxOffset - tolerance;
+    }
+
+    private void ScrollPhotoViewerDuplicateStripLeft_Click(object? sender, RoutedEventArgs e)
+    {
+        ScrollPhotoViewerDuplicateStrip(-PhotoViewerDuplicateStripScrollStep);
+        e.Handled = true;
+    }
+
+    private void ScrollPhotoViewerDuplicateStripRight_Click(object? sender, RoutedEventArgs e)
+    {
+        ScrollPhotoViewerDuplicateStrip(PhotoViewerDuplicateStripScrollStep);
+        e.Handled = true;
+    }
+
+    private void PhotoViewerDuplicateStripScrollViewer_ScrollChanged(object? sender, ScrollChangedEventArgs e)
+    {
+        UpdatePhotoViewerDuplicateStripScrollButtonVisibility();
+    }
+
+    private void PhotoViewerDuplicateStripScrollViewer_SizeChanged(object? sender, SizeChangedEventArgs e)
+    {
+        _ = Dispatcher.UIThread.InvokeAsync(UpdatePhotoViewerDuplicateStripScrollButtonVisibility, DispatcherPriority.Render);
+    }
+
+    private void PhotoViewerDuplicateStrip_PointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (_photoViewerDuplicateStripDragPointer is not null)
+        {
+            return;
+        }
+
+        _photoViewerDuplicateStripDragPointer = e.Pointer;
+        _photoViewerDuplicateStripDragStart = e.GetPosition(PhotoViewerDuplicateStripScrollViewer);
+        _photoViewerDuplicateStripDragStartOffset = PhotoViewerDuplicateStripScrollViewer.Offset;
+        _photoViewerDuplicateStripDragMoved = false;
+    }
+
+    private void PhotoViewerDuplicateStrip_PointerMoved(object? sender, PointerEventArgs e)
+    {
+        if (!ReferenceEquals(_photoViewerDuplicateStripDragPointer, e.Pointer))
+        {
+            return;
+        }
+
+        var delta = e.GetPosition(PhotoViewerDuplicateStripScrollViewer) - _photoViewerDuplicateStripDragStart;
+        if (!_photoViewerDuplicateStripDragMoved && Math.Abs(delta.X) < AlbumReviewHeaderDragThreshold)
+        {
+            return;
+        }
+
+        _photoViewerDuplicateStripDragMoved = true;
+        SetPhotoViewerDuplicateStripOffset(_photoViewerDuplicateStripDragStartOffset.X - delta.X);
+        e.Handled = true;
+    }
+
+    private void PhotoViewerDuplicateStrip_PointerReleased(object? sender, PointerReleasedEventArgs e)
+    {
+        if (!ReferenceEquals(_photoViewerDuplicateStripDragPointer, e.Pointer))
+        {
+            return;
+        }
+
+        var handled = _photoViewerDuplicateStripDragMoved;
+        _photoViewerDuplicateStripDragPointer = null;
+        _photoViewerDuplicateStripDragMoved = false;
+        e.Handled = handled;
+    }
+
+    private void PhotoViewerDuplicateStrip_PointerCaptureLost(object? sender, PointerCaptureLostEventArgs e)
+    {
+        if (ReferenceEquals(_photoViewerDuplicateStripDragPointer, e.Pointer))
+        {
+            _photoViewerDuplicateStripDragPointer = null;
+            _photoViewerDuplicateStripDragMoved = false;
+        }
+    }
+
+    private void ScrollPhotoViewerDuplicateStrip(double delta)
+    {
+        SetPhotoViewerDuplicateStripOffset(PhotoViewerDuplicateStripScrollViewer.Offset.X + delta);
+    }
+
+    private void SetPhotoViewerDuplicateStripOffset(double offset)
+    {
+        var maxOffset = Math.Max(0, PhotoViewerDuplicateStripScrollViewer.Extent.Width - PhotoViewerDuplicateStripScrollViewer.Viewport.Width);
+        var nextOffset = Math.Clamp(offset, 0, maxOffset);
+        PhotoViewerDuplicateStripScrollViewer.Offset = new Vector(nextOffset, PhotoViewerDuplicateStripScrollViewer.Offset.Y);
+        UpdatePhotoViewerDuplicateStripScrollButtonVisibility();
+    }
+
+    private void UpdatePhotoViewerDuplicateStripScrollButtonVisibility()
+    {
+        const double tolerance = 0.5;
+        var maxOffset = Math.Max(0, PhotoViewerDuplicateStripScrollViewer.Extent.Width - PhotoViewerDuplicateStripScrollViewer.Viewport.Width);
+        if (maxOffset <= tolerance)
+        {
+            PhotoViewerDuplicateStripScrollLeftButton.IsVisible = false;
+            PhotoViewerDuplicateStripScrollRightButton.IsVisible = false;
+            return;
+        }
+
+        PhotoViewerDuplicateStripScrollLeftButton.IsVisible = PhotoViewerDuplicateStripScrollViewer.Offset.X > tolerance;
+        PhotoViewerDuplicateStripScrollRightButton.IsVisible = PhotoViewerDuplicateStripScrollViewer.Offset.X < maxOffset - tolerance;
     }
 
     private void SelectAlbumReviewTab(string tabId)

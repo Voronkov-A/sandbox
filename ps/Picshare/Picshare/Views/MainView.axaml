@@ -2929,57 +2929,96 @@
                 Best in the group
               </CheckBox>
             </Border>
-            <Border Background="#99000000"
-                    CornerRadius="6"
+            <Border Background="#80FFFFFF"
+                    Height="68"
                     Padding="8"
-                    Margin="0,0,0,92"
-                    HorizontalAlignment="Center"
+                    HorizontalAlignment="Stretch"
                     VerticalAlignment="Bottom"
+                    Margin="0,0,0,56"
                     IsVisible="{Binding IsPhotoViewerDuplicateStripVisible}">
-              <ItemsControl ItemsSource="{Binding PhotoViewerDuplicatePhotos}">
-                <ItemsControl.ItemsPanel>
-                  <ItemsPanelTemplate>
-                    <StackPanel Orientation="Horizontal"/>
-                  </ItemsPanelTemplate>
-                </ItemsControl.ItemsPanel>
-                <ItemsControl.ItemTemplate>
-                  <DataTemplate x:DataType="vm:AlbumPhotoViewModel">
-                    <Button Width="68"
-                            Height="52"
-                            Margin="0,0,6,0"
-                            Padding="0"
-                            Click="DuplicatePhotoViewerItem_Click"
-                            BorderBrush="{Binding CardBorderBrush}"
-                            BorderThickness="{Binding CardBorderThickness}"
-                            ClipToBounds="True">
-                      <Grid>
-                        <Image Source="{Binding Image}"
-                               Stretch="UniformToFill"
-                               RenderTransformOrigin="50%,50%">
-                          <Image.RenderTransform>
-                            <RotateTransform Angle="{Binding RotationDegrees}"/>
-                          </Image.RenderTransform>
-                        </Image>
-                        <Border Width="22"
-                                Height="22"
-                                HorizontalAlignment="Right"
-                                VerticalAlignment="Bottom"
-                                Background="#1E8E3E"
-                                BorderBrush="White"
-                                BorderThickness="1"
-                                IsVisible="{Binding IsBestMarkerVisible}">
-                          <TextBlock Text="V"
-                                     Foreground="White"
-                                     FontSize="16"
-                                     FontWeight="Bold"
-                                     HorizontalAlignment="Center"
-                                     VerticalAlignment="Center"/>
-                        </Border>
-                      </Grid>
-                    </Button>
-                  </DataTemplate>
-                </ItemsControl.ItemTemplate>
-              </ItemsControl>
+              <Grid ColumnDefinitions="21,*,21">
+                <Button x:Name="PhotoViewerDuplicateStripScrollLeftButton"
+                        Grid.Column="0"
+                        Width="21"
+                        Height="52"
+                        Padding="0"
+                        Click="ScrollPhotoViewerDuplicateStripLeft_Click"
+                        Classes="footer-action photo-viewer-footer-action"
+                        HorizontalContentAlignment="Center"
+                        VerticalContentAlignment="Center"
+                        ToolTip.Tip="Scroll left">
+                  <TextBlock Text="&lt;"
+                             FontSize="16"
+                             FontWeight="SemiBold"/>
+                </Button>
+                <ScrollViewer x:Name="PhotoViewerDuplicateStripScrollViewer"
+                              Grid.Column="1"
+                              Margin="8,0"
+                              HorizontalScrollBarVisibility="Hidden"
+                              VerticalScrollBarVisibility="Disabled"
+                              ScrollChanged="PhotoViewerDuplicateStripScrollViewer_ScrollChanged"
+                              SizeChanged="PhotoViewerDuplicateStripScrollViewer_SizeChanged">
+                  <ItemsControl ItemsSource="{Binding PhotoViewerDuplicatePhotos}"
+                                HorizontalAlignment="Center">
+                    <ItemsControl.ItemsPanel>
+                      <ItemsPanelTemplate>
+                        <StackPanel Orientation="Horizontal"/>
+                      </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="vm:AlbumPhotoViewModel">
+                        <Button Width="68"
+                                Height="52"
+                                Margin="0,0,6,0"
+                                Padding="0"
+                                Click="DuplicatePhotoViewerItem_Click"
+                                BorderBrush="{Binding CardBorderBrush}"
+                                BorderThickness="{Binding CardBorderThickness}"
+                                ClipToBounds="True">
+                          <Grid>
+                            <Image Source="{Binding Image}"
+                                   Stretch="UniformToFill"
+                                   RenderTransformOrigin="50%,50%">
+                              <Image.RenderTransform>
+                                <RotateTransform Angle="{Binding RotationDegrees}"/>
+                              </Image.RenderTransform>
+                            </Image>
+                            <Border Width="22"
+                                    Height="22"
+                                    HorizontalAlignment="Right"
+                                    VerticalAlignment="Bottom"
+                                    Background="#1E8E3E"
+                                    BorderBrush="White"
+                                    BorderThickness="1"
+                                    IsVisible="{Binding IsBestMarkerVisible}">
+                              <TextBlock Text="V"
+                                         Foreground="White"
+                                         FontSize="16"
+                                         FontWeight="Bold"
+                                         HorizontalAlignment="Center"
+                                         VerticalAlignment="Center"/>
+                            </Border>
+                          </Grid>
+                        </Button>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </ScrollViewer>
+                <Button x:Name="PhotoViewerDuplicateStripScrollRightButton"
+                        Grid.Column="2"
+                        Width="21"
+                        Height="52"
+                        Padding="0"
+                        Click="ScrollPhotoViewerDuplicateStripRight_Click"
+                        Classes="footer-action photo-viewer-footer-action"
+                        HorizontalContentAlignment="Center"
+                        VerticalContentAlignment="Center"
+                        ToolTip.Tip="Scroll right">
+                  <TextBlock Text="&gt;"
+                             FontSize="16"
+                             FontWeight="SemiBold"/>
+                </Button>
+              </Grid>
             </Border>
             <Border Background="#80FFFFFF"
                     BorderBrush="#80D6D8D1"
