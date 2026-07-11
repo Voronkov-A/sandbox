@@ -84,6 +84,7 @@ public sealed class GoogleDriveAlbumPublisher
                 AlbumFolderUrl = albumFolder.WebViewLink ?? $"https://drive.google.com/drive/folders/{albumFolder.Id}"
             },
             null,
+            null,
             photoReferences);
 
         await using var placeholderManifestStream = new MemoryStream(JsonSerializer.SerializeToUtf8Bytes(manifestWithoutId, JsonOptions));

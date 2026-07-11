@@ -57,10 +57,13 @@ public sealed class LocalUserSettingsStore
 public sealed class LocalUserSettings
 {
     public const int DefaultMaximumParallelism = 8;
+    public const int DefaultPicturesPerRow = 4;
 
     public string AnonymousReviewerName { get; set; } = "";
 
     public int MaximumParallelism { get; set; } = DefaultMaximumParallelism;
+
+    public int NumberOfPicturesPerRow { get; set; } = DefaultPicturesPerRow;
 
     public bool CacheThumbnails { get; set; } = true;
 

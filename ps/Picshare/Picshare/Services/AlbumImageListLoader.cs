@@ -25,6 +25,8 @@ public sealed class AlbumImageListLoader : IDisposable
     private readonly List<Task> _workerTasks = new();
     private Task _stoppedWorkerTasks = Task.CompletedTask;
     private int _maximumParallelism = LocalUserSettings.DefaultMaximumParallelism;
+    private int _detailedThumbnailPixelWidth = 220;
+    private int _detailedThumbnailPixelHeight = 150;
     private int _workerCount;
     private int _pendingWorkerSignalCount;
     private long _generation;
@@ -95,6 +97,15 @@ public sealed class AlbumImageListLoader : IDisposable
         foreach (var photo in priorityPhotos)
         {
             AddPriorityPhoto(photo);
+        }
+    }
+
+    public void SetDetailedThumbnailSize(int pixelWidth, int pixelHeight)
+    {
+        lock (_sync)
+        {
+            _detailedThumbnailPixelWidth = Math.Max(1, pixelWidth);
+            _detailedThumbnailPixelHeight = Math.Max(1, pixelHeight);
         }
     }
 
@@ -1198,6 +1209,8 @@ public sealed class AlbumImageListLoader : IDisposable
                     $"{photo.PhotoId}-full{photo.FileExtension}",
                     photo.DownloadUrl,
                     _httpClient,
+                    _detailedThumbnailPixelWidth,
+                    _detailedThumbnailPixelHeight,
                     AlbumImageCacheReadMode.Lazy,
                     AlbumImageCacheReadMode.Lazy,
                     cancellationToken);
@@ -1228,6 +1241,8 @@ public sealed class AlbumImageListLoader : IDisposable
                 $"{photo.PhotoId}-full{photo.FileExtension}",
                 photo.DownloadUrl,
                 _httpClient,
+                _detailedThumbnailPixelWidth,
+                _detailedThumbnailPixelHeight,
                 isVisible ? AlbumImageCacheReadMode.Eager : AlbumImageCacheReadMode.Lazy,
                 AlbumImageCacheReadMode.Lazy,
                 cancellationToken);
@@ -1373,6 +1388,8 @@ public sealed class AlbumImageListLoader : IDisposable
                 $"{photo.PhotoId}-full{photo.FileExtension}",
                 photo.DownloadUrl,
                 _httpClient,
+                _detailedThumbnailPixelWidth,
+                _detailedThumbnailPixelHeight,
                 AlbumImageCacheReadMode.Lookup,
                 AlbumImageCacheReadMode.Lookup,
                 cancellationToken);

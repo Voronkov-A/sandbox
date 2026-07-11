@@ -473,17 +473,29 @@ public partial class MainView : UserControl
 
     private void UpdateFooterActionButtonWidths()
     {
-        var visibleButtons = FooterActionPanel.Children
+        UpdateFooterActionButtonWidths(FooterActionPanelHost, FooterActionPanel);
+        UpdateFooterActionButtonWidths(PhotoViewerActionFooterHost, PhotoViewerActionFooter);
+        UpdateFooterActionButtonWidths(PhotoViewerActionFooterCleanHost, PhotoViewerActionFooterClean);
+    }
+
+    private static void UpdateFooterActionButtonWidths(Control host, Panel panel)
+    {
+        var visibleButtons = panel.Children
             .OfType<Button>()
-            .Where(button => button.IsVisible)
+            .Where(button => button.IsVisible && double.IsFinite(button.MaxWidth))
             .ToList();
         if (visibleButtons.Count == 0)
         {
             return;
         }
 
-        var availableWidth = Math.Max(0, FooterActionPanelHost.Bounds.Width);
-        var availableButtonWidth = (availableWidth - (visibleButtons.Count - 1) * FooterActionButtonSpacing) / visibleButtons.Count;
+        var fixedWidth = panel.Children
+            .OfType<Button>()
+            .Where(button => button.IsVisible && !double.IsFinite(button.MaxWidth) && double.IsFinite(button.Width))
+            .Sum(button => button.Width);
+        var visibleButtonCount = panel.Children.OfType<Button>().Count(button => button.IsVisible);
+        var availableWidth = Math.Max(0, host.Bounds.Width - fixedWidth);
+        var availableButtonWidth = (availableWidth - (visibleButtonCount - 1) * FooterActionButtonSpacing) / visibleButtons.Count;
         var buttonWidth = Math.Max(0, Math.Min(FooterActionButtonMaxWidth, availableButtonWidth));
         foreach (var button in visibleButtons)
         {
@@ -981,6 +993,16 @@ public partial class MainView : UserControl
     private void AlbumPhotoScrollViewer_SizeChanged(object? sender, SizeChangedEventArgs e)
     {
         UpdateStickyAlbumPhotoGroupHeader();
+        QueueVisibleAlbumPhotoPriorityUpdate();
+    }
+
+    private void AlbumReviewContentHost_SizeChanged(object? sender, SizeChangedEventArgs e)
+    {
+        if (DataContext is MainViewModel viewModel)
+        {
+            viewModel.UpdateAlbumPhotoCardSize(e.NewSize.Width);
+        }
+
         QueueVisibleAlbumPhotoPriorityUpdate();
     }
 

@@ -12,6 +12,8 @@ public sealed record AlbumManifest
 
     public required int TargetNicePhotoCount { get; init; }
 
+    public AlbumImageSize? Size { get; init; }
+
     public required string PhotoBackendType { get; init; }
 
     public required string DatabaseBackendType { get; init; }
@@ -23,6 +25,13 @@ public sealed record AlbumManifest
     public LocalFileSystemAlbumDetails? LocalFileSystem { get; init; }
 
     public required IReadOnlyList<PhotoReference> Photos { get; init; }
+}
+
+public sealed record AlbumImageSize
+{
+    public required int Width { get; init; }
+
+    public required int Height { get; init; }
 }
 
 public sealed record GoogleDriveAlbumDetails

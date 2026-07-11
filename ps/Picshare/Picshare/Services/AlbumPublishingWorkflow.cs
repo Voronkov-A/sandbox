@@ -60,6 +60,7 @@ public static class AlbumPublishingWorkflow
         FeedbackReviewerIdentity author,
         GoogleDriveAlbumDetails? googleDrive,
         LocalFileSystemAlbumDetails? localFileSystem,
+        AlbumImageSize? size,
         IReadOnlyList<PhotoReference> photos)
     {
         return new AlbumManifest
@@ -68,6 +69,7 @@ public static class AlbumPublishingWorkflow
             Title = title,
             CreatedAt = DateTimeOffset.UtcNow,
             TargetNicePhotoCount = targetNicePhotoCount,
+            Size = size,
             PhotoBackendType = photoBackendType,
             DatabaseBackendType = databaseBackendType,
             Author = author,

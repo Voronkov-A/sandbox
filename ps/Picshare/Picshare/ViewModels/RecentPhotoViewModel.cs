@@ -9,12 +9,14 @@ public sealed class RecentPhotoViewModel
         string photoId,
         string duplicateGroupId,
         string displayName,
+        AlbumPhotoViewModel photo,
         Func<RecentPhotoViewModel, Task> openAsync)
     {
         Key = key;
         PhotoId = photoId;
         DuplicateGroupId = duplicateGroupId;
         DisplayName = displayName;
+        Photo = photo;
         OpenCommand = new AsyncRelayCommand(() => openAsync(this));
     }
 
@@ -25,6 +27,8 @@ public sealed class RecentPhotoViewModel
     public string DuplicateGroupId { get; }
 
     public string DisplayName { get; }
+
+    public AlbumPhotoViewModel Photo { get; }
 
     public IAsyncRelayCommand OpenCommand { get; }
 }

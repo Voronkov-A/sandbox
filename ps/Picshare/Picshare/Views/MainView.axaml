@@ -21,8 +21,8 @@
         <ItemsControl.ItemTemplate>
           <DataTemplate x:DataType="vm:AlbumPhotoViewModel">
             <Border x:Name="AlbumPhotoCard"
-                    Width="220"
-                    Height="190"
+                    Width="{Binding CardWidth}"
+                    Height="{Binding CardHeight}"
                     Margin="0,0,12,12"
                     Background="White"
                     BorderBrush="{Binding CardBorderBrush}"
@@ -30,7 +30,7 @@
                     CornerRadius="6"
                     Loaded="AlbumPhoto_Loaded"
                     Unloaded="AlbumPhoto_Unloaded">
-              <Grid RowDefinitions="150,40">
+              <Grid RowDefinitions="*,40">
                 <Button Click="AlbumPhoto_Click"
                         Padding="0"
                         Background="Transparent"
@@ -273,6 +273,17 @@
   </UserControl.Resources>
 
   <UserControl.Styles>
+    <Style Selector="Button.footer-action">
+      <Setter Property="Background" Value="White"/>
+      <Setter Property="BorderBrush" Value="#D6D8D1"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="Foreground" Value="#27343B"/>
+      <Setter Property="CornerRadius" Value="6"/>
+    </Style>
+    <Style Selector="Button.photo-viewer-footer-action">
+      <Setter Property="BorderBrush" Value="Black"/>
+      <Setter Property="BorderThickness" Value="2"/>
+    </Style>
     <Style Selector="Button.compact-footer-action TextBlock.footer-action-label">
       <Setter Property="IsVisible" Value="False"/>
     </Style>
@@ -1036,7 +1047,8 @@
         </Border>
         <Grid x:Name="AlbumReviewContentHost"
               Grid.Row="1"
-              Margin="20,0,20,20">
+              Margin="20,0,20,20"
+              SizeChanged="AlbumReviewContentHost_SizeChanged">
           <Grid IsVisible="{Binding IsUncategorizedReviewTabSelected}">
                   <ListBox ItemsSource="{Binding UncategorizedPhotoGroups}"
                            Classes="album-photo-list"
@@ -1515,6 +1527,13 @@
                 <NumericUpDown Value="{Binding MaximumParallelism}"
                                Minimum="1"
                                Maximum="64"
+                               Increment="1"/>
+              </StackPanel>
+              <StackPanel Spacing="5">
+                <TextBlock Text="Number of pictures per row" FontWeight="SemiBold"/>
+                <NumericUpDown Value="{Binding NumberOfPicturesPerRow}"
+                               Minimum="1"
+                               Maximum="8"
                                Increment="1"/>
               </StackPanel>
               <StackPanel Spacing="6">
@@ -2840,13 +2859,14 @@
 
         <Border x:Name="PhotoViewerViewport"
                 Grid.Row="1"
-                Padding="12"
+                Padding="0"
                 PointerPressed="PhotoViewer_PointerPressed"
                 PointerMoved="PhotoViewer_PointerMoved"
                 PointerReleased="PhotoViewer_PointerReleased"
                 PointerWheelChanged="PhotoViewer_PointerWheelChanged">
           <Grid>
             <ScrollViewer x:Name="PhotoViewerScrollViewer"
+                          Margin="12,12,12,0"
                           HorizontalScrollBarVisibility="Auto"
                           VerticalScrollBarVisibility="Auto">
               <Image x:Name="PhotoViewerImageControl"
@@ -2961,28 +2981,61 @@
                 </ItemsControl.ItemTemplate>
               </ItemsControl>
             </Border>
-            <Border Background="#99000000"
-                    CornerRadius="6"
-                    Padding="10"
-                    Margin="0,0,0,18"
-                    HorizontalAlignment="Center"
+            <Border Background="#80FFFFFF"
+                    BorderBrush="#80D6D8D1"
+                    BorderThickness="0,1,0,0"
+                    Height="56"
+                    HorizontalAlignment="Stretch"
                     VerticalAlignment="Bottom"
-                    IsVisible="{Binding IsPhotoViewerActionsVisible}">
-              <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto">
-                <Button Padding="14,10"
+                    IsVisible="False">
+              <Grid x:Name="PhotoViewerActionFooterHost"
+                    Margin="8,0"
+                    SizeChanged="FooterActionPanelHost_SizeChanged"
+                    HorizontalAlignment="Stretch"
+                    VerticalAlignment="Center">
+                <StackPanel x:Name="PhotoViewerActionFooter"
+                            Orientation="Horizontal"
+                            Spacing="8"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center">
+                <Button Classes="footer-action"
+                        Width="42"
+                        Height="42"
+                        Padding="0"
                         Margin="0,0,8,0"
                         Command="{Binding ShowPreviousPhotoInCategoryCommand}"
-                        IsEnabled="{Binding CanNavigatePhotoViewerCategory}"
-                        Background="White"
-                        Foreground="Black"
-                        BorderBrush="Black"
-                        BorderThickness="2">
+                        IsEnabled="{Binding CanNavigatePhotoViewerCategory}">
                   <Grid>
                     <TextBlock Text="&lt;" FontWeight="SemiBold" Foreground="White" Margin="-1,-1,0,0"/>
                     <TextBlock Text="&lt;" FontWeight="SemiBold" Foreground="White" Margin="1,-1,0,0"/>
                     <TextBlock Text="&lt;" FontWeight="SemiBold" Foreground="White" Margin="-1,1,0,0"/>
                     <TextBlock Text="&lt;" FontWeight="SemiBold" Foreground="White" Margin="1,1,0,0"/>
                     <TextBlock Text="&lt;" FontWeight="SemiBold" Foreground="Black"/>
+                  </Grid>
+                </Button>
+                <Button Classes="footer-action"
+                        MaxWidth="92"
+                        Height="42"
+                        Padding="0"
+                        SizeChanged="FooterActionButton_SizeChanged"
+                        Command="{Binding MarkCurrentPhotoSameAsPreviousCommand}"
+                        IsEnabled="{Binding CanMarkCurrentPhotoSameAsPrevious}"
+                        ToolTip.Tip="Same as previous">
+                  <Grid ColumnDefinitions="28,Auto" ColumnSpacing="6" HorizontalAlignment="Center">
+                    <Border Width="28"
+                            Height="28"
+                            Background="#EDF0ED"
+                            BorderBrush="#27343B"
+                            BorderThickness="1"
+                            ClipToBounds="True">
+                      <Image Source="{Binding PreviousRecentPhoto.Image}"
+                             Stretch="UniformToFill"/>
+                    </Border>
+                    <TextBlock Grid.Column="1"
+                               Classes="footer-action-label"
+                               Text="Same"
+                               FontWeight="SemiBold"
+                               VerticalAlignment="Center"/>
                   </Grid>
                 </Button>
                 <Button Grid.Column="1"
@@ -2992,6 +3045,7 @@
                         Margin="0,0,8,0"
                         Command="{Binding OpenPreviousRecentPhotoCommand}"
                         IsEnabled="{Binding CanOpenPreviousRecentPhoto}"
+                        IsVisible="False"
                         Background="White"
                         Foreground="Black"
                         BorderBrush="Black"
@@ -3084,6 +3138,45 @@
                     <TextBlock Text="okay 🗿" FontWeight="SemiBold" Foreground="Black"/>
                   </Grid>
                 </Button>
+                <Button Classes="footer-action"
+                        Width="42"
+                        Height="42"
+                        Padding="0"
+                        Command="{Binding OpenPreviousRecentPhotoCommand}"
+                        IsEnabled="{Binding CanOpenPreviousRecentPhoto}"
+                        ToolTip.Tip="Previous recent photo">
+                  <Canvas Width="26" Height="22">
+                    <Border Canvas.Left="3"
+                            Canvas.Top="5"
+                            Width="15"
+                            Height="13"
+                            Background="#F2F5F6"
+                            BorderBrush="#27343B"
+                            BorderThickness="1"
+                            RenderTransformOrigin="50%,50%">
+                      <Border.RenderTransform>
+                        <RotateTransform Angle="-14"/>
+                      </Border.RenderTransform>
+                    </Border>
+                    <Border Canvas.Left="8"
+                            Canvas.Top="4"
+                            Width="15"
+                            Height="13"
+                            Background="White"
+                            BorderBrush="#27343B"
+                            BorderThickness="1"
+                            RenderTransformOrigin="50%,50%">
+                      <Border.RenderTransform>
+                        <RotateTransform Angle="12"/>
+                      </Border.RenderTransform>
+                    </Border>
+                    <Path Data="M5,11 L20,11 M15,6 L20,11 L15,16"
+                          Stroke="#27343B"
+                          StrokeThickness="1.7"
+                          StrokeLineCap="Round"
+                          StrokeJoin="Round"/>
+                  </Canvas>
+                </Button>
                 <Button Grid.Column="5"
                         Padding="14,10"
                         Margin="0,0,8,0"
@@ -3100,6 +3193,29 @@
                   </Grid>
                   <Button.Flyout>
                     <MenuFlyout>
+                      <MenuItem IsHitTestVisible="False">
+                        <MenuItem.Header>
+                          <Border Background="#27343B"
+                                  Padding="12,7"
+                                  MinWidth="180">
+                            <TextBlock Text="{Binding PhotoViewerTitle}"
+                                       Foreground="White"
+                                       FontWeight="Bold"/>
+                          </Border>
+                        </MenuItem.Header>
+                      </MenuItem>
+                      <MenuItem Header="Trash"
+                                Command="{Binding MarkCurrentPhotoTrashCommand}"
+                                IsVisible="{Binding CanShowCurrentPhotoTrashAction}"
+                                IsEnabled="{Binding CanMarkCurrentPhotoTrash}"/>
+                      <MenuItem Header="Same as previous"
+                                Command="{Binding MarkCurrentPhotoSameAsPreviousCommand}"
+                                IsVisible="{Binding CanShowCurrentPhotoSameAsPreviousMenuItem}"
+                                IsEnabled="{Binding CanMarkCurrentPhotoSameAsPrevious}"/>
+                      <MenuItem Header="Remove from duplicates"
+                                Command="{Binding RemoveCurrentPhotoFromDuplicatesCommand}"
+                                IsVisible="{Binding IsCurrentPhotoInDuplicateGroup}"
+                                IsEnabled="{Binding CanRemoveCurrentPhotoFromDuplicates}"/>
                       <MenuItem Command="{Binding UndoFeedbackActionCommand}"
                                 IsEnabled="{Binding CanUndoFeedbackAction}">
                         <MenuItem.Header>
@@ -3111,9 +3227,20 @@
                           </StackPanel>
                         </MenuItem.Header>
                       </MenuItem>
+                      <MenuItem Command="{Binding RedoFeedbackActionCommand}"
+                                IsEnabled="{Binding CanRedoFeedbackAction}">
+                        <MenuItem.Header>
+                          <StackPanel Spacing="1">
+                            <TextBlock Text="Redo"/>
+                            <TextBlock Text="{Binding RedoFeedbackActionDescription}"
+                                       FontSize="11"
+                                       Foreground="#6C756F"/>
+                          </StackPanel>
+                        </MenuItem.Header>
+                      </MenuItem>
                       <MenuItem Header="Recent..."
-                                ItemsSource="{Binding RecentPhotos}"
-                                IsEnabled="{Binding HasRecentPhotos}"
+                                ItemsSource="{Binding PhotoViewerRecentPhotos}"
+                                IsEnabled="{Binding CanOpenPreviousRecentPhoto}"
                                 x:CompileBindings="False">
                         <MenuItem.Styles>
                           <Style Selector="MenuItem">
@@ -3144,13 +3271,6 @@
                           </MenuItem.Header>
                         </MenuItem>
                       </MenuItem>
-                      <MenuItem Header="trash"
-                                Command="{Binding MarkCurrentPhotoTrashCommand}"
-                                IsVisible="{Binding CanShowCurrentPhotoTrashAction}"
-                                IsEnabled="{Binding CanMarkCurrentPhotoTrash}"/>
-                      <MenuItem Header="Remove from duplicates"
-                                Command="{Binding RemoveCurrentPhotoFromDuplicatesCommand}"
-                                IsEnabled="{Binding CanRemoveCurrentPhotoFromDuplicates}"/>
                       <MenuItem Header="Download..."
                                 Click="DownloadCurrentPhoto_Click"
                                 IsEnabled="{Binding CanDownloadCurrentPhoto}"/>
@@ -3173,6 +3293,327 @@
                     <TextBlock Text="&gt;" FontWeight="SemiBold" Foreground="Black"/>
                   </Grid>
                 </Button>
+                </StackPanel>
+              </Grid>
+            </Border>
+            <Border Background="#80FFFFFF"
+                    BorderBrush="#80D6D8D1"
+                    BorderThickness="0,1,0,0"
+                    Height="56"
+                    HorizontalAlignment="Stretch"
+                    VerticalAlignment="Bottom"
+                    IsVisible="{Binding IsPhotoViewerActionsVisible}">
+              <Grid x:Name="PhotoViewerActionFooterCleanHost"
+                    Margin="0"
+                    SizeChanged="FooterActionPanelHost_SizeChanged"
+                    HorizontalAlignment="Stretch"
+                    VerticalAlignment="Center">
+                <StackPanel x:Name="PhotoViewerActionFooterClean"
+                            Orientation="Horizontal"
+                            Spacing="8"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center">
+                  <Button Classes="footer-action photo-viewer-footer-action"
+                          Width="42"
+                          Height="42"
+                          Padding="0"
+                          HorizontalContentAlignment="Center"
+                          VerticalContentAlignment="Center"
+                          Command="{Binding ShowPreviousPhotoInCategoryCommand}"
+                          IsEnabled="{Binding CanNavigatePhotoViewerCategory}"
+                          ToolTip.Tip="Previous photo">
+                    <TextBlock Text="&lt;"
+                               FontSize="20"
+                               FontWeight="SemiBold"/>
+                  </Button>
+
+                  <Button Classes="footer-action photo-viewer-footer-action"
+                          MaxWidth="92"
+                          Height="42"
+                          Padding="0"
+                          SizeChanged="FooterActionButton_SizeChanged"
+                          HorizontalAlignment="Stretch"
+                          HorizontalContentAlignment="Center"
+                          VerticalContentAlignment="Center"
+                          Command="{Binding MarkCurrentPhotoSameAsPreviousCommand}"
+                          IsEnabled="{Binding CanMarkCurrentPhotoSameAsPrevious}"
+                          ToolTip.Tip="Same as previous">
+                    <Grid ColumnDefinitions="28,Auto"
+                          ColumnSpacing="6"
+                          HorizontalAlignment="Center">
+                      <Canvas Width="26" Height="22">
+                        <Border Canvas.Left="3"
+                                Canvas.Top="5"
+                                Width="15"
+                                Height="13"
+                                Background="#F2F5F6"
+                                BorderBrush="#27343B"
+                                BorderThickness="1"
+                                RenderTransformOrigin="50%,50%">
+                          <Border.RenderTransform>
+                            <RotateTransform Angle="-14"/>
+                          </Border.RenderTransform>
+                        </Border>
+                        <Border Canvas.Left="8"
+                                Canvas.Top="4"
+                                Width="15"
+                                Height="13"
+                                Background="White"
+                                BorderBrush="#27343B"
+                                BorderThickness="1"
+                                RenderTransformOrigin="50%,50%">
+                          <Border.RenderTransform>
+                            <RotateTransform Angle="12"/>
+                          </Border.RenderTransform>
+                        </Border>
+                        <Path Data="M5,11 L20,11 M15,6 L20,11 L15,16"
+                              Stroke="#27343B"
+                              StrokeThickness="1.7"
+                              StrokeLineCap="Round"
+                              StrokeJoin="Round"/>
+                      </Canvas>
+                      <TextBlock Grid.Column="1"
+                                 Classes="footer-action-label"
+                                 Text="Same"
+                                 FontWeight="SemiBold"
+                                 VerticalAlignment="Center"/>
+                    </Grid>
+                  </Button>
+
+                  <Button Classes="footer-action photo-viewer-footer-action"
+                          MaxWidth="92"
+                          Height="42"
+                          Padding="0"
+                          SizeChanged="FooterActionButton_SizeChanged"
+                          HorizontalAlignment="Stretch"
+                          HorizontalContentAlignment="Center"
+                          VerticalContentAlignment="Center"
+                          Command="{Binding MarkCurrentPhotoUncategorizedCommand}"
+                          IsVisible="{Binding ShouldShowCurrentPhotoUncategorizedAction}"
+                          IsEnabled="{Binding CanMarkCurrentPhotoUncategorized}"
+                          ToolTip.Tip="Todo">
+                    <Grid ColumnDefinitions="Auto,Auto" ColumnSpacing="6" HorizontalAlignment="Center">
+                      <Canvas Width="20" Height="20">
+                        <Path Data="M5,7 L9,3 L15,3 L18,8 L15,16 L8,18 L3,14 Z"
+                              Stroke="#27343B"
+                              StrokeThickness="1.5"
+                              Fill="Transparent"/>
+                        <Path Data="M10,8 Q10,5.8 12,5.8 Q14,5.8 14,7.8 Q14,9.2 12.2,10.2 Q11,10.9 11,12.1"
+                              Stroke="#27343B"
+                              StrokeThickness="1.5"
+                              StrokeLineCap="Round"
+                              StrokeJoin="Round"
+                              Fill="Transparent"/>
+                        <Path Data="M11,15 L11,15.1"
+                              Stroke="#27343B"
+                              StrokeThickness="2"
+                              StrokeLineCap="Round"/>
+                      </Canvas>
+                      <TextBlock Grid.Column="1"
+                                 Classes="footer-action-label"
+                                 Text="Todo"
+                                 FontWeight="SemiBold"
+                                 VerticalAlignment="Center"/>
+                    </Grid>
+                  </Button>
+
+                  <Button Classes="footer-action photo-viewer-footer-action"
+                          MaxWidth="92"
+                          Height="42"
+                          Padding="0"
+                          SizeChanged="FooterActionButton_SizeChanged"
+                          HorizontalAlignment="Stretch"
+                          HorizontalContentAlignment="Center"
+                          VerticalContentAlignment="Center"
+                          Command="{Binding MarkCurrentPhotoNiceCommand}"
+                          IsVisible="{Binding ShouldShowCurrentPhotoNiceAction}"
+                          IsEnabled="{Binding CanMarkCurrentPhotoNice}"
+                          ToolTip.Tip="Nice">
+                    <Grid ColumnDefinitions="Auto,Auto" ColumnSpacing="6" HorizontalAlignment="Center">
+                      <Canvas Width="20" Height="20">
+                        <Path Data="M5,7 L9,3 L15,3 L18,8 L15,16 L8,18 L3,14 Z"
+                              Stroke="#27343B"
+                              StrokeThickness="1.5"
+                              Fill="Transparent"/>
+                        <Path Data="M8,8 L8,9 M14,8 L14,9 M8,13 Q11,16 15,13"
+                              Stroke="#27343B"
+                              StrokeThickness="1.5"
+                              StrokeLineCap="Round"
+                              Fill="Transparent"/>
+                      </Canvas>
+                      <TextBlock Grid.Column="1"
+                                 Classes="footer-action-label"
+                                 Text="Nice"
+                                 FontWeight="SemiBold"
+                                 VerticalAlignment="Center"/>
+                    </Grid>
+                  </Button>
+
+                  <Button Classes="footer-action photo-viewer-footer-action"
+                          MaxWidth="92"
+                          Height="42"
+                          Padding="0"
+                          SizeChanged="FooterActionButton_SizeChanged"
+                          HorizontalAlignment="Stretch"
+                          HorizontalContentAlignment="Center"
+                          VerticalContentAlignment="Center"
+                          Command="{Binding MarkCurrentPhotoOkCommand}"
+                          IsVisible="{Binding ShouldShowCurrentPhotoOkAction}"
+                          IsEnabled="{Binding CanMarkCurrentPhotoOk}"
+                          ToolTip.Tip="Okay">
+                    <Grid ColumnDefinitions="Auto,Auto" ColumnSpacing="6" HorizontalAlignment="Center">
+                      <Canvas Width="20" Height="20">
+                        <Path Data="M5,7 L9,3 L15,3 L18,8 L15,16 L8,18 L3,14 Z"
+                              Stroke="#27343B"
+                              StrokeThickness="1.5"
+                              Fill="Transparent"/>
+                        <Path Data="M8,8 L8,9 M14,8 L14,9 M8,14 L15,14"
+                              Stroke="#27343B"
+                              StrokeThickness="1.5"
+                              StrokeLineCap="Round"
+                              Fill="Transparent"/>
+                      </Canvas>
+                      <TextBlock Grid.Column="1"
+                                 Classes="footer-action-label"
+                                 Text="Okay"
+                                 FontWeight="SemiBold"
+                                 VerticalAlignment="Center"/>
+                    </Grid>
+                  </Button>
+
+                  <Button Classes="footer-action photo-viewer-footer-action"
+                          Width="42"
+                          Height="42"
+                          Padding="0"
+                          HorizontalContentAlignment="Center"
+                          VerticalContentAlignment="Center"
+                          Command="{Binding OpenPreviousRecentPhotoCommand}"
+                          IsEnabled="{Binding CanOpenPreviousRecentPhoto}"
+                          ToolTip.Tip="{Binding PreviousRecentPhotoButtonTip}">
+                    <Border Width="30"
+                            Height="30"
+                            Background="#EDF0ED"
+                            BorderBrush="#27343B"
+                            BorderThickness="1"
+                            ClipToBounds="True">
+                      <Image Source="{Binding PreviousRecentPhotoIconImage}"
+                             Stretch="UniformToFill"/>
+                    </Border>
+                  </Button>
+
+                  <Button Classes="footer-action photo-viewer-footer-action"
+                          Width="42"
+                          Height="42"
+                          Padding="0"
+                          HorizontalContentAlignment="Center"
+                          VerticalContentAlignment="Center"
+                          ToolTip.Tip="More">
+                    <Grid Width="20" Height="20">
+                      <Ellipse Width="4" Height="4" Fill="#27343B" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,2,0,0"/>
+                      <Ellipse Width="4" Height="4" Fill="#27343B" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                      <Ellipse Width="4" Height="4" Fill="#27343B" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,2"/>
+                    </Grid>
+                    <Button.Flyout>
+                      <MenuFlyout>
+                        <MenuItem IsHitTestVisible="False">
+                          <MenuItem.Header>
+                            <Border Background="#27343B"
+                                    Padding="12,7"
+                                    MinWidth="180">
+                              <TextBlock Text="{Binding PhotoViewerTitle}"
+                                         Foreground="White"
+                                         FontWeight="Bold"/>
+                            </Border>
+                          </MenuItem.Header>
+                        </MenuItem>
+                        <MenuItem Header="Trash"
+                                  Command="{Binding MarkCurrentPhotoTrashCommand}"
+                                  IsVisible="{Binding CanShowCurrentPhotoTrashAction}"
+                                  IsEnabled="{Binding CanMarkCurrentPhotoTrash}"/>
+                        <MenuItem Header="Same as previous"
+                                  Command="{Binding MarkCurrentPhotoSameAsPreviousCommand}"
+                                  IsVisible="{Binding CanShowCurrentPhotoSameAsPreviousMenuItem}"
+                                  IsEnabled="{Binding CanMarkCurrentPhotoSameAsPrevious}"/>
+                        <MenuItem Header="Remove from duplicates"
+                                  Command="{Binding RemoveCurrentPhotoFromDuplicatesCommand}"
+                                  IsVisible="{Binding IsCurrentPhotoInDuplicateGroup}"
+                                  IsEnabled="{Binding CanRemoveCurrentPhotoFromDuplicates}"/>
+                        <MenuItem Command="{Binding UndoFeedbackActionCommand}"
+                                  IsEnabled="{Binding CanUndoFeedbackAction}">
+                          <MenuItem.Header>
+                            <StackPanel Spacing="1">
+                              <TextBlock Text="Undo"/>
+                              <TextBlock Text="{Binding UndoFeedbackActionDescription}"
+                                         FontSize="11"
+                                         Foreground="#6C756F"/>
+                            </StackPanel>
+                          </MenuItem.Header>
+                        </MenuItem>
+                        <MenuItem Command="{Binding RedoFeedbackActionCommand}"
+                                  IsEnabled="{Binding CanRedoFeedbackAction}">
+                          <MenuItem.Header>
+                            <StackPanel Spacing="1">
+                              <TextBlock Text="Redo"/>
+                              <TextBlock Text="{Binding RedoFeedbackActionDescription}"
+                                         FontSize="11"
+                                         Foreground="#6C756F"/>
+                            </StackPanel>
+                          </MenuItem.Header>
+                        </MenuItem>
+                        <MenuItem Header="Rotate left"
+                                  Command="{Binding RotateCurrentPhotoLeftCommand}"
+                                  IsEnabled="{Binding CanDownloadCurrentPhoto}"/>
+                        <MenuItem Header="Rotate right"
+                                  Command="{Binding RotateCurrentPhotoRightCommand}"
+                                  IsEnabled="{Binding CanDownloadCurrentPhoto}"/>
+                        <MenuItem Header="Recent..."
+                                  ItemsSource="{Binding PhotoViewerRecentPhotos}"
+                                  IsEnabled="{Binding CanOpenPreviousRecentPhoto}"
+                                  x:CompileBindings="False">
+                          <MenuItem.Styles>
+                            <Style Selector="MenuItem">
+                              <Setter Property="Header" Value="{Binding DisplayName}"/>
+                              <Setter Property="Command" Value="{Binding OpenCommand}"/>
+                            </Style>
+                          </MenuItem.Styles>
+                        </MenuItem>
+                        <MenuItem Header="Bookmark...">
+                          <MenuItem Header="Set"
+                                    Command="{Binding SetCurrentPhotoBookmarkCommand}"
+                                    IsEnabled="{Binding CanSetCurrentPhotoBookmark}"/>
+                          <MenuItem Command="{Binding OpenBookmarkedPhotoCommand}"
+                                    IsEnabled="{Binding CanOpenBookmarkedPhoto}">
+                            <MenuItem.Header>
+                              <StackPanel Spacing="1">
+                                <TextBlock Text="Open"/>
+                                <TextBlock Text="{Binding BookmarkedPhotoName}"
+                                           FontSize="11"
+                                           Foreground="#6C756F"/>
+                              </StackPanel>
+                            </MenuItem.Header>
+                          </MenuItem>
+                        </MenuItem>
+                        <MenuItem Header="Download..."
+                                  Click="DownloadCurrentPhoto_Click"
+                                  IsEnabled="{Binding CanDownloadCurrentPhoto}"/>
+                      </MenuFlyout>
+                    </Button.Flyout>
+                  </Button>
+
+                  <Button Classes="footer-action photo-viewer-footer-action"
+                          Width="42"
+                          Height="42"
+                          Padding="0"
+                          HorizontalContentAlignment="Center"
+                          VerticalContentAlignment="Center"
+                          Command="{Binding ShowNextPhotoInCategoryCommand}"
+                          IsEnabled="{Binding CanNavigatePhotoViewerCategory}"
+                          ToolTip.Tip="Next photo">
+                    <TextBlock Text="&gt;"
+                               FontSize="20"
+                               FontWeight="SemiBold"/>
+                  </Button>
+                </StackPanel>
               </Grid>
             </Border>
           </Grid>

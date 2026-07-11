@@ -46,6 +46,20 @@ public static class PhotoThumbnailGenerator
         return thumbnail;
     }
 
+    public static (int Width, int Height) GetImageSize(Stream source)
+    {
+        using var codec = SKCodec.Create(source)
+            ?? throw new InvalidOperationException("The selected photo could not be decoded.");
+
+        var info = codec.Info;
+        if (info.Width <= 0 || info.Height <= 0)
+        {
+            throw new InvalidOperationException("The selected photo has invalid dimensions.");
+        }
+
+        return (info.Width, info.Height);
+    }
+
     private static SKRect GetCenteredSquareCrop(int width, int height)
     {
         var size = Math.Min(width, height);

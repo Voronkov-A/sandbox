@@ -73,6 +73,7 @@ public sealed class LocalFileSystemAlbumPublisher
                 FeedbackFolderPath = feedbackFolderPath,
                 ManifestFilePath = manifestFilePath
             },
+            null,
             photoReferences);
 
         await using (var stream = File.Create(manifestFilePath))

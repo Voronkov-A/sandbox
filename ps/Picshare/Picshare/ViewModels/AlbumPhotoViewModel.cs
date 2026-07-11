@@ -59,6 +59,12 @@ public partial class AlbumPhotoViewModel : ObservableObject
     [ObservableProperty]
     private Bitmap? _image;
 
+    [ObservableProperty]
+    private double _cardWidth = DisplayPixelWidth;
+
+    [ObservableProperty]
+    private double _cardHeight = DisplayPixelHeight + 40;
+
     private AlbumImageBitmapLease? _imageLease;
     private bool _isApplyingImageLease;
 

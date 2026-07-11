@@ -236,6 +236,7 @@ public sealed class PersistentAlbumCreationService
                     FeedbackFolderPath = pending.LocalFeedbackFolderPath ?? Path.Combine(pending.LocalAlbumFolderPath, "feedback"),
                     ManifestFilePath = pending.LocalManifestFilePath ?? Path.Combine(pending.LocalAlbumFolderPath, "album.json")
                 },
+                pending.Size,
                 pending.Photos.Where(photo => photo.Reference is not null).Select(photo => photo.Reference!).ToList());
         }
 
@@ -259,6 +260,7 @@ public sealed class PersistentAlbumCreationService
                     AlbumFolderUrl = pending.GoogleAlbumFolderUrl ?? $"https://drive.google.com/drive/folders/{pending.GoogleAlbumFolderId}"
                 },
                 null,
+                pending.Size,
                 pending.Photos.Where(photo => photo.Reference is not null).Select(photo => photo.Reference!).ToList());
         }
 
@@ -315,6 +317,8 @@ public sealed class PersistentAlbumCreationService
             progress,
             maximumParallelism,
             cancellationToken);
+        pending.Size = GetDominantImageSize(pending.Photos);
+        await SavePendingCreationAsync(pending, cancellationToken);
 
         var manifest = AlbumPublishingWorkflow.CreateManifest(
             pending.AlbumId,
@@ -331,6 +335,7 @@ public sealed class PersistentAlbumCreationService
                 FeedbackFolderPath = pending.LocalFeedbackFolderPath,
                 ManifestFilePath = pending.LocalManifestFilePath
             },
+            pending.Size,
             pending.Photos.Select(photo => photo.Reference!).ToList());
 
         progress?.Report(new AlbumCreationProgress("Writing manifest", pending.Photos.Count + 1, pending.Photos.Count + 3));
@@ -421,6 +426,8 @@ public sealed class PersistentAlbumCreationService
             progress,
             maximumParallelism,
             cancellationToken);
+        pending.Size = GetDominantImageSize(pending.Photos);
+        await SavePendingCreationAsync(pending, cancellationToken);
 
         var manifestWithoutId = AlbumPublishingWorkflow.CreateManifest(
             pending.AlbumId,
@@ -438,6 +445,7 @@ public sealed class PersistentAlbumCreationService
                 AlbumFolderUrl = pending.GoogleAlbumFolderUrl!
             },
             null,
+            pending.Size,
             pending.Photos.Select(photo => photo.Reference!).ToList());
 
         if (string.IsNullOrWhiteSpace(pending.GoogleManifestFileId))
@@ -492,6 +500,10 @@ public sealed class PersistentAlbumCreationService
                 progress?.Report(new AlbumCreationProgress($"Uploading {photo.StoredFileName}", Volatile.Read(ref completed), pending.Photos.Count + 3));
                 var contentType = GetContentType(photo.FileName);
                 await using var thumbnailSourceStream = File.OpenRead(photo.LocalPath);
+                var (width, height) = PhotoThumbnailGenerator.GetImageSize(thumbnailSourceStream);
+                photo.Width = width;
+                photo.Height = height;
+                thumbnailSourceStream.Position = 0;
                 await using var thumbnailStream = PhotoThumbnailGenerator.CreateJpegThumbnail(thumbnailSourceStream);
                 await using var contentStream = File.OpenRead(photo.LocalPath);
                 await storeAsync(photo, contentType, contentStream, thumbnailStream, token);
@@ -661,6 +673,19 @@ public sealed class PersistentAlbumCreationService
         await JsonSerializer.SerializeAsync(stream, pending, JsonOptions, cancellationToken);
     }
 
+    private static AlbumImageSize? GetDominantImageSize(IEnumerable<PendingAlbumCreationPhoto> photos)
+    {
+        var size = photos
+            .Where(photo => photo.Width > 0 && photo.Height > 0)
+            .Select(photo => new { photo.Width, photo.Height })
+            .GroupBy(size => (size.Width, size.Height))
+            .MaxBy(group => group.Count())?
+            .Key;
+        return size is null
+            ? null
+            : new AlbumImageSize { Width = size.Value.Width, Height = size.Value.Height };
+    }
+
     private void DeletePendingCreation(string albumId)
     {
         var path = GetPendingCreationPath(albumId);
@@ -734,6 +759,8 @@ public sealed class PendingAlbumCreation
     public string? GoogleFeedbackFolderId { get; set; }
     public string? GoogleManifestFileId { get; set; }
     public bool GoogleShared { get; set; }
+
+    public AlbumImageSize? Size { get; set; }
 }
 
 public sealed class PendingAlbumCreationPhoto
@@ -745,6 +772,8 @@ public sealed class PendingAlbumCreationPhoto
     public required string LocalPath { get; set; }
     public string? DriveFileId { get; set; }
     public string? ThumbnailDriveFileId { get; set; }
+    public int Width { get; set; }
+    public int Height { get; set; }
     public PhotoReference? Reference { get; set; }
 }
 

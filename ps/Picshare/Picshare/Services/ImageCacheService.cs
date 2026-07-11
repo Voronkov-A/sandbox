@@ -145,12 +145,39 @@ public sealed class ImageCacheService
         AlbumImageCacheReadMode originalReadMode,
         CancellationToken cancellationToken)
     {
+        return await LoadDetailedThumbnailBitmapAsync(
+            albumId,
+            photoId,
+            originalCacheFileName,
+            originalDownloadUrl,
+            httpClient,
+            220,
+            150,
+            detailedReadMode,
+            originalReadMode,
+            cancellationToken);
+    }
+
+    public async Task<AlbumDetailedThumbnailBitmapLoadResult> LoadDetailedThumbnailBitmapAsync(
+        string albumId,
+        string photoId,
+        string originalCacheFileName,
+        string originalDownloadUrl,
+        HttpClient httpClient,
+        int maxPixelWidth,
+        int maxPixelHeight,
+        AlbumImageCacheReadMode detailedReadMode,
+        AlbumImageCacheReadMode originalReadMode,
+        CancellationToken cancellationToken)
+    {
         return await LoadDetailedThumbnailBitmapCoreAsync(
             albumId,
             photoId,
             originalCacheFileName,
             originalDownloadUrl,
             httpClient,
+            maxPixelWidth,
+            maxPixelHeight,
             detailedReadMode,
             originalReadMode,
             retryInvalidOriginalCacheEntry: true,
@@ -163,12 +190,14 @@ public sealed class ImageCacheService
         string originalCacheFileName,
         string originalDownloadUrl,
         HttpClient httpClient,
+        int maxPixelWidth,
+        int maxPixelHeight,
         AlbumImageCacheReadMode detailedReadMode,
         AlbumImageCacheReadMode originalReadMode,
         bool retryInvalidOriginalCacheEntry,
         CancellationToken cancellationToken)
     {
-        var cacheFileName = GetDetailedThumbnailCacheFileName(photoId);
+        var cacheFileName = GetDetailedThumbnailCacheFileName(photoId, maxPixelWidth, maxPixelHeight);
         var originalImageLoaded = false;
         try
         {
@@ -191,6 +220,8 @@ public sealed class ImageCacheService
                         original,
                         albumId,
                         originalCacheFileName,
+                        maxPixelWidth,
+                        maxPixelHeight,
                         cancellationToken);
                 },
                 cancellationToken);
@@ -208,6 +239,8 @@ public sealed class ImageCacheService
                 originalCacheFileName,
                 originalDownloadUrl,
                 httpClient,
+                maxPixelWidth,
+                maxPixelHeight,
                 detailedReadMode,
                 originalReadMode,
                 retryInvalidOriginalCacheEntry: false,
@@ -242,12 +275,39 @@ public sealed class ImageCacheService
         AlbumImageCacheReadMode originalReadMode,
         CancellationToken cancellationToken)
     {
+        return await WarmDetailedThumbnailAsync(
+            albumId,
+            photoId,
+            originalCacheFileName,
+            originalDownloadUrl,
+            httpClient,
+            220,
+            150,
+            detailedReadMode,
+            originalReadMode,
+            cancellationToken);
+    }
+
+    public async Task<AlbumDetailedThumbnailWarmResult> WarmDetailedThumbnailAsync(
+        string albumId,
+        string photoId,
+        string originalCacheFileName,
+        string originalDownloadUrl,
+        HttpClient httpClient,
+        int maxPixelWidth,
+        int maxPixelHeight,
+        AlbumImageCacheReadMode detailedReadMode,
+        AlbumImageCacheReadMode originalReadMode,
+        CancellationToken cancellationToken)
+    {
         return await WarmDetailedThumbnailCoreAsync(
             albumId,
             photoId,
             originalCacheFileName,
             originalDownloadUrl,
             httpClient,
+            maxPixelWidth,
+            maxPixelHeight,
             detailedReadMode,
             originalReadMode,
             retryInvalidOriginalCacheEntry: true,
@@ -260,6 +320,8 @@ public sealed class ImageCacheService
         string originalCacheFileName,
         string originalDownloadUrl,
         HttpClient httpClient,
+        int maxPixelWidth,
+        int maxPixelHeight,
         AlbumImageCacheReadMode detailedReadMode,
         AlbumImageCacheReadMode originalReadMode,
         bool retryInvalidOriginalCacheEntry,
@@ -270,7 +332,7 @@ public sealed class ImageCacheService
         {
             var detailedThumbnailLoaded = await WarmEncodedImageAsync(
                 albumId,
-                GetDetailedThumbnailCacheFileName(photoId),
+                GetDetailedThumbnailCacheFileName(photoId, maxPixelWidth, maxPixelHeight),
                 AlbumImageCacheKind.DetailedThumbnail,
                 detailedReadMode,
                 async () =>
@@ -287,6 +349,8 @@ public sealed class ImageCacheService
                         original,
                         albumId,
                         originalCacheFileName,
+                        maxPixelWidth,
+                        maxPixelHeight,
                         cancellationToken);
                 },
                 cancellationToken);
@@ -303,6 +367,8 @@ public sealed class ImageCacheService
                 originalCacheFileName,
                 originalDownloadUrl,
                 httpClient,
+                maxPixelWidth,
+                maxPixelHeight,
                 detailedReadMode,
                 originalReadMode,
                 retryInvalidOriginalCacheEntry: false,
@@ -1537,9 +1603,9 @@ public sealed class ImageCacheService
         return $"{photoId}-thumbnail.jpg";
     }
 
-    private static string GetDetailedThumbnailCacheFileName(string photoId)
+    private static string GetDetailedThumbnailCacheFileName(string photoId, int maxPixelWidth, int maxPixelHeight)
     {
-        return $"{photoId}-detailed-220x150.jpg";
+        return $"{photoId}-detailed-{Math.Max(1, maxPixelWidth)}x{Math.Max(1, maxPixelHeight)}.jpg";
     }
 
     private static async Task<Bitmap> DecodeBitmapAsync(byte[] bytes, CancellationToken cancellationToken)
@@ -1830,11 +1896,13 @@ public sealed class ImageCacheService
         AlbumImageCacheLoadResult original,
         string albumId,
         string originalCacheFileName,
+        int maxPixelWidth,
+        int maxPixelHeight,
         CancellationToken cancellationToken)
     {
         try
         {
-            return CreateDisplayImageStream(original.Bytes, 220, 150, cancellationToken);
+            return CreateDisplayImageStream(original.Bytes, Math.Max(1, maxPixelWidth), Math.Max(1, maxPixelHeight), cancellationToken);
         }
         catch (OperationCanceledException)
         {
