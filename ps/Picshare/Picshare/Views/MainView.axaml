@@ -1536,6 +1536,13 @@
                                Maximum="8"
                                Increment="1"/>
               </StackPanel>
+              <StackPanel Spacing="5">
+                <TextBlock Text="Zoom power" FontWeight="SemiBold"/>
+                <NumericUpDown Value="{Binding ZoomPower}"
+                               Minimum="2"
+                               Maximum="10000"
+                               Increment="1"/>
+              </StackPanel>
               <StackPanel Spacing="6">
                 <TextBlock Text="Image cache" FontWeight="SemiBold"/>
                 <CheckBox IsChecked="{Binding CacheThumbnails}">
@@ -2867,21 +2874,24 @@
                 PointerPressed="PhotoViewer_PointerPressed"
                 PointerMoved="PhotoViewer_PointerMoved"
                 PointerReleased="PhotoViewer_PointerReleased"
+                PointerCaptureLost="PhotoViewer_PointerCaptureLost"
                 PointerWheelChanged="PhotoViewer_PointerWheelChanged">
           <Grid>
             <ScrollViewer x:Name="PhotoViewerScrollViewer"
-                          HorizontalScrollBarVisibility="Auto"
-                          VerticalScrollBarVisibility="Auto">
-              <Image x:Name="PhotoViewerImageControl"
-                     Source="{Binding PhotoViewerImage}"
-                     Stretch="Uniform"
-                     RenderTransformOrigin="50%,50%"
-                     HorizontalAlignment="Center"
-                     VerticalAlignment="Center">
-                <Image.RenderTransform>
-                  <RotateTransform Angle="{Binding PhotoViewerRotationDegrees}"/>
-                </Image.RenderTransform>
-              </Image>
+                          HorizontalScrollBarVisibility="Hidden"
+                          VerticalScrollBarVisibility="Hidden"
+                          SizeChanged="PhotoViewerScrollViewer_SizeChanged">
+              <Canvas x:Name="PhotoViewerImageHost"
+                      ClipToBounds="True">
+                <Image x:Name="PhotoViewerImageControl"
+                       Source="{Binding PhotoViewerImage}"
+                       Stretch="Uniform"
+                       RenderTransformOrigin="50%,50%">
+                  <Image.RenderTransform>
+                    <RotateTransform Angle="{Binding PhotoViewerRotationDegrees}"/>
+                  </Image.RenderTransform>
+                </Image>
+              </Canvas>
             </ScrollViewer>
             <Grid Width="92"
                   Height="48"
@@ -2922,9 +2932,8 @@
                   HorizontalAlignment="Stretch"
                   VerticalAlignment="Top"
                   IsVisible="{Binding IsPhotoViewerActionsVisible}">
-              <Grid ColumnDefinitions="92,*,42"
-                    Margin="8,0">
-                <Border Grid.Column="0"
+              <Grid Margin="8,0">
+                <Border
                         Width="92"
                         Height="42"
                         Background="White"
@@ -2955,7 +2964,7 @@
                                VerticalAlignment="Center"/>
                   </Grid>
                 </Border>
-                <Border Grid.Column="1"
+                <Border
                         Height="56"
                         Padding="8,0"
                         Background="#80FFFFFF"
@@ -2981,8 +2990,7 @@
                                VerticalAlignment="Center"/>
                   </Border>
                 </Border>
-                <Button Grid.Column="2"
-                        Classes="footer-action photo-viewer-footer-action"
+                <Button Classes="footer-action photo-viewer-footer-action"
                         Command="{Binding ClosePhotoViewerCommand}"
                         Width="42"
                         Height="42"
@@ -3000,6 +3008,41 @@
                   </Canvas>
                 </Button>
               </Grid>
+            </Grid>
+            <Grid Width="42"
+                  Height="180"
+                  HorizontalAlignment="Right"
+                  VerticalAlignment="Center"
+                  Margin="0,0,8,0"
+                  IsVisible="{Binding IsPhotoViewerActionsVisible}">
+              <Border Width="10"
+                      Background="#FAFAFA"
+                      BorderBrush="Black"
+                      BorderThickness="2"
+                      CornerRadius="5"
+                      HorizontalAlignment="Center"
+                      VerticalAlignment="Stretch"
+                      Margin="0,14"
+                      IsHitTestVisible="False"/>
+              <Slider x:Name="PhotoViewerZoomSlider"
+                      Minimum="0"
+                      Maximum="1"
+                      Value="0"
+                      TickFrequency="0.01"
+                      Orientation="Vertical"
+                      Margin="0,8"
+                      Opacity="0.01"
+                      ValueChanged="PhotoViewerZoomSlider_ValueChanged"/>
+              <Border x:Name="PhotoViewerZoomSliderThumb"
+                      Width="24"
+                      Height="24"
+                      Background="#FAFAFA"
+                      BorderBrush="Black"
+                      BorderThickness="2"
+                      CornerRadius="12"
+                      HorizontalAlignment="Center"
+                      VerticalAlignment="Top"
+                      IsHitTestVisible="False"/>
             </Grid>
             <Grid Height="56"
                   Margin="0,56,0,0"
@@ -3071,39 +3114,43 @@
                     </ItemsControl.ItemsPanel>
                     <ItemsControl.ItemTemplate>
                       <DataTemplate x:DataType="vm:AlbumPhotoViewModel">
-                        <Button Width="68"
-                                Height="52"
+                        <Border BorderBrush="Black"
+                                BorderThickness="1"
                                 Margin="0,0,6,0"
-                                Padding="0"
-                                Click="DuplicatePhotoViewerItem_Click"
-                                BorderBrush="{Binding CardBorderBrush}"
-                                BorderThickness="{Binding CardBorderThickness}"
                                 ClipToBounds="True">
-                          <Grid>
-                            <Image Source="{Binding Image}"
-                                   Stretch="UniformToFill"
-                                   RenderTransformOrigin="50%,50%">
-                              <Image.RenderTransform>
-                                <RotateTransform Angle="{Binding RotationDegrees}"/>
-                              </Image.RenderTransform>
-                            </Image>
-                            <Border Width="22"
-                                    Height="22"
-                                    HorizontalAlignment="Right"
-                                    VerticalAlignment="Bottom"
-                                    Background="#1E8E3E"
-                                    BorderBrush="White"
-                                    BorderThickness="1"
-                                    IsVisible="{Binding IsBestMarkerVisible}">
-                              <TextBlock Text="V"
-                                         Foreground="White"
-                                         FontSize="16"
-                                         FontWeight="Bold"
-                                         HorizontalAlignment="Center"
-                                         VerticalAlignment="Center"/>
-                            </Border>
-                          </Grid>
-                        </Button>
+                          <Button Width="{Binding DuplicateStripImageWidth}"
+                                  Height="50"
+                                  Padding="0"
+                                  Click="DuplicatePhotoViewerItem_Click"
+                                  BorderBrush="{Binding CardBorderBrush}"
+                                  BorderThickness="{Binding CardBorderThickness}"
+                                  ClipToBounds="True">
+                            <Grid>
+                              <Image Source="{Binding Image}"
+                                     Stretch="UniformToFill"
+                                     RenderTransformOrigin="50%,50%">
+                                <Image.RenderTransform>
+                                  <RotateTransform Angle="{Binding RotationDegrees}"/>
+                                </Image.RenderTransform>
+                              </Image>
+                              <Border Width="22"
+                                      Height="22"
+                                      HorizontalAlignment="Right"
+                                      VerticalAlignment="Bottom"
+                                      Background="#1E8E3E"
+                                      BorderBrush="White"
+                                      BorderThickness="1"
+                                      IsVisible="{Binding IsBestMarkerVisible}">
+                                <TextBlock Text="V"
+                                           Foreground="White"
+                                           FontSize="16"
+                                           FontWeight="Bold"
+                                           HorizontalAlignment="Center"
+                                           VerticalAlignment="Center"/>
+                              </Border>
+                            </Grid>
+                          </Button>
+                        </Border>
                       </DataTemplate>
                     </ItemsControl.ItemTemplate>
                   </ItemsControl>
@@ -3710,6 +3757,24 @@
                         <MenuItem Header="Rotate right"
                                   Command="{Binding RotateCurrentPhotoRightCommand}"
                                   IsEnabled="{Binding CanDownloadCurrentPhoto}"/>
+                        <MenuItem Header="Aspect ratio...">
+                          <MenuItem Header="Original"
+                                    Command="{Binding SetPhotoViewerOriginalAspectRatioCommand}">
+                            <MenuItem.Icon>
+                              <TextBlock Text="V"
+                                         FontWeight="Bold"
+                                         IsVisible="{Binding IsPhotoViewerOriginalAspectRatioMode}"/>
+                            </MenuItem.Icon>
+                          </MenuItem>
+                          <MenuItem Header="Stretch to fit"
+                                    Command="{Binding SetPhotoViewerStretchToFitAspectRatioCommand}">
+                            <MenuItem.Icon>
+                              <TextBlock Text="V"
+                                         FontWeight="Bold"
+                                         IsVisible="{Binding IsPhotoViewerStretchToFitAspectRatioMode}"/>
+                            </MenuItem.Icon>
+                          </MenuItem>
+                        </MenuItem>
                         <MenuItem Header="Recent..."
                                   ItemsSource="{Binding PhotoViewerRecentPhotos}"
                                   IsEnabled="{Binding CanOpenPreviousRecentPhoto}"

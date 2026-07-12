@@ -77,6 +77,10 @@ public sealed record PhotoReference
     public required string ThumbnailDownloadUrl { get; init; }
 
     public required string ThumbnailContentType { get; init; }
+
+    public int Width { get; init; }
+
+    public int Height { get; init; }
 }
 
 public sealed record FeedbackReviewerIdentity

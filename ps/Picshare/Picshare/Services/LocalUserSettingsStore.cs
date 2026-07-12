@@ -58,6 +58,8 @@ public sealed class LocalUserSettings
 {
     public const int DefaultMaximumParallelism = 8;
     public const int DefaultPicturesPerRow = 4;
+    public const int DefaultZoomPower = 10;
+    public const string DefaultPhotoViewerAspectRatioMode = "original";
 
     public string AnonymousReviewerName { get; set; } = "";
 
@@ -74,6 +76,10 @@ public sealed class LocalUserSettings
     public bool? FixedTabs { get; set; }
 
     public bool? FixedActionPanel { get; set; }
+
+    public int ZoomPower { get; set; } = DefaultZoomPower;
+
+    public string PhotoViewerAspectRatioMode { get; set; } = DefaultPhotoViewerAspectRatioMode;
 
     public int AlbumFastThumbnailMemoryCacheSizeMb { get; set; } = 256;
 

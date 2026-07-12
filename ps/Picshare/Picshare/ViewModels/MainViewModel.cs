@@ -22,6 +22,7 @@ public partial class MainViewModel : ViewModelBase
     private const string FlowReviewTabId = "flow";
     private const int DefaultAlbumImageWidth = 4;
     private const int DefaultAlbumImageHeight = 3;
+    private const double PhotoViewerDuplicateStripImageHeight = 52;
     private const int MaxRecentAlbumCount = 10;
     private const int RecentPhotoCapacity = 5;
     private const int FeedbackUndoCapacity = 10;
@@ -173,6 +174,12 @@ public partial class MainViewModel : ViewModelBase
 
     [ObservableProperty]
     private bool _fixedActionPanel = true;
+
+    [ObservableProperty]
+    private int _zoomPower = LocalUserSettings.DefaultZoomPower;
+
+    [ObservableProperty]
+    private string _photoViewerAspectRatioMode = LocalUserSettings.DefaultPhotoViewerAspectRatioMode;
 
     [ObservableProperty]
     private int _albumFastThumbnailMemoryCacheSizeMb = 256;
@@ -849,6 +856,16 @@ public partial class MainViewModel : ViewModelBase
 
     public string CurrentPhotoScoreText => _selectedViewedPhoto?.ScoreText ?? "";
 
+    public bool IsPhotoViewerOriginalAspectRatioMode => string.Equals(
+        PhotoViewerAspectRatioMode,
+        LocalUserSettings.DefaultPhotoViewerAspectRatioMode,
+        StringComparison.OrdinalIgnoreCase);
+
+    public bool IsPhotoViewerStretchToFitAspectRatioMode => string.Equals(
+        PhotoViewerAspectRatioMode,
+        "stretch-to-fit",
+        StringComparison.OrdinalIgnoreCase);
+
     public MainViewModel()
     {
         _localUserSettingsStore = new LocalUserSettingsStore(_settingsProvider.LocalStorageRootPath);
@@ -875,6 +892,8 @@ public partial class MainViewModel : ViewModelBase
             FixedHeader = localSettings.FixedHeader ?? _settingsProvider.DefaultSettings.FixedHeader ?? true;
             FixedTabs = localSettings.FixedTabs ?? _settingsProvider.DefaultSettings.FixedTabs ?? true;
             FixedActionPanel = localSettings.FixedActionPanel ?? _settingsProvider.DefaultSettings.FixedActionPanel ?? true;
+            ZoomPower = NormalizeZoomPower(localSettings.ZoomPower);
+            PhotoViewerAspectRatioMode = NormalizePhotoViewerAspectRatioMode(localSettings.PhotoViewerAspectRatioMode);
             AlbumFastThumbnailMemoryCacheSizeMb = NormalizeCacheSizeMb(localSettings.AlbumFastThumbnailMemoryCacheSizeMb, 256);
             AlbumDetailedThumbnailMemoryCacheSizeMb = NormalizeCacheSizeMb(localSettings.AlbumDetailedThumbnailMemoryCacheSizeMb, 512);
             AlbumOriginalImageMemoryCacheSizeMb = NormalizeCacheSizeMb(localSettings.AlbumOriginalImageMemoryCacheSizeMb, 256);
@@ -952,6 +971,18 @@ public partial class MainViewModel : ViewModelBase
     private async Task RotateCurrentPhotoRightAsync()
     {
         await RotateCurrentPhotoAsync(90);
+    }
+
+    [RelayCommand]
+    private void SetPhotoViewerOriginalAspectRatio()
+    {
+        PhotoViewerAspectRatioMode = LocalUserSettings.DefaultPhotoViewerAspectRatioMode;
+    }
+
+    [RelayCommand]
+    private void SetPhotoViewerStretchToFitAspectRatio()
+    {
+        PhotoViewerAspectRatioMode = "stretch-to-fit";
     }
 
     [RelayCommand]
@@ -3312,7 +3343,9 @@ public partial class MainViewModel : ViewModelBase
                 photo.Id,
                 photo.FileName,
                 photo.DownloadUrl,
-                photo.ThumbnailDownloadUrl));
+                photo.ThumbnailDownloadUrl,
+                photo.Width,
+                photo.Height));
         }
 
         _albumImageListLoader.SetPhotos(Photos.ToList(), GetMaximumParallelism());
@@ -5795,6 +5828,7 @@ public partial class MainViewModel : ViewModelBase
                 PhotoViewerDuplicatePhotos.Add(member);
             }
         }
+        UpdatePhotoViewerDuplicateStripImageSize();
 
         if (IsPhotoViewerVisible)
         {
@@ -5814,6 +5848,35 @@ public partial class MainViewModel : ViewModelBase
 
         UpdateCurrentPhotoActionVisibility();
         NotifyBookmarkStateChanged();
+    }
+
+    private void UpdatePhotoViewerDuplicateStripImageSize()
+    {
+        var photos = PhotoViewerDuplicatePhotos.ToList();
+        var size = photos
+            .Where(photo => photo.OriginalWidth > 0 && photo.OriginalHeight > 0)
+            .GroupBy(photo => (photo.OriginalWidth, photo.OriginalHeight))
+            .MaxBy(group => group.Count())?
+            .Key;
+
+        var width = size is { OriginalWidth: > 0, OriginalHeight: > 0 }
+            ? PhotoViewerDuplicateStripImageHeight * size.Value.OriginalWidth / size.Value.OriginalHeight
+            : GetFallbackPhotoViewerDuplicateStripImageWidth();
+        width = Math.Clamp(Math.Round(width), 24, 180);
+
+        foreach (var photo in photos)
+        {
+            photo.DuplicateStripImageWidth = width;
+        }
+    }
+
+    private double GetFallbackPhotoViewerDuplicateStripImageWidth()
+    {
+        var size = _currentManifest?.Size;
+        var width = size is { Width: > 0, Height: > 0 }
+            ? PhotoViewerDuplicateStripImageHeight * size.Width / size.Height
+            : PhotoViewerDuplicateStripImageHeight * DefaultAlbumImageWidth / DefaultAlbumImageHeight;
+        return width;
     }
 
     private void UpdateCurrentPhotoActionVisibility()
@@ -6747,6 +6810,8 @@ public partial class MainViewModel : ViewModelBase
             FixedHeader = FixedHeader,
             FixedTabs = FixedTabs,
             FixedActionPanel = FixedActionPanel,
+            ZoomPower = NormalizeZoomPower(ZoomPower),
+            PhotoViewerAspectRatioMode = NormalizePhotoViewerAspectRatioMode(PhotoViewerAspectRatioMode),
             AlbumFastThumbnailMemoryCacheSizeMb = GetCacheSizeMb(AlbumFastThumbnailMemoryCacheSizeMb, 256),
             AlbumDetailedThumbnailMemoryCacheSizeMb = GetCacheSizeMb(AlbumDetailedThumbnailMemoryCacheSizeMb, 512),
             AlbumOriginalImageMemoryCacheSizeMb = GetCacheSizeMb(AlbumOriginalImageMemoryCacheSizeMb, 256),
@@ -6843,6 +6908,19 @@ public partial class MainViewModel : ViewModelBase
     private static int NormalizeNumberOfPicturesPerRow(int value)
     {
         return Math.Clamp(value <= 0 ? LocalUserSettings.DefaultPicturesPerRow : value, 1, 8);
+    }
+
+    private static int NormalizeZoomPower(int value)
+    {
+        return Math.Clamp(value <= 0 ? LocalUserSettings.DefaultZoomPower : value, 2, 10000);
+    }
+
+    private static string NormalizePhotoViewerAspectRatioMode(string? value)
+    {
+        return string.Equals(value, "stretch-to-fit", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(value, "full-wide", StringComparison.OrdinalIgnoreCase)
+            ? "stretch-to-fit"
+            : LocalUserSettings.DefaultPhotoViewerAspectRatioMode;
     }
 
     private static int NormalizeCacheSizeMb(int value, int defaultValue)
@@ -6942,6 +7020,26 @@ public partial class MainViewModel : ViewModelBase
 
     partial void OnFixedActionPanelChanged(bool value)
     {
+        PersistLocalUserSettingsIfReady();
+    }
+
+    partial void OnZoomPowerChanged(int value)
+    {
+        ZoomPower = NormalizeZoomPower(value);
+        PersistLocalUserSettingsIfReady();
+    }
+
+    partial void OnPhotoViewerAspectRatioModeChanged(string value)
+    {
+        var normalized = NormalizePhotoViewerAspectRatioMode(value);
+        if (!string.Equals(value, normalized, StringComparison.Ordinal))
+        {
+            PhotoViewerAspectRatioMode = normalized;
+            return;
+        }
+
+        OnPropertyChanged(nameof(IsPhotoViewerOriginalAspectRatioMode));
+        OnPropertyChanged(nameof(IsPhotoViewerStretchToFitAspectRatioMode));
         PersistLocalUserSettingsIfReady();
     }
 

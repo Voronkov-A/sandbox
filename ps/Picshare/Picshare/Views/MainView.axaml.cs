@@ -7,6 +7,7 @@ using Avalonia.Media;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
+using Picshare.Services;
 using Picshare.ViewModels;
 
 namespace Picshare.Views;
@@ -14,7 +15,6 @@ namespace Picshare.Views;
 public partial class MainView : UserControl
 {
     private const double MinimumPhotoViewerZoom = 1;
-    private const double MaximumPhotoViewerZoom = 8;
     private const double AlbumReviewHeaderScrollStep = 180;
     private const double AlbumReviewHeaderDragThreshold = 6;
     private const double AlbumReviewSwipeThreshold = 72;
@@ -41,10 +41,14 @@ public partial class MainView : UserControl
     private double _photoViewerZoom = MinimumPhotoViewerZoom;
     private double _pinchStartDistance;
     private double _pinchStartZoom = MinimumPhotoViewerZoom;
+    private Point _pinchStartCenter;
     private bool _photoViewerPointerPressed;
     private bool _photoViewerPointerMoved;
     private bool _photoViewerPinchActive;
     private Point _photoViewerPointerStart;
+    private Point _photoViewerPointerStartImageOrigin;
+    private Point _photoViewerImageOrigin;
+    private bool _isUpdatingPhotoViewerZoomSlider;
     private object? _albumReviewSwipePointer;
     private Point _albumReviewSwipeStart;
     private object? _albumReviewHeaderDragPointer;
@@ -129,6 +133,11 @@ public partial class MainView : UserControl
             PhotoViewerDuplicateStrip_PointerCaptureLost,
             RoutingStrategies.Tunnel,
             handledEventsToo: true);
+        PhotoViewerScrollViewer.AddHandler(
+            InputElement.PointerWheelChangedEvent,
+            PhotoViewer_PointerWheelChanged,
+            RoutingStrategies.Tunnel,
+            handledEventsToo: true);
         _ = Dispatcher.UIThread.InvokeAsync(UpdateAlbumReviewTabScrollButtonVisibility, DispatcherPriority.Loaded);
         _ = Dispatcher.UIThread.InvokeAsync(UpdatePhotoViewerDuplicateStripScrollButtonVisibility, DispatcherPriority.Loaded);
         _ = Dispatcher.UIThread.InvokeAsync(UpdateFooterActionButtonWidths, DispatcherPriority.Loaded);
@@ -192,6 +201,11 @@ public partial class MainView : UserControl
         else if (e.PropertyName is nameof(MainViewModel.IsPhotoViewerVisible))
         {
             _ = Dispatcher.UIThread.InvokeAsync(FocusPhotoViewerOverlay, DispatcherPriority.Render);
+        }
+        else if (e.PropertyName is nameof(MainViewModel.ZoomPower)
+            or nameof(MainViewModel.PhotoViewerAspectRatioMode))
+        {
+            _ = Dispatcher.UIThread.InvokeAsync(ResetPhotoViewerZoom, DispatcherPriority.Render);
         }
         else if (e.PropertyName is nameof(MainViewModel.ActiveReviewTabId)
             or nameof(MainViewModel.UncategorizedTabHeader)
@@ -1812,7 +1826,7 @@ public partial class MainView : UserControl
         }
 
         var factor = e.Delta.Y > 0 ? 1.15 : 1 / 1.15;
-        SetPhotoViewerZoom(_photoViewerZoom * factor);
+        SetPhotoViewerZoom(_photoViewerZoom * factor, e.GetPosition(PhotoViewerScrollViewer));
         e.Handled = true;
     }
 
@@ -1821,12 +1835,15 @@ public partial class MainView : UserControl
         _photoViewerPointers[e.Pointer] = e.GetPosition(PhotoViewerViewport);
         _photoViewerPointerPressed = _photoViewerPointers.Count == 1;
         _photoViewerPointerStart = e.GetPosition(PhotoViewerViewport);
+        _photoViewerPointerStartImageOrigin = _photoViewerImageOrigin;
         _photoViewerPointerMoved = false;
+        e.Pointer.Capture(PhotoViewerViewport);
 
         if (_photoViewerPointers.Count == 2)
         {
             _pinchStartDistance = GetActivePointerDistance();
             _pinchStartZoom = _photoViewerZoom;
+            _pinchStartCenter = GetActivePointerCenter(PhotoViewerScrollViewer);
             _photoViewerPinchActive = true;
         }
     }
@@ -1842,7 +1859,16 @@ public partial class MainView : UserControl
         _photoViewerPointerMoved = true;
         if (_photoViewerPointers.Count >= 2 && _pinchStartDistance > 0)
         {
-            SetPhotoViewerZoom(_pinchStartZoom * GetActivePointerDistance() / _pinchStartDistance);
+            SetPhotoViewerZoom(_pinchStartZoom * GetActivePointerDistance() / _pinchStartDistance, _pinchStartCenter);
+            _pinchStartCenter = GetActivePointerCenter(PhotoViewerScrollViewer);
+            _pinchStartZoom = _photoViewerZoom;
+            _pinchStartDistance = GetActivePointerDistance();
+            e.Handled = true;
+        }
+        else if (_photoViewerPointers.Count == 1 && _photoViewerZoom > MinimumPhotoViewerZoom)
+        {
+            var delta = e.GetPosition(PhotoViewerViewport) - _photoViewerPointerStart;
+            SetPhotoViewerImageOrigin(_photoViewerPointerStartImageOrigin + delta);
             e.Handled = true;
         }
     }
@@ -1859,11 +1885,13 @@ public partial class MainView : UserControl
         var swipeDirection = GetPhotoViewerSwipeDirection(delta);
 
         _photoViewerPointers.Remove(e.Pointer);
+        e.Pointer.Capture(null);
 
         if (_photoViewerPointers.Count == 2)
         {
             _pinchStartDistance = GetActivePointerDistance();
             _pinchStartZoom = _photoViewerZoom;
+            _pinchStartCenter = GetActivePointerCenter(PhotoViewerScrollViewer);
         }
         else if (_photoViewerPointers.Count < 2)
         {
@@ -1888,34 +1916,78 @@ public partial class MainView : UserControl
         }
     }
 
+    private void PhotoViewer_PointerCaptureLost(object? sender, PointerCaptureLostEventArgs e)
+    {
+        if (_photoViewerPointers.Remove(e.Pointer) && _photoViewerPointers.Count < 2)
+        {
+            _pinchStartDistance = 0;
+            _photoViewerPinchActive = false;
+        }
+    }
+
     private void ResetPhotoViewerZoom()
     {
         _photoViewerPointers.Clear();
-        _photoViewerZoom = MinimumPhotoViewerZoom;
-
-        if (DataContext is not MainViewModel { PhotoViewerImage: { } image })
+        if (DataContext is not MainViewModel { PhotoViewerImage: { } image } viewModel)
         {
             return;
         }
 
+        _photoViewerZoom = MinimumPhotoViewerZoom;
         var viewportWidth = Math.Max(1, PhotoViewerScrollViewer.Bounds.Width > 1 ? PhotoViewerScrollViewer.Bounds.Width : Bounds.Width);
         var viewportHeight = Math.Max(1, PhotoViewerScrollViewer.Bounds.Height > 1 ? PhotoViewerScrollViewer.Bounds.Height : Bounds.Height);
         var pixelWidth = Math.Max(1, image.PixelSize.Width);
         var pixelHeight = Math.Max(1, image.PixelSize.Height);
-        var isQuarterTurn = DataContext is MainViewModel viewModel &&
-            viewModel.PhotoViewerRotationDegrees is 90 or 270;
+        var isQuarterTurn = viewModel.PhotoViewerRotationDegrees is 90 or 270;
         var effectiveWidth = isQuarterTurn ? pixelHeight : pixelWidth;
         var effectiveHeight = isQuarterTurn ? pixelWidth : pixelHeight;
         var fitScale = Math.Min(viewportWidth / effectiveWidth, viewportHeight / effectiveHeight);
+        var maximumZoom = GetMaximumPhotoViewerZoom(image);
 
-        _photoViewerBaseWidth = pixelWidth * fitScale;
-        _photoViewerBaseHeight = pixelHeight * fitScale;
+        if (viewModel.IsPhotoViewerStretchToFitAspectRatioMode)
+        {
+            _photoViewerBaseWidth = isQuarterTurn ? viewportHeight : viewportWidth;
+            _photoViewerBaseHeight = isQuarterTurn ? viewportWidth : viewportHeight;
+            PhotoViewerImageControl.Stretch = Stretch.Fill;
+        }
+        else
+        {
+            _photoViewerBaseWidth = pixelWidth * fitScale;
+            _photoViewerBaseHeight = pixelHeight * fitScale;
+            PhotoViewerImageControl.Stretch = Stretch.Uniform;
+        }
+        PhotoViewerZoomSlider.Maximum = 1;
+        SetPhotoViewerSliderValue(_photoViewerZoom);
+        var imageWidth = _photoViewerBaseWidth * _photoViewerZoom;
+        var imageHeight = _photoViewerBaseHeight * _photoViewerZoom;
+        var viewport = GetPhotoViewerViewportSize();
+        _photoViewerImageOrigin = new Point(
+            (viewport.Width - imageWidth) / 2,
+            (viewport.Height - imageHeight) / 2);
         ApplyPhotoViewerZoom();
     }
 
     private void SetPhotoViewerZoom(double zoom)
     {
-        _photoViewerZoom = Math.Clamp(zoom, MinimumPhotoViewerZoom, MaximumPhotoViewerZoom);
+        SetPhotoViewerZoom(zoom, new Point(PhotoViewerScrollViewer.Bounds.Width / 2, PhotoViewerScrollViewer.Bounds.Height / 2));
+    }
+
+    private void SetPhotoViewerZoom(double zoom, Point anchor)
+    {
+        var maximumZoom = GetMaximumPhotoViewerZoom();
+        var oldWidth = Math.Max(1, PhotoViewerImageControl.Bounds.Width > 1 ? PhotoViewerImageControl.Bounds.Width : _photoViewerBaseWidth * _photoViewerZoom);
+        var oldHeight = Math.Max(1, PhotoViewerImageControl.Bounds.Height > 1 ? PhotoViewerImageControl.Bounds.Height : _photoViewerBaseHeight * _photoViewerZoom);
+        var relativeX = (anchor.X - _photoViewerImageOrigin.X) / oldWidth;
+        var relativeY = (anchor.Y - _photoViewerImageOrigin.Y) / oldHeight;
+
+        _photoViewerZoom = Math.Clamp(zoom, MinimumPhotoViewerZoom, maximumZoom);
+        SetPhotoViewerSliderValue(_photoViewerZoom);
+
+        var newWidth = Math.Max(1, _photoViewerBaseWidth * _photoViewerZoom);
+        var newHeight = Math.Max(1, _photoViewerBaseHeight * _photoViewerZoom);
+        _photoViewerImageOrigin = ClampPhotoViewerImageOrigin(new Point(
+            anchor.X - relativeX * newWidth,
+            anchor.Y - relativeY * newHeight));
         ApplyPhotoViewerZoom();
     }
 
@@ -1928,6 +2000,113 @@ public partial class MainView : UserControl
 
         PhotoViewerImageControl.Width = _photoViewerBaseWidth * _photoViewerZoom;
         PhotoViewerImageControl.Height = _photoViewerBaseHeight * _photoViewerZoom;
+        var viewport = GetPhotoViewerViewportSize();
+        PhotoViewerImageHost.Width = viewport.Width;
+        PhotoViewerImageHost.Height = viewport.Height;
+        _photoViewerImageOrigin = ClampPhotoViewerImageOrigin(_photoViewerImageOrigin);
+        Canvas.SetLeft(PhotoViewerImageControl, _photoViewerImageOrigin.X);
+        Canvas.SetTop(PhotoViewerImageControl, _photoViewerImageOrigin.Y);
+    }
+
+    private void SetPhotoViewerImageOrigin(Point origin)
+    {
+        _photoViewerImageOrigin = ClampPhotoViewerImageOrigin(origin);
+        Canvas.SetLeft(PhotoViewerImageControl, _photoViewerImageOrigin.X);
+        Canvas.SetTop(PhotoViewerImageControl, _photoViewerImageOrigin.Y);
+    }
+
+    private Point ClampPhotoViewerImageOrigin(Point origin)
+    {
+        var viewport = GetPhotoViewerViewportSize();
+        var imageWidth = Math.Max(1, _photoViewerBaseWidth * _photoViewerZoom);
+        var imageHeight = Math.Max(1, _photoViewerBaseHeight * _photoViewerZoom);
+        return new Point(
+            ClampPhotoViewerAxisOrigin(origin.X, viewport.Width, imageWidth),
+            ClampPhotoViewerAxisOrigin(origin.Y, viewport.Height, imageHeight));
+    }
+
+    private static double ClampPhotoViewerAxisOrigin(double value, double viewportSize, double imageSize)
+    {
+        if (imageSize <= viewportSize)
+        {
+            return (viewportSize - imageSize) / 2;
+        }
+
+        return Math.Clamp(value, viewportSize - imageSize, 0);
+    }
+
+    private Size GetPhotoViewerViewportSize()
+    {
+        return new Size(
+            Math.Max(1, PhotoViewerScrollViewer.Bounds.Width > 1 ? PhotoViewerScrollViewer.Bounds.Width : Bounds.Width),
+            Math.Max(1, PhotoViewerScrollViewer.Bounds.Height > 1 ? PhotoViewerScrollViewer.Bounds.Height : Bounds.Height));
+    }
+
+    private double GetMaximumPhotoViewerZoom()
+    {
+        return DataContext is MainViewModel { PhotoViewerImage: { } image }
+            ? GetMaximumPhotoViewerZoom(image)
+            : MinimumPhotoViewerZoom;
+    }
+
+    private double GetMaximumPhotoViewerZoom(Avalonia.Media.Imaging.Bitmap image)
+    {
+        var configuredZoomPower = DataContext is MainViewModel viewModel
+            ? Math.Clamp(viewModel.ZoomPower, 2, 10000)
+            : LocalUserSettings.DefaultZoomPower;
+        var imageLimit = Math.Max(1, Math.Max(image.PixelSize.Width, image.PixelSize.Height));
+        return Math.Max(MinimumPhotoViewerZoom, Math.Min(configuredZoomPower, imageLimit));
+    }
+
+    private void SetPhotoViewerSliderValue(double value)
+    {
+        _isUpdatingPhotoViewerZoomSlider = true;
+        PhotoViewerZoomSlider.Value = GetPhotoViewerZoomSliderPosition(value);
+        UpdatePhotoViewerZoomSliderThumb(value);
+        _isUpdatingPhotoViewerZoomSlider = false;
+    }
+
+    private void UpdatePhotoViewerZoomSliderThumb(double value)
+    {
+        const double trackInset = 14;
+        const double thumbHeight = 24;
+        var availableHeight = Math.Max(1, PhotoViewerZoomSliderThumb.Parent is Control parent && parent.Bounds.Height > 1
+            ? parent.Bounds.Height
+            : 180);
+        var trackHeight = Math.Max(1, availableHeight - trackInset * 2);
+        var normalized = GetPhotoViewerZoomSliderPosition(value);
+        var thumbCenterY = trackInset + trackHeight * (1 - normalized);
+        PhotoViewerZoomSliderThumb.RenderTransform = new TranslateTransform(0, thumbCenterY - thumbHeight / 2);
+    }
+
+    private double GetPhotoViewerZoomSliderPosition(double zoom)
+    {
+        var maximumZoom = Math.Max(MinimumPhotoViewerZoom + 0.001, GetMaximumPhotoViewerZoom());
+        var clampedZoom = Math.Clamp(zoom, MinimumPhotoViewerZoom, maximumZoom);
+        return Math.Log(clampedZoom / MinimumPhotoViewerZoom) /
+            Math.Log(maximumZoom / MinimumPhotoViewerZoom);
+    }
+
+    private double GetPhotoViewerZoomFromSliderPosition(double position)
+    {
+        var maximumZoom = Math.Max(MinimumPhotoViewerZoom + 0.001, GetMaximumPhotoViewerZoom());
+        var normalized = Math.Clamp(position, 0, 1);
+        return MinimumPhotoViewerZoom * Math.Pow(maximumZoom / MinimumPhotoViewerZoom, normalized);
+    }
+
+    private void PhotoViewerZoomSlider_ValueChanged(object? sender, Avalonia.Controls.Primitives.RangeBaseValueChangedEventArgs e)
+    {
+        if (_isUpdatingPhotoViewerZoomSlider || PhotoViewerImageControl.Source is null)
+        {
+            return;
+        }
+
+        SetPhotoViewerZoom(GetPhotoViewerZoomFromSliderPosition(e.NewValue));
+    }
+
+    private void PhotoViewerScrollViewer_SizeChanged(object? sender, SizeChangedEventArgs e)
+    {
+        ResetPhotoViewerZoom();
     }
 
     private double GetActivePointerDistance()
@@ -1941,6 +2120,20 @@ public partial class MainView : UserControl
         var x = points[0].X - points[1].X;
         var y = points[0].Y - points[1].Y;
         return Math.Sqrt(x * x + y * y);
+    }
+
+    private Point GetActivePointerCenter(Visual relativeTo)
+    {
+        if (_photoViewerPointers.Count < 2)
+        {
+            return new Point(PhotoViewerScrollViewer.Bounds.Width / 2, PhotoViewerScrollViewer.Bounds.Height / 2);
+        }
+
+        var viewportPoint = new Point(
+            _photoViewerPointers.Values.Take(2).Average(point => point.X),
+            _photoViewerPointers.Values.Take(2).Average(point => point.Y));
+        var transform = PhotoViewerViewport.TransformToVisual(relativeTo);
+        return transform?.Transform(viewportPoint) ?? viewportPoint;
     }
 
     private int GetPhotoViewerSwipeDirection(Vector delta)

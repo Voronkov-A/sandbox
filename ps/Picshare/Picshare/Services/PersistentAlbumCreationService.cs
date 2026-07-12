@@ -311,7 +311,9 @@ public sealed class PersistentAlbumCreationService
                     BackendType = "local-file",
                     DownloadUrl = new Uri(storedPath).AbsoluteUri,
                     ThumbnailDownloadUrl = new Uri(thumbnailPath).AbsoluteUri,
-                    ThumbnailContentType = PhotoThumbnailGenerator.ContentType
+                    ThumbnailContentType = PhotoThumbnailGenerator.ContentType,
+                    Width = photo.Width,
+                    Height = photo.Height
                 };
             },
             progress,
@@ -420,7 +422,9 @@ public sealed class PersistentAlbumCreationService
                     DownloadUrl = GoogleDriveRestClient.CreatePublicDownloadUrl(photo.DriveFileId!),
                     ThumbnailDriveFileId = photo.ThumbnailDriveFileId,
                     ThumbnailDownloadUrl = GoogleDriveRestClient.CreatePublicDownloadUrl(photo.ThumbnailDriveFileId!),
-                    ThumbnailContentType = PhotoThumbnailGenerator.ContentType
+                    ThumbnailContentType = PhotoThumbnailGenerator.ContentType,
+                    Width = photo.Width,
+                    Height = photo.Height
                 };
             },
             progress,

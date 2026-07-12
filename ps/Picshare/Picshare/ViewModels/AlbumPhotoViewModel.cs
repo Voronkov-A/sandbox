@@ -28,13 +28,17 @@ public partial class AlbumPhotoViewModel : ObservableObject
         string photoId,
         string fileName,
         string downloadUrl,
-        string thumbnailDownloadUrl)
+        string thumbnailDownloadUrl,
+        int width = 0,
+        int height = 0)
     {
         AlbumId = albumId;
         PhotoId = photoId;
         FileName = fileName;
         DownloadUrl = downloadUrl;
         ThumbnailDownloadUrl = thumbnailDownloadUrl;
+        OriginalWidth = width;
+        OriginalHeight = height;
     }
 
     public string AlbumId { get; }
@@ -46,6 +50,10 @@ public partial class AlbumPhotoViewModel : ObservableObject
     public string DownloadUrl { get; }
 
     public string ThumbnailDownloadUrl { get; }
+
+    public int OriginalWidth { get; }
+
+    public int OriginalHeight { get; }
 
     public string FileExtension
     {
@@ -64,6 +72,9 @@ public partial class AlbumPhotoViewModel : ObservableObject
 
     [ObservableProperty]
     private double _cardHeight = DisplayPixelHeight + 40;
+
+    [ObservableProperty]
+    private double _duplicateStripImageWidth = 68;
 
     private AlbumImageBitmapLease? _imageLease;
     private bool _isApplyingImageLease;
