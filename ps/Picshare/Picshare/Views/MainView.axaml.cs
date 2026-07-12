@@ -21,10 +21,13 @@ public partial class MainView : UserControl
     private const double AlbumReviewSwipeDominance = 1.35;
     private const double ChromeSurfaceHeight = 56;
     private const double FooterActionButtonMaxWidth = 92;
+    private const double FooterActionButtonMinWidth = 5;
     private const double FooterActionButtonCompactThreshold = 70;
     private const double FooterActionButtonSpacing = 8;
     private const double PhotoViewerFooterHorizontalPadding = 16;
     private const double OverlayCornerRadius = 6;
+    private const double PhotoViewerZoomSliderDefaultHeight = 180;
+    private const double PhotoViewerOverlayVerticalGap = 8;
     private const double PhotoViewerDuplicateStripScrollStep = 180;
     private static readonly IReadOnlyList<FilePickerFileType> ZipFileTypeChoices =
     [
@@ -229,7 +232,16 @@ public partial class MainView : UserControl
         else if (e.PropertyName is nameof(MainViewModel.IsPhotoViewerDuplicateStripVisible))
         {
             _ = Dispatcher.UIThread.InvokeAsync(UpdatePhotoViewerDuplicateStripScrollButtonVisibility, DispatcherPriority.Render);
-            _ = Dispatcher.UIThread.InvokeAsync(UpdatePhotoViewerActionFooterShape, DispatcherPriority.Render);
+            _ = Dispatcher.UIThread.InvokeAsync(UpdatePhotoViewerAdaptiveOverlayWidths, DispatcherPriority.Render);
+        }
+        else if (e.PropertyName is nameof(MainViewModel.IsCurrentPhotoScoreVisible)
+            or nameof(MainViewModel.IsPhotoViewerActionsVisible)
+            or nameof(MainViewModel.ShowPhotoViewerPreviousNextButtons)
+            or nameof(MainViewModel.ShouldShowCurrentPhotoUncategorizedAction)
+            or nameof(MainViewModel.ShouldShowCurrentPhotoNiceAction)
+            or nameof(MainViewModel.ShouldShowCurrentPhotoOkAction))
+        {
+            _ = Dispatcher.UIThread.InvokeAsync(UpdatePhotoViewerAdaptiveOverlayWidths, DispatcherPriority.Render);
         }
     }
 
@@ -653,23 +665,136 @@ public partial class MainView : UserControl
         _ = Dispatcher.UIThread.InvokeAsync(UpdatePhotoViewerActionFooterShape, DispatcherPriority.Render);
     }
 
+    private void PhotoViewerViewport_SizeChanged(object? sender, SizeChangedEventArgs e)
+    {
+        _ = Dispatcher.UIThread.InvokeAsync(UpdatePhotoViewerAdaptiveOverlayWidths, DispatcherPriority.Render);
+    }
+
     private void UpdateFooterActionButtonWidths()
     {
         UpdateFooterActionButtonWidths(FooterActionPanelHost, FooterActionPanel);
         UpdateFooterActionButtonWidths(PhotoViewerActionFooterHost, PhotoViewerActionFooter);
+        UpdatePhotoViewerAdaptiveOverlayWidths();
+    }
+
+    private void UpdatePhotoViewerAdaptiveOverlayWidths()
+    {
+        UpdatePhotoViewerHeaderWidths();
+        UpdatePhotoViewerZoomSliderHeight();
         UpdatePhotoViewerCleanFooterActionButtonWidths();
+        UpdatePhotoViewerActionFooterShape();
+    }
+
+    private void UpdatePhotoViewerHeaderWidths()
+    {
+        var viewportWidth = Math.Max(0, PhotoViewerViewport.Bounds.Width);
+        var horizontalMargin = 16d;
+        var sideGap = 8d;
+        var edgeMargin = horizontalMargin / 2;
+        var squareWidth = 42d;
+        var closeWidth = squareWidth;
+        var titleContainerPadding = 16d;
+        var titleLabelNaturalWidth = PhotoViewerTitleLabel.Bounds.Width is > 0 and < 520
+            ? PhotoViewerTitleLabel.Bounds.Width
+            : 520;
+        var titleContainerNaturalWidth = titleLabelNaturalWidth + titleContainerPadding;
+        var scoreWidth = PhotoViewerScoreLabel.IsVisible ? FooterActionButtonMaxWidth : 0;
+
+        if (PhotoViewerScoreLabel.IsVisible)
+        {
+            var maxSideWidthForNaturalTitle = (viewportWidth - titleContainerNaturalWidth) / 2 - edgeMargin - sideGap;
+            scoreWidth = Math.Clamp(maxSideWidthForNaturalTitle, squareWidth, FooterActionButtonMaxWidth);
+        }
+
+        var sideWidth = Math.Max(scoreWidth, closeWidth);
+        var titleContainerMaxWidth = viewportWidth - 2 * (edgeMargin + sideGap + sideWidth);
+        if (titleContainerMaxWidth < FooterActionButtonMinWidth + titleContainerPadding)
+        {
+            titleContainerMaxWidth = FooterActionButtonMinWidth + titleContainerPadding;
+            var maxSideWidthForMinimumTitle = (viewportWidth - titleContainerMaxWidth) / 2 - edgeMargin - sideGap;
+            closeWidth = Math.Clamp(maxSideWidthForMinimumTitle, FooterActionButtonMinWidth, squareWidth);
+            scoreWidth = PhotoViewerScoreLabel.IsVisible
+                ? Math.Clamp(maxSideWidthForMinimumTitle, FooterActionButtonMinWidth, squareWidth)
+                : 0;
+        }
+
+        var titleLabelMaxWidth = Math.Max(FooterActionButtonMinWidth, titleContainerMaxWidth - titleContainerPadding);
+
+        PhotoViewerScoreLabel.Width = scoreWidth;
+        PhotoViewerScoreIcon.IsVisible = PhotoViewerScoreLabel.Width >= FooterActionButtonCompactThreshold;
+        PhotoViewerCloseButton.Width = closeWidth;
+        PhotoViewerTitleContainer.Width = double.NaN;
+        PhotoViewerTitleContainer.MaxWidth = Math.Min(536, titleContainerMaxWidth);
+        PhotoViewerTitleLabel.Width = double.NaN;
+        PhotoViewerTitleLabel.MaxWidth = Math.Min(520, titleLabelMaxWidth);
+        PhotoViewerBestInGroupLabel.MaxWidth = Math.Max(
+            FooterActionButtonMinWidth,
+            viewportWidth - horizontalMargin - titleContainerPadding);
+    }
+
+    private void UpdatePhotoViewerZoomSliderHeight()
+    {
+        var viewportHeight = Math.Max(0, PhotoViewerViewport.Bounds.Height);
+        var topReservedHeight = 56d;
+        if (PhotoViewerDuplicateStripContainer.IsVisible)
+        {
+            topReservedHeight += 56d;
+        }
+
+        var bottomReservedHeight = 56d;
+        if (PhotoViewerDuplicateStripContainer.IsVisible)
+        {
+            bottomReservedHeight += 68d;
+        }
+
+        var availableHeight = viewportHeight - topReservedHeight - bottomReservedHeight - PhotoViewerOverlayVerticalGap * 2;
+        PhotoViewerZoomSliderContainer.Height = Math.Clamp(availableHeight, FooterActionButtonMinWidth, PhotoViewerZoomSliderDefaultHeight);
+        UpdatePhotoViewerZoomSliderThumb(_photoViewerZoom);
     }
 
     private void UpdatePhotoViewerCleanFooterActionButtonWidths()
     {
-        foreach (var button in PhotoViewerActionFooterClean.Children
+        var variableButtons = PhotoViewerActionFooterClean.Children
             .OfType<Button>()
-            .Where(button => double.IsFinite(button.MaxWidth)))
+            .Where(button => button.IsVisible && double.IsFinite(button.MaxWidth))
+            .ToList();
+        if (variableButtons.Count == 0)
         {
-            button.Width = FooterActionButtonMaxWidth;
+            return;
         }
 
-        UpdatePhotoViewerActionFooterShape();
+        var visibleButtons = PhotoViewerActionFooterClean.Children.OfType<Button>().Where(button => button.IsVisible).ToList();
+        var fixedButtons = visibleButtons
+            .Where(button => !double.IsFinite(button.MaxWidth))
+            .ToList();
+        var visibleButtonCount = visibleButtons.Count;
+        var maxContentWidth = Math.Max(0, PhotoViewerViewport.Bounds.Width - PhotoViewerFooterHorizontalPadding);
+        var availableButtonWidth = maxContentWidth - (visibleButtonCount - 1) * FooterActionButtonSpacing;
+        var variableButtonWidth = FooterActionButtonMaxWidth;
+        var fixedButtonWidth = 42d;
+        var availableVariableWidth = availableButtonWidth - fixedButtons.Count * fixedButtonWidth;
+        if (variableButtons.Count > 0)
+        {
+            variableButtonWidth = Math.Clamp(availableVariableWidth / variableButtons.Count, fixedButtonWidth, FooterActionButtonMaxWidth);
+        }
+
+        if (variableButtons.Count > 0 && availableVariableWidth / variableButtons.Count < fixedButtonWidth)
+        {
+            var commonWidth = Math.Clamp(availableButtonWidth / visibleButtonCount, FooterActionButtonMinWidth, fixedButtonWidth);
+            variableButtonWidth = commonWidth;
+            fixedButtonWidth = commonWidth;
+        }
+
+        foreach (var button in variableButtons)
+        {
+            button.Width = variableButtonWidth;
+            button.Classes.Set("compact-footer-action", variableButtonWidth < FooterActionButtonCompactThreshold);
+        }
+
+        foreach (var button in fixedButtons)
+        {
+            button.Width = fixedButtonWidth;
+        }
     }
 
     private void UpdatePhotoViewerActionFooterShape()

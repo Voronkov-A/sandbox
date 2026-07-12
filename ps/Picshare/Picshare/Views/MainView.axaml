@@ -1583,6 +1583,9 @@
                 <CheckBox IsChecked="{Binding FixedActionPanel}">
                   Fixed action panel
                 </CheckBox>
+                <CheckBox IsChecked="{Binding ShowPhotoViewerPreviousNextButtons}">
+                  Show previous/next buttons
+                </CheckBox>
               </StackPanel>
               <StackPanel Spacing="5">
                 <TextBlock Text="Default download directories" FontWeight="SemiBold"/>
@@ -2875,7 +2878,8 @@
                 PointerMoved="PhotoViewer_PointerMoved"
                 PointerReleased="PhotoViewer_PointerReleased"
                 PointerCaptureLost="PhotoViewer_PointerCaptureLost"
-                PointerWheelChanged="PhotoViewer_PointerWheelChanged">
+                PointerWheelChanged="PhotoViewer_PointerWheelChanged"
+                SizeChanged="PhotoViewerViewport_SizeChanged">
           <Grid>
             <ScrollViewer x:Name="PhotoViewerScrollViewer"
                           HorizontalScrollBarVisibility="Hidden"
@@ -2933,9 +2937,10 @@
                   VerticalAlignment="Top"
                   IsVisible="{Binding IsPhotoViewerActionsVisible}">
               <Grid Margin="8,0">
-                <Border
+                <Border x:Name="PhotoViewerScoreLabel"
                         Width="92"
                         Height="42"
+                        Classes="score-label"
                         Background="White"
                         BorderBrush="Black"
                         BorderThickness="2"
@@ -2947,7 +2952,8 @@
                         ColumnSpacing="6"
                         HorizontalAlignment="Center"
                         VerticalAlignment="Center">
-                    <Canvas Width="20"
+                    <Canvas x:Name="PhotoViewerScoreIcon"
+                            Width="20"
                             Height="20"
                             VerticalAlignment="Center">
                       <Path Data="M4,9 L7,9 L7,17 L4,17 Z M7,9 L10.5,4.5 Q11.2,3.6 12.2,4 Q13.2,4.4 13,5.6 L12.5,8 L16,8 Q17.4,8 17,9.5 L15.8,15.5 Q15.5,17 14,17 L7,17"
@@ -2964,14 +2970,14 @@
                                VerticalAlignment="Center"/>
                   </Grid>
                 </Border>
-                <Border
+                <Border x:Name="PhotoViewerTitleContainer"
                         Height="56"
                         Padding="8,0"
                         Background="#80FFFFFF"
                         CornerRadius="0,0,6,6"
                         HorizontalAlignment="Center"
                         VerticalAlignment="Center">
-                  <Border MinWidth="180"
+                  <Border x:Name="PhotoViewerTitleLabel"
                           MaxWidth="520"
                           Height="42"
                           Padding="14,0"
@@ -2990,7 +2996,8 @@
                                VerticalAlignment="Center"/>
                   </Border>
                 </Border>
-                <Button Classes="footer-action photo-viewer-footer-action"
+                <Button x:Name="PhotoViewerCloseButton"
+                        Classes="footer-action photo-viewer-footer-action"
                         Command="{Binding ClosePhotoViewerCommand}"
                         Width="42"
                         Height="42"
@@ -3009,7 +3016,8 @@
                 </Button>
               </Grid>
             </Grid>
-            <Grid Width="42"
+            <Grid x:Name="PhotoViewerZoomSliderContainer"
+                  Width="42"
                   Height="180"
                   HorizontalAlignment="Right"
                   VerticalAlignment="Center"
@@ -3067,7 +3075,10 @@
                             Foreground="#27343B"
                             FontWeight="SemiBold"
                             VerticalAlignment="Center">
-                    Best in the group
+                    <TextBlock x:Name="PhotoViewerBestInGroupLabel"
+                               Text="Best in the group"
+                               TextTrimming="CharacterEllipsis"
+                               TextWrapping="NoWrap"/>
                   </CheckBox>
                 </Border>
               </Border>
@@ -3512,6 +3523,7 @@
                           VerticalContentAlignment="Center"
                           Command="{Binding ShowPreviousPhotoInCategoryCommand}"
                           IsEnabled="{Binding CanNavigatePhotoViewerCategory}"
+                          IsVisible="{Binding ShowPhotoViewerPreviousNextButtons}"
                           ToolTip.Tip="Previous photo">
                     <TextBlock Text="&lt;"
                                FontSize="20"
@@ -3817,6 +3829,7 @@
                           VerticalContentAlignment="Center"
                           Command="{Binding ShowNextPhotoInCategoryCommand}"
                           IsEnabled="{Binding CanNavigatePhotoViewerCategory}"
+                          IsVisible="{Binding ShowPhotoViewerPreviousNextButtons}"
                           ToolTip.Tip="Next photo">
                     <TextBlock Text="&gt;"
                                FontSize="20"

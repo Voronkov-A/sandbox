@@ -176,6 +176,9 @@ public partial class MainViewModel : ViewModelBase
     private bool _fixedActionPanel = true;
 
     [ObservableProperty]
+    private bool _showPhotoViewerPreviousNextButtons = true;
+
+    [ObservableProperty]
     private int _zoomPower = LocalUserSettings.DefaultZoomPower;
 
     [ObservableProperty]
@@ -892,6 +895,10 @@ public partial class MainViewModel : ViewModelBase
             FixedHeader = localSettings.FixedHeader ?? _settingsProvider.DefaultSettings.FixedHeader ?? true;
             FixedTabs = localSettings.FixedTabs ?? _settingsProvider.DefaultSettings.FixedTabs ?? true;
             FixedActionPanel = localSettings.FixedActionPanel ?? _settingsProvider.DefaultSettings.FixedActionPanel ?? true;
+            ShowPhotoViewerPreviousNextButtons =
+                localSettings.ShowPhotoViewerPreviousNextButtons ??
+                _settingsProvider.DefaultSettings.ShowPhotoViewerPreviousNextButtons ??
+                true;
             ZoomPower = NormalizeZoomPower(localSettings.ZoomPower);
             PhotoViewerAspectRatioMode = NormalizePhotoViewerAspectRatioMode(localSettings.PhotoViewerAspectRatioMode);
             AlbumFastThumbnailMemoryCacheSizeMb = NormalizeCacheSizeMb(localSettings.AlbumFastThumbnailMemoryCacheSizeMb, 256);
@@ -5818,15 +5825,18 @@ public partial class MainViewModel : ViewModelBase
             _selectedViewedPhoto.IsSelectedForViewing = true;
         }
 
-        PhotoViewerDuplicatePhotos.Clear();
+        var nextDuplicateStripPhotos = new List<AlbumPhotoViewModel>();
         if (_selectedViewedPhoto is not null &&
             !string.IsNullOrWhiteSpace(_selectedViewedPhoto.DuplicateGroupId) &&
             _duplicateGroupsById.TryGetValue(_selectedViewedPhoto.DuplicateGroupId, out var members))
         {
-            foreach (var member in members)
-            {
-                PhotoViewerDuplicatePhotos.Add(member);
-            }
+            nextDuplicateStripPhotos.AddRange(members);
+        }
+
+        PhotoViewerDuplicatePhotos.Clear();
+        foreach (var member in nextDuplicateStripPhotos)
+        {
+            PhotoViewerDuplicatePhotos.Add(member);
         }
         UpdatePhotoViewerDuplicateStripImageSize();
 
@@ -6810,6 +6820,7 @@ public partial class MainViewModel : ViewModelBase
             FixedHeader = FixedHeader,
             FixedTabs = FixedTabs,
             FixedActionPanel = FixedActionPanel,
+            ShowPhotoViewerPreviousNextButtons = ShowPhotoViewerPreviousNextButtons,
             ZoomPower = NormalizeZoomPower(ZoomPower),
             PhotoViewerAspectRatioMode = NormalizePhotoViewerAspectRatioMode(PhotoViewerAspectRatioMode),
             AlbumFastThumbnailMemoryCacheSizeMb = GetCacheSizeMb(AlbumFastThumbnailMemoryCacheSizeMb, 256),
@@ -7019,6 +7030,11 @@ public partial class MainViewModel : ViewModelBase
     }
 
     partial void OnFixedActionPanelChanged(bool value)
+    {
+        PersistLocalUserSettingsIfReady();
+    }
+
+    partial void OnShowPhotoViewerPreviousNextButtonsChanged(bool value)
     {
         PersistLocalUserSettingsIfReady();
     }

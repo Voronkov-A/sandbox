@@ -141,13 +141,19 @@ public sealed class PicshareSettingsProvider
         var fixedHeader = next?.FixedHeader ?? current?.FixedHeader;
         var fixedTabs = next?.FixedTabs ?? current?.FixedTabs;
         var fixedActionPanel = next?.FixedActionPanel ?? current?.FixedActionPanel;
-        return fixedHeader is null && fixedTabs is null && fixedActionPanel is null
+        var showPhotoViewerPreviousNextButtons =
+            next?.ShowPhotoViewerPreviousNextButtons ?? current?.ShowPhotoViewerPreviousNextButtons;
+        return fixedHeader is null &&
+            fixedTabs is null &&
+            fixedActionPanel is null &&
+            showPhotoViewerPreviousNextButtons is null
             ? null
             : new DefaultUserSettings
             {
                 FixedHeader = fixedHeader,
                 FixedTabs = fixedTabs,
-                FixedActionPanel = fixedActionPanel
+                FixedActionPanel = fixedActionPanel,
+                ShowPhotoViewerPreviousNextButtons = showPhotoViewerPreviousNextButtons
             };
     }
 
@@ -192,4 +198,6 @@ public sealed record DefaultUserSettings
     public bool? FixedTabs { get; init; }
 
     public bool? FixedActionPanel { get; init; }
+
+    public bool? ShowPhotoViewerPreviousNextButtons { get; init; }
 }
