@@ -845,8 +845,7 @@ public partial class MainViewModel : ViewModelBase
     public string BookmarkedPhotoName => ResolveBookmarkedPhoto()?.FileName ?? "No bookmark";
 
     public bool IsCurrentPhotoScoreVisible => IsPhotoViewerActionsVisible &&
-        _selectedViewedPhoto?.IsScoreVisible == true &&
-        _isFeedbackFinalized;
+        _selectedViewedPhoto?.IsScoreVisible == true;
 
     public string CurrentPhotoScoreText => _selectedViewedPhoto?.ScoreText ?? "";
 

@@ -23,6 +23,8 @@ public partial class MainView : UserControl
     private const double FooterActionButtonMaxWidth = 92;
     private const double FooterActionButtonCompactThreshold = 70;
     private const double FooterActionButtonSpacing = 8;
+    private const double PhotoViewerFooterHorizontalPadding = 16;
+    private const double OverlayCornerRadius = 6;
     private const double PhotoViewerDuplicateStripScrollStep = 180;
     private static readonly IReadOnlyList<FilePickerFileType> ZipFileTypeChoices =
     [
@@ -187,6 +189,10 @@ public partial class MainView : UserControl
         {
             _ = Dispatcher.UIThread.InvokeAsync(ResetPhotoViewerZoom, DispatcherPriority.Render);
         }
+        else if (e.PropertyName is nameof(MainViewModel.IsPhotoViewerVisible))
+        {
+            _ = Dispatcher.UIThread.InvokeAsync(FocusPhotoViewerOverlay, DispatcherPriority.Render);
+        }
         else if (e.PropertyName is nameof(MainViewModel.ActiveReviewTabId)
             or nameof(MainViewModel.UncategorizedTabHeader)
             or nameof(MainViewModel.NiceTabHeader)
@@ -209,6 +215,7 @@ public partial class MainView : UserControl
         else if (e.PropertyName is nameof(MainViewModel.IsPhotoViewerDuplicateStripVisible))
         {
             _ = Dispatcher.UIThread.InvokeAsync(UpdatePhotoViewerDuplicateStripScrollButtonVisibility, DispatcherPriority.Render);
+            _ = Dispatcher.UIThread.InvokeAsync(UpdatePhotoViewerActionFooterShape, DispatcherPriority.Render);
         }
     }
 
@@ -327,6 +334,28 @@ public partial class MainView : UserControl
             {
                 await viewModel.DownloadCurrentPhotoAsync(destinationPath);
             }
+        }
+    }
+
+    private void PhotoViewerOverlay_KeyDown(object? sender, KeyEventArgs e)
+    {
+        if (DataContext is not MainViewModel { IsPhotoViewerVisible: true } viewModel)
+        {
+            return;
+        }
+
+        if (e.Key is Key.Escape or Key.BrowserBack or Key.Back)
+        {
+            viewModel.ClosePhotoViewerCommand.Execute(null);
+            e.Handled = true;
+        }
+    }
+
+    private void FocusPhotoViewerOverlay()
+    {
+        if (DataContext is MainViewModel { IsPhotoViewerVisible: true })
+        {
+            PhotoViewerOverlay.Focus();
         }
     }
 
@@ -481,6 +510,7 @@ public partial class MainView : UserControl
     private void PhotoViewerDuplicateStripScrollViewer_SizeChanged(object? sender, SizeChangedEventArgs e)
     {
         _ = Dispatcher.UIThread.InvokeAsync(UpdatePhotoViewerDuplicateStripScrollButtonVisibility, DispatcherPriority.Render);
+        _ = Dispatcher.UIThread.InvokeAsync(UpdatePhotoViewerActionFooterShape, DispatcherPriority.Render);
     }
 
     private void PhotoViewerDuplicateStrip_PointerPressed(object? sender, PointerPressedEventArgs e)
@@ -604,11 +634,78 @@ public partial class MainView : UserControl
         UpdateFooterActionButtonWidths();
     }
 
+    private void PhotoViewerOverlaySurface_SizeChanged(object? sender, SizeChangedEventArgs e)
+    {
+        _ = Dispatcher.UIThread.InvokeAsync(UpdatePhotoViewerActionFooterShape, DispatcherPriority.Render);
+    }
+
     private void UpdateFooterActionButtonWidths()
     {
         UpdateFooterActionButtonWidths(FooterActionPanelHost, FooterActionPanel);
         UpdateFooterActionButtonWidths(PhotoViewerActionFooterHost, PhotoViewerActionFooter);
-        UpdateFooterActionButtonWidths(PhotoViewerActionFooterCleanHost, PhotoViewerActionFooterClean);
+        UpdatePhotoViewerCleanFooterActionButtonWidths();
+    }
+
+    private void UpdatePhotoViewerCleanFooterActionButtonWidths()
+    {
+        foreach (var button in PhotoViewerActionFooterClean.Children
+            .OfType<Button>()
+            .Where(button => double.IsFinite(button.MaxWidth)))
+        {
+            button.Width = FooterActionButtonMaxWidth;
+        }
+
+        UpdatePhotoViewerActionFooterShape();
+    }
+
+    private void UpdatePhotoViewerActionFooterShape()
+    {
+        var footerNaturalWidth = GetPhotoViewerActionFooterNaturalWidth();
+        var stripWidth = PhotoViewerDuplicateStripContainer.IsVisible
+            ? PhotoViewerDuplicateStripContainer.Bounds.Width
+            : 0;
+
+        if (stripWidth > 0 && footerNaturalWidth <= stripWidth)
+        {
+            PhotoViewerActionFooterCleanContainer.MinWidth = stripWidth;
+            PhotoViewerActionFooterCleanContainer.CornerRadius = new CornerRadius(0);
+        }
+        else
+        {
+            PhotoViewerActionFooterCleanContainer.MinWidth = 0;
+            PhotoViewerActionFooterCleanContainer.CornerRadius = new CornerRadius(OverlayCornerRadius, OverlayCornerRadius, 0, 0);
+        }
+    }
+
+    private double GetPhotoViewerActionFooterNaturalWidth()
+    {
+        var visibleButtons = PhotoViewerActionFooterClean.Children
+            .OfType<Button>()
+            .Where(button => button.IsVisible)
+            .ToList();
+        if (visibleButtons.Count == 0)
+        {
+            return PhotoViewerFooterHorizontalPadding;
+        }
+
+        var buttonWidth = visibleButtons.Sum(button =>
+        {
+            if (double.IsFinite(button.Width) && button.Width > 0)
+            {
+                return button.Width;
+            }
+
+            if (double.IsFinite(button.MaxWidth))
+            {
+                return Math.Min(FooterActionButtonMaxWidth, button.MaxWidth);
+            }
+
+            return button.Bounds.Width;
+        });
+
+        return buttonWidth
+            + (visibleButtons.Count - 1) * FooterActionButtonSpacing
+            + PhotoViewerFooterHorizontalPadding;
     }
 
     private static void UpdateFooterActionButtonWidths(Control host, Panel panel)

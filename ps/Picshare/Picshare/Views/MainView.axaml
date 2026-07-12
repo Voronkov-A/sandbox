@@ -2811,12 +2811,16 @@
       </Border>
     </Grid>
 
-    <Grid Grid.RowSpan="3"
+    <Grid x:Name="PhotoViewerOverlay"
+          Grid.RowSpan="4"
           Background="#F8000000"
+          Focusable="True"
+          KeyDown="PhotoViewerOverlay_KeyDown"
           IsVisible="{Binding IsPhotoViewerVisible}">
       <Grid RowDefinitions="Auto,*">
         <Border Grid.Row="0"
                 Background="#CC000000"
+                IsVisible="False"
                 Padding="14,10">
           <Grid ColumnDefinitions="44,*,Auto">
             <StackPanel Grid.Column="1"
@@ -2866,7 +2870,6 @@
                 PointerWheelChanged="PhotoViewer_PointerWheelChanged">
           <Grid>
             <ScrollViewer x:Name="PhotoViewerScrollViewer"
-                          Margin="12,12,12,0"
                           HorizontalScrollBarVisibility="Auto"
                           VerticalScrollBarVisibility="Auto">
               <Image x:Name="PhotoViewerImageControl"
@@ -2885,7 +2888,7 @@
                   Margin="18"
                   HorizontalAlignment="Left"
                   VerticalAlignment="Top"
-                  IsVisible="{Binding IsCurrentPhotoScoreVisible}">
+                  IsVisible="False">
               <Grid ColumnDefinitions="42,Auto"
                     HorizontalAlignment="Left"
                     VerticalAlignment="Top">
@@ -2915,28 +2918,129 @@
                 </Border>
               </Grid>
             </Grid>
-            <Border Background="#99000000"
-                    CornerRadius="6"
-                    Padding="10"
-                    Margin="0,18,0,0"
-                    HorizontalAlignment="Center"
-                    VerticalAlignment="Top"
-                    IsVisible="{Binding IsPhotoViewerDuplicateStripVisible}">
-              <CheckBox Command="{Binding ToggleCurrentPhotoBestInDuplicateGroupCommand}"
-                        IsChecked="{Binding IsCurrentPhotoBestInDuplicateGroup, Mode=OneWay}"
-                        Foreground="White"
-                        FontWeight="SemiBold">
-                Best in the group
-              </CheckBox>
-            </Border>
-            <Border Background="#80FFFFFF"
+            <Grid Height="56"
+                  HorizontalAlignment="Stretch"
+                  VerticalAlignment="Top"
+                  IsVisible="{Binding IsPhotoViewerActionsVisible}">
+              <Grid ColumnDefinitions="92,*,42"
+                    Margin="8,0">
+                <Border Grid.Column="0"
+                        Width="92"
+                        Height="42"
+                        Background="White"
+                        BorderBrush="Black"
+                        BorderThickness="2"
+                        CornerRadius="6"
+                        HorizontalAlignment="Left"
+                        VerticalAlignment="Center"
+                        IsVisible="{Binding IsCurrentPhotoScoreVisible}">
+                  <Grid ColumnDefinitions="Auto,Auto"
+                        ColumnSpacing="6"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center">
+                    <Canvas Width="20"
+                            Height="20"
+                            VerticalAlignment="Center">
+                      <Path Data="M4,9 L7,9 L7,17 L4,17 Z M7,9 L10.5,4.5 Q11.2,3.6 12.2,4 Q13.2,4.4 13,5.6 L12.5,8 L16,8 Q17.4,8 17,9.5 L15.8,15.5 Q15.5,17 14,17 L7,17"
+                            Stroke="#27343B"
+                            StrokeThickness="1.6"
+                            StrokeLineCap="Round"
+                            Fill="Transparent"/>
+                    </Canvas>
+                    <TextBlock Grid.Column="1"
+                               Classes="footer-action-label"
+                               Text="{Binding CurrentPhotoScoreText}"
+                               Foreground="#27343B"
+                               FontWeight="SemiBold"
+                               VerticalAlignment="Center"/>
+                  </Grid>
+                </Border>
+                <Border Grid.Column="1"
+                        Height="56"
+                        Padding="8,0"
+                        Background="#80FFFFFF"
+                        CornerRadius="0,0,6,6"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center">
+                  <Border MinWidth="180"
+                          MaxWidth="520"
+                          Height="42"
+                          Padding="14,0"
+                          Background="White"
+                          BorderBrush="Black"
+                          BorderThickness="2"
+                          CornerRadius="6"
+                          HorizontalAlignment="Center"
+                          VerticalAlignment="Center">
+                    <TextBlock Text="{Binding PhotoViewerTitle}"
+                               Foreground="#27343B"
+                               FontSize="15"
+                               FontWeight="SemiBold"
+                               TextAlignment="Center"
+                               TextTrimming="CharacterEllipsis"
+                               VerticalAlignment="Center"/>
+                  </Border>
+                </Border>
+                <Button Grid.Column="2"
+                        Classes="footer-action photo-viewer-footer-action"
+                        Command="{Binding ClosePhotoViewerCommand}"
+                        Width="42"
+                        Height="42"
+                        Padding="0"
+                        HorizontalAlignment="Right"
+                        VerticalAlignment="Center"
+                        HorizontalContentAlignment="Center"
+                        VerticalContentAlignment="Center"
+                        ToolTip.Tip="Close">
+                  <Canvas Width="18" Height="18">
+                    <Path Data="M4,4 L14,14 M14,4 L4,14"
+                          Stroke="#27343B"
+                          StrokeThickness="2"
+                          StrokeLineCap="Round"/>
+                  </Canvas>
+                </Button>
+              </Grid>
+            </Grid>
+            <Grid Height="56"
+                  Margin="0,56,0,0"
+                  HorizontalAlignment="Center"
+                  VerticalAlignment="Top"
+                  IsVisible="{Binding IsPhotoViewerDuplicateStripVisible}">
+              <Border Height="56"
+                      Padding="8,0"
+                      Background="Transparent"
+                      HorizontalAlignment="Center"
+                      VerticalAlignment="Center">
+                <Border Height="42"
+                        Padding="12,0"
+                        Background="White"
+                        BorderBrush="Black"
+                        BorderThickness="2"
+                        CornerRadius="6"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center">
+                  <CheckBox Command="{Binding ToggleCurrentPhotoBestInDuplicateGroupCommand}"
+                            IsChecked="{Binding IsCurrentPhotoBestInDuplicateGroup, Mode=OneWay}"
+                            Foreground="#27343B"
+                            FontWeight="SemiBold"
+                            VerticalAlignment="Center">
+                    Best in the group
+                  </CheckBox>
+                </Border>
+              </Border>
+            </Grid>
+            <Border x:Name="PhotoViewerDuplicateStripContainer"
+                    Background="#80FFFFFF"
+                    CornerRadius="6,6,0,0"
                     Height="68"
                     Padding="8"
-                    HorizontalAlignment="Stretch"
+                    HorizontalAlignment="Center"
                     VerticalAlignment="Bottom"
                     Margin="0,0,0,56"
+                    MaxWidth="{Binding Bounds.Width, ElementName=PhotoViewerViewport}"
+                    SizeChanged="PhotoViewerOverlaySurface_SizeChanged"
                     IsVisible="{Binding IsPhotoViewerDuplicateStripVisible}">
-              <Grid ColumnDefinitions="21,*,21">
+              <Grid ColumnDefinitions="Auto,*,Auto">
                 <Button x:Name="PhotoViewerDuplicateStripScrollLeftButton"
                         Grid.Column="0"
                         Width="21"
@@ -3085,7 +3189,7 @@
                         Command="{Binding OpenPreviousRecentPhotoCommand}"
                         IsEnabled="{Binding CanOpenPreviousRecentPhoto}"
                         IsVisible="False"
-                        Background="White"
+                    Background="Transparent"
                         Foreground="Black"
                         BorderBrush="Black"
                         BorderThickness="2"
@@ -3335,17 +3439,18 @@
                 </StackPanel>
               </Grid>
             </Border>
-            <Border Background="#80FFFFFF"
-                    BorderBrush="#80D6D8D1"
-                    BorderThickness="0,1,0,0"
+            <Border x:Name="PhotoViewerActionFooterCleanContainer"
+                    Background="#80FFFFFF"
                     Height="56"
-                    HorizontalAlignment="Stretch"
+                    Padding="8,0"
+                    HorizontalAlignment="Center"
                     VerticalAlignment="Bottom"
+                    SizeChanged="PhotoViewerOverlaySurface_SizeChanged"
                     IsVisible="{Binding IsPhotoViewerActionsVisible}">
               <Grid x:Name="PhotoViewerActionFooterCleanHost"
                     Margin="0"
                     SizeChanged="FooterActionPanelHost_SizeChanged"
-                    HorizontalAlignment="Stretch"
+                    HorizontalAlignment="Center"
                     VerticalAlignment="Center">
                 <StackPanel x:Name="PhotoViewerActionFooterClean"
                             Orientation="Horizontal"
