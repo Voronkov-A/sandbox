@@ -776,6 +776,7 @@ public partial class MainViewModel : ViewModelBase
     private AlbumPhotoViewModel? _selectedViewedPhoto;
     private string _selectedViewedPhotoSourceCategory = "";
     private string _selectedViewedPhotoSourceReviewTabId = UncategorizedReviewTabId;
+    private bool _isPhotoViewerDuplicateStripNavigationActive;
     private ReviewerFeedbackSession? _feedbackSession;
     private ReviewerFeedbackDatabase? _feedbackDatabase;
     private ReviewerFeedbackStatus? _feedbackStatus;
@@ -1857,9 +1858,11 @@ public partial class MainViewModel : ViewModelBase
     {
         CancelPhotoViewerLoad();
         _albumImageListLoader.ClearPriorityPhotos();
+        _albumImageListLoader.ClearFullImageWarmup();
         ReleasePhotoViewerPriorityImages();
         SetPhotoViewerImageLease(null);
         SetPreviousRecentPhotoIconImageLease(null);
+        _isPhotoViewerDuplicateStripNavigationActive = false;
         PhotoViewerRotationDegrees = 0;
         PhotoViewerTitle = "";
         PhotoViewerStatus = "";
@@ -1896,6 +1899,7 @@ public partial class MainViewModel : ViewModelBase
         CancelPhotoViewerLoad();
         _albumImageListLoader.ClearPriorityPhotos();
         ReleasePhotoViewerPriorityImages();
+        _isPhotoViewerDuplicateStripNavigationActive = false;
         _photoViewerCancellation = new CancellationTokenSource();
         var cancellation = _photoViewerCancellation;
 
@@ -1914,12 +1918,7 @@ public partial class MainViewModel : ViewModelBase
             PhotoViewerStatus = "Loading";
             SetPhotoViewerImageLease(null);
 
-            var viewerImage = await _imageCache.LoadOriginalBitmapAsync(
-                photo.AlbumId,
-                GetFullPhotoCacheFileName(photo),
-                photo.DownloadUrl,
-                _imageHttpClient,
-                cancellation.Token);
+            var viewerImage = await LoadPhotoViewerOriginalWithFallbackAsync(photo, cancellation);
 
             if (ReferenceEquals(_photoViewerCancellation, cancellation))
             {
@@ -1943,6 +1942,124 @@ public partial class MainViewModel : ViewModelBase
                 PhotoViewerStatus = ex.Message;
             }
         }
+    }
+
+    private async Task<AlbumImageBitmapLease> LoadPhotoViewerOriginalWithFallbackAsync(
+        AlbumPhotoViewModel photo,
+        CancellationTokenSource cancellation)
+    {
+        var cacheFileName = GetFullPhotoCacheFileName(photo);
+        try
+        {
+            return await _imageCache.LoadOriginalBitmapAsync(
+                photo.AlbumId,
+                cacheFileName,
+                photo.DownloadUrl,
+                _imageHttpClient,
+                AlbumImageCacheReadMode.Lookup,
+                cachePriority: 2,
+                cancellation.Token);
+        }
+        catch (Exception ex) when (ex is FileNotFoundException or AlbumImageCacheEntryInvalidException)
+        {
+            await TryShowPhotoViewerDetailedThumbnailFallbackAsync(photo, cacheFileName, cancellation);
+        }
+
+        return await _imageCache.LoadOriginalBitmapAsync(
+            photo.AlbumId,
+            cacheFileName,
+            photo.DownloadUrl,
+            _imageHttpClient,
+            AlbumImageCacheReadMode.Eager,
+            cachePriority: 2,
+            cancellation.Token);
+    }
+
+    private async Task TryShowPhotoViewerDetailedThumbnailFallbackAsync(
+        AlbumPhotoViewModel photo,
+        string originalCacheFileName,
+        CancellationTokenSource cancellation)
+    {
+        var (pixelWidth, pixelHeight) = _albumImageListLoader.GetDetailedThumbnailSize();
+        AlbumImageBitmapLease? fallbackLease = null;
+        try
+        {
+            var result = await _imageCache.LoadDetailedThumbnailBitmapAsync(
+                photo.AlbumId,
+                photo.PhotoId,
+                originalCacheFileName,
+                photo.DownloadUrl,
+                _imageHttpClient,
+                pixelWidth,
+                pixelHeight,
+                AlbumImageCacheReadMode.Lookup,
+                AlbumImageCacheReadMode.Lookup,
+                cancellation.Token);
+            fallbackLease = result.Bitmap;
+
+            if (TrySetPhotoViewerFallbackImage(photo, cancellation, fallbackLease, "Loading original"))
+            {
+                fallbackLease = null;
+                return;
+            }
+        }
+        catch (Exception ex) when (ex is FileNotFoundException or AlbumImageCacheEntryInvalidException)
+        {
+        }
+        finally
+        {
+            fallbackLease?.Dispose();
+        }
+
+        await TryShowPhotoViewerFastThumbnailFallbackAsync(photo, cancellation);
+    }
+
+    private async Task TryShowPhotoViewerFastThumbnailFallbackAsync(
+        AlbumPhotoViewModel photo,
+        CancellationTokenSource cancellation)
+    {
+        AlbumImageBitmapLease? fallbackLease = null;
+        try
+        {
+            var result = await _imageCache.LoadFastThumbnailBitmapAsync(
+                photo.AlbumId,
+                photo.PhotoId,
+                photo.ThumbnailDownloadUrl,
+                _imageHttpClient,
+                AlbumImageCacheReadMode.Lookup,
+                cancellation.Token);
+            fallbackLease = result.Bitmap;
+
+            if (TrySetPhotoViewerFallbackImage(photo, cancellation, fallbackLease, "Loading original"))
+            {
+                fallbackLease = null;
+            }
+        }
+        catch (Exception ex) when (ex is FileNotFoundException or AlbumImageCacheEntryInvalidException)
+        {
+        }
+        finally
+        {
+            fallbackLease?.Dispose();
+        }
+    }
+
+    private bool TrySetPhotoViewerFallbackImage(
+        AlbumPhotoViewModel photo,
+        CancellationTokenSource cancellation,
+        AlbumImageBitmapLease fallbackLease,
+        string status)
+    {
+        if (!ReferenceEquals(_photoViewerCancellation, cancellation) ||
+            !ReferenceEquals(_selectedViewedPhoto, photo) ||
+            PhotoViewerImage is not null)
+        {
+            return false;
+        }
+
+        SetPhotoViewerImageLease(fallbackLease);
+        PhotoViewerStatus = status;
+        return true;
     }
 
     [RelayCommand]
@@ -3525,6 +3642,7 @@ public partial class MainViewModel : ViewModelBase
 
         CancelPhotoViewerLoad();
         _albumImageListLoader.ClearPriorityPhotos();
+        _isPhotoViewerDuplicateStripNavigationActive = true;
         _photoViewerCancellation = new CancellationTokenSource();
         var cancellation = _photoViewerCancellation;
 
@@ -3540,12 +3658,7 @@ public partial class MainViewModel : ViewModelBase
 
         try
         {
-            var viewerImage = await _imageCache.LoadOriginalBitmapAsync(
-                photo.AlbumId,
-                GetFullPhotoCacheFileName(photo),
-                photo.DownloadUrl,
-                _imageHttpClient,
-                cancellation.Token);
+            var viewerImage = await LoadPhotoViewerOriginalWithFallbackAsync(photo, cancellation);
             if (ReferenceEquals(_photoViewerCancellation, cancellation))
             {
                 SetPhotoViewerImageLease(viewerImage);
@@ -3568,6 +3681,34 @@ public partial class MainViewModel : ViewModelBase
                 PhotoViewerStatus = ex.Message;
             }
         }
+    }
+
+    public bool CanNavigatePhotoViewerDuplicateStrip => _isPhotoViewerDuplicateStripNavigationActive &&
+        PhotoViewerDuplicatePhotos.Count > 1 &&
+        _selectedViewedPhoto is not null &&
+        PhotoViewerDuplicatePhotos.Contains(_selectedViewedPhoto);
+
+    public async Task<bool> MovePhotoViewerInDuplicateStripAsync(int offset)
+    {
+        if (!CanNavigatePhotoViewerDuplicateStrip || _selectedViewedPhoto is null)
+        {
+            return false;
+        }
+
+        var currentIndex = PhotoViewerDuplicatePhotos.IndexOf(_selectedViewedPhoto);
+        if (currentIndex < 0)
+        {
+            return false;
+        }
+
+        var nextIndex = (currentIndex + offset) % PhotoViewerDuplicatePhotos.Count;
+        if (nextIndex < 0)
+        {
+            nextIndex += PhotoViewerDuplicatePhotos.Count;
+        }
+
+        await ShowDuplicatePhotoInViewerAsync(PhotoViewerDuplicatePhotos[nextIndex]);
+        return true;
     }
 
     private async Task PreloadPhotoViewerDuplicatePhotosAsync(CancellationTokenSource cancellation)
@@ -5842,6 +5983,18 @@ public partial class MainViewModel : ViewModelBase
 
         if (IsPhotoViewerVisible)
         {
+            if (_selectedViewedPhoto is not null)
+            {
+                _albumImageListLoader.UpdateFullImageWarmup(
+                    _selectedViewedPhoto,
+                    GetPhotoViewerWarmupNavigationPhotos(),
+                    PhotoViewerDuplicatePhotos.ToList());
+            }
+            else
+            {
+                _albumImageListLoader.ClearFullImageWarmup();
+            }
+
             var newPriorityPhotos = GetPhotoViewerPriorityPhotos();
             _albumImageListLoader.ClearPriorityPhotos();
             foreach (var priorityPhoto in newPriorityPhotos)
@@ -5858,6 +6011,13 @@ public partial class MainViewModel : ViewModelBase
 
         UpdateCurrentPhotoActionVisibility();
         NotifyBookmarkStateChanged();
+    }
+
+    private IReadOnlyList<AlbumPhotoViewModel> GetPhotoViewerWarmupNavigationPhotos()
+    {
+        return _selectedViewedPhoto is null
+            ? []
+            : GetPhotosForReviewTab(_selectedViewedPhotoSourceReviewTabId).ToList();
     }
 
     private void UpdatePhotoViewerDuplicateStripImageSize()

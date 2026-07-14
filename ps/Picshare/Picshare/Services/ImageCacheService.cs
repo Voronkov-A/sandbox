@@ -14,6 +14,10 @@ public sealed class ImageCacheService
     private readonly object _memoryCacheSync = new();
     private readonly Dictionary<MemoryCacheKey, EncodedMemoryCacheEntry> _memoryCache = new();
     private readonly Dictionary<MemoryCacheKey, BitmapMemoryCacheEntry> _bitmapCache = new();
+    private HashSet<MemoryCacheKey> _priority1OriginalImageKeys = new();
+    private HashSet<MemoryCacheKey> _priority2OriginalImageKeys = new();
+    private HashSet<MemoryCacheKey> _priority1OriginalImageDiskKeys = new();
+    private HashSet<MemoryCacheKey> _priority2OriginalImageDiskKeys = new();
     private readonly string _rootPath;
     private AlbumImageCacheLimits _limits = AlbumImageCacheLimits.Default;
 
@@ -77,6 +81,39 @@ public sealed class ImageCacheService
         var hasMemoryRoom = GetMemoryCacheSize(albumId, kind) < Limits.GetMemoryBytes(kind);
         var hasDiskRoom = IsDiskCachingEnabled(kind) && GetDiskCacheSize(albumId, kind) < Limits.GetDiskBytes(kind);
         return hasMemoryRoom || hasDiskRoom;
+    }
+
+    public void SetOriginalImageCachePrioritySets(
+        string albumId,
+        IEnumerable<string> priority1CacheFileNames,
+        IEnumerable<string> priority2CacheFileNames)
+    {
+        var priority2 = priority2CacheFileNames
+            .Where(fileName => !string.IsNullOrWhiteSpace(fileName))
+            .Select(fileName => CreateOriginalImagePriorityKey(albumId, fileName))
+            .ToHashSet();
+        var priority2Disk = priority2CacheFileNames
+            .Where(fileName => !string.IsNullOrWhiteSpace(fileName))
+            .Select(fileName => CreateOriginalImageDiskPriorityKey(albumId, fileName))
+            .ToHashSet();
+        var priority1 = priority1CacheFileNames
+            .Where(fileName => !string.IsNullOrWhiteSpace(fileName))
+            .Select(fileName => CreateOriginalImagePriorityKey(albumId, fileName))
+            .Where(key => !priority2.Contains(key))
+            .ToHashSet();
+        var priority1Disk = priority1CacheFileNames
+            .Where(fileName => !string.IsNullOrWhiteSpace(fileName))
+            .Select(fileName => CreateOriginalImageDiskPriorityKey(albumId, fileName))
+            .Where(key => !priority2Disk.Contains(key))
+            .ToHashSet();
+
+        lock (_memoryCacheSync)
+        {
+            _priority1OriginalImageKeys = priority1;
+            _priority2OriginalImageKeys = priority2;
+            _priority1OriginalImageDiskKeys = priority1Disk;
+            _priority2OriginalImageDiskKeys = priority2Disk;
+        }
     }
 
     public async Task<AlbumFastThumbnailBitmapLoadResult> LoadFastThumbnailBitmapAsync(
@@ -384,11 +421,31 @@ public sealed class ImageCacheService
         AlbumImageCacheReadMode readMode,
         CancellationToken cancellationToken)
     {
+        return await WarmOriginalAsync(
+            albumId,
+            cacheFileName,
+            downloadUrl,
+            httpClient,
+            readMode,
+            cachePriority: 0,
+            cancellationToken);
+    }
+
+    public async Task<bool> WarmOriginalAsync(
+        string albumId,
+        string cacheFileName,
+        string downloadUrl,
+        HttpClient httpClient,
+        AlbumImageCacheReadMode readMode,
+        int cachePriority,
+        CancellationToken cancellationToken)
+    {
         return await WarmEncodedImageAsync(
             albumId,
             cacheFileName,
             AlbumImageCacheKind.OriginalImage,
             readMode,
+            cachePriority,
             () => OpenSeekableSourceStreamAsync(downloadUrl, httpClient, cancellationToken),
             cancellationToken);
     }
@@ -600,6 +657,25 @@ public sealed class ImageCacheService
         AlbumImageCacheReadMode readMode,
         CancellationToken cancellationToken)
     {
+        return await LoadOriginalBitmapAsync(
+            albumId,
+            cacheFileName,
+            downloadUrl,
+            httpClient,
+            readMode,
+            cachePriority: 0,
+            cancellationToken);
+    }
+
+    public async Task<AlbumImageBitmapLease> LoadOriginalBitmapAsync(
+        string albumId,
+        string cacheFileName,
+        string downloadUrl,
+        HttpClient httpClient,
+        AlbumImageCacheReadMode readMode,
+        int cachePriority,
+        CancellationToken cancellationToken)
+    {
         try
         {
             var result = await GetBitmapImageAsync(
@@ -607,6 +683,7 @@ public sealed class ImageCacheService
                 cacheFileName,
                 AlbumImageCacheKind.OriginalImage,
                 readMode,
+                cachePriority,
                 () => OpenSeekableSourceStreamAsync(downloadUrl, httpClient, cancellationToken),
                 cancellationToken);
             return result.Bitmap;
@@ -618,6 +695,7 @@ public sealed class ImageCacheService
                 cacheFileName,
                 AlbumImageCacheKind.OriginalImage,
                 readMode,
+                cachePriority,
                 () => OpenSeekableSourceStreamAsync(downloadUrl, httpClient, cancellationToken),
                 cancellationToken);
             return result.Bitmap;
@@ -649,6 +727,25 @@ public sealed class ImageCacheService
         Func<Task<Stream>> openSourceAsync,
         CancellationToken cancellationToken)
     {
+        return await GetBitmapImageAsync(
+            albumId,
+            cacheFileName,
+            kind,
+            readMode,
+            cachePriority: 0,
+            openSourceAsync,
+            cancellationToken);
+    }
+
+    private async Task<AlbumImageBitmapCacheLoadResult> GetBitmapImageAsync(
+        string albumId,
+        string cacheFileName,
+        AlbumImageCacheKind kind,
+        AlbumImageCacheReadMode readMode,
+        int cachePriority,
+        Func<Task<Stream>> openSourceAsync,
+        CancellationToken cancellationToken)
+    {
         if (TryGetBitmapCache(albumId, cacheFileName, kind, readMode, out var memoryBitmap))
         {
             return new AlbumImageBitmapCacheLoadResult(memoryBitmap, IsCached: true);
@@ -659,11 +756,12 @@ public sealed class ImageCacheService
             cacheFileName,
             kind,
             readMode,
+            cachePriority,
             openSourceAsync,
             cancellationToken);
         var bitmap = await DecodeCachedBitmapAsync(result, albumId, cacheFileName, kind, cancellationToken);
         if (readMode != AlbumImageCacheReadMode.Lookup &&
-            TryAddBitmapCache(albumId, cacheFileName, kind, bitmap, readMode, out var cachedBitmap))
+            TryAddBitmapCache(albumId, cacheFileName, kind, bitmap, readMode, cachePriority, out var cachedBitmap))
         {
             return new AlbumImageBitmapCacheLoadResult(cachedBitmap, IsCached: true);
         }
@@ -681,6 +779,25 @@ public sealed class ImageCacheService
         Func<Task<Stream>> openSourceAsync,
         CancellationToken cancellationToken)
     {
+        return await WarmEncodedImageAsync(
+            albumId,
+            cacheFileName,
+            kind,
+            readMode,
+            cachePriority: 0,
+            openSourceAsync,
+            cancellationToken);
+    }
+
+    private async Task<bool> WarmEncodedImageAsync(
+        string albumId,
+        string cacheFileName,
+        AlbumImageCacheKind kind,
+        AlbumImageCacheReadMode readMode,
+        int cachePriority,
+        Func<Task<Stream>> openSourceAsync,
+        CancellationToken cancellationToken)
+    {
         if (TryGetEncodedMemoryCache(albumId, cacheFileName, kind, readMode, out var memoryBytes))
         {
             if (readMode == AlbumImageCacheReadMode.Lookup ||
@@ -689,7 +806,7 @@ public sealed class ImageCacheService
                 return true;
             }
 
-            var diskCached = await AddDiskCacheAsync(albumId, cacheFileName, kind, memoryBytes, readMode, cancellationToken);
+            var diskCached = await AddDiskCacheAsync(albumId, cacheFileName, kind, memoryBytes, readMode, cachePriority, cancellationToken);
             return diskCached || IsEncodedMemoryCacheStored(albumId, cacheFileName, kind);
         }
 
@@ -698,6 +815,7 @@ public sealed class ImageCacheService
             cacheFileName,
             kind,
             readMode,
+            cachePriority,
             openSourceAsync,
             cancellationToken);
 
@@ -733,6 +851,25 @@ public sealed class ImageCacheService
         string cacheFileName,
         AlbumImageCacheKind kind,
         AlbumImageCacheReadMode readMode,
+        Func<Task<Stream>> openSourceAsync,
+        CancellationToken cancellationToken)
+    {
+        return await GetEncodedImageBytesAsync(
+            albumId,
+            cacheFileName,
+            kind,
+            readMode,
+            cachePriority: 0,
+            openSourceAsync,
+            cancellationToken);
+    }
+
+    private async Task<AlbumImageCacheLoadResult> GetEncodedImageBytesAsync(
+        string albumId,
+        string cacheFileName,
+        AlbumImageCacheKind kind,
+        AlbumImageCacheReadMode readMode,
+        int cachePriority,
         Func<Task<Stream>> openSourceAsync,
         CancellationToken cancellationToken)
     {
@@ -785,12 +922,12 @@ public sealed class ImageCacheService
                 var diskBytes = await File.ReadAllBytesAsync(diskPath, cancellationToken);
                 if (readMode == AlbumImageCacheReadMode.Eager)
                 {
-                    TrimDiskCache(albumId, kind, diskLimit);
+                    TrimDiskCache(albumId, kind, diskLimit, cachePriority);
                 }
 
                 if (readMode == AlbumImageCacheReadMode.Eager)
                 {
-                    AddEncodedMemoryCache(albumId, cacheFileName, kind, diskBytes, readMode);
+                    AddEncodedMemoryCache(albumId, cacheFileName, kind, diskBytes, readMode, cachePriority);
                 }
 
                 return new AlbumImageCacheLoadResult(diskBytes, IsCached: true);
@@ -824,8 +961,8 @@ public sealed class ImageCacheService
             },
             null,
             cancellationToken);
-        var diskCached = await AddDiskCacheAsync(albumId, cacheFileName, kind, bytes, readMode, cancellationToken);
-        var memoryCached = AddEncodedMemoryCache(albumId, cacheFileName, kind, bytes, readMode);
+        var diskCached = await AddDiskCacheAsync(albumId, cacheFileName, kind, bytes, readMode, cachePriority, cancellationToken);
+        var memoryCached = AddEncodedMemoryCache(albumId, cacheFileName, kind, bytes, readMode, cachePriority);
         return new AlbumImageCacheLoadResult(bytes, diskCached || memoryCached);
     }
 
@@ -915,6 +1052,17 @@ public sealed class ImageCacheService
         byte[] bytes,
         AlbumImageCacheReadMode readMode)
     {
+        return AddEncodedMemoryCache(albumId, cacheFileName, kind, bytes, readMode, cachePriority: 0);
+    }
+
+    private bool AddEncodedMemoryCache(
+        string albumId,
+        string cacheFileName,
+        AlbumImageCacheKind kind,
+        byte[] bytes,
+        AlbumImageCacheReadMode readMode,
+        int cachePriority)
+    {
         var limit = Limits.GetMemoryBytes(kind);
         var estimatedBytes = bytes.LongLength;
         if (limit <= 0 || estimatedBytes > limit || readMode == AlbumImageCacheReadMode.Lookup)
@@ -937,10 +1085,20 @@ public sealed class ImageCacheService
                 return false;
             }
 
+            if (readMode == AlbumImageCacheReadMode.Eager && albumKindSize + estimatedBytes > limit)
+            {
+                TrimMemoryCacheNoLock(albumId, kind, limit - estimatedBytes, cachePriority);
+                albumKindSize = GetMemoryCacheSizeNoLock(albumId, kind) - (existingEntry?.EstimatedBytes ?? 0);
+                if (albumKindSize + estimatedBytes > limit)
+                {
+                    return false;
+                }
+            }
+
             _memoryCache[key] = new EncodedMemoryCacheEntry(bytes, estimatedBytes, DateTime.UtcNow);
             if (readMode == AlbumImageCacheReadMode.Eager)
             {
-                TrimMemoryCacheNoLock(albumId, kind, limit);
+                TrimMemoryCacheNoLock(albumId, kind, limit, cachePriority);
             }
 
             return true;
@@ -953,6 +1111,18 @@ public sealed class ImageCacheService
         AlbumImageCacheKind kind,
         Bitmap bitmap,
         AlbumImageCacheReadMode readMode,
+        out AlbumImageBitmapLease lease)
+    {
+        return TryAddBitmapCache(albumId, cacheFileName, kind, bitmap, readMode, cachePriority: 0, out lease);
+    }
+
+    private bool TryAddBitmapCache(
+        string albumId,
+        string cacheFileName,
+        AlbumImageCacheKind kind,
+        Bitmap bitmap,
+        AlbumImageCacheReadMode readMode,
+        int cachePriority,
         out AlbumImageBitmapLease lease)
     {
         var limit = Limits.GetBitmapMemoryBytes(kind);
@@ -987,7 +1157,7 @@ public sealed class ImageCacheService
                     return false;
                 }
 
-                TrimBitmapCacheNoLock(albumId, kind, limit - estimatedBytes);
+                TrimBitmapCacheNoLock(albumId, kind, limit - estimatedBytes, cachePriority);
                 albumKindSize = GetBitmapCacheSizeNoLock(albumId, kind);
                 if (albumKindSize + estimatedBytes > limit)
                 {
@@ -1068,10 +1238,16 @@ public sealed class ImageCacheService
 
     private void TrimMemoryCacheNoLock(string albumId, AlbumImageCacheKind kind, long limit)
     {
+        TrimMemoryCacheNoLock(albumId, kind, limit, incomingPriority: int.MaxValue);
+    }
+
+    private void TrimMemoryCacheNoLock(string albumId, AlbumImageCacheKind kind, long limit, int incomingPriority)
+    {
         if (limit <= 0)
         {
             foreach (var key in _memoryCache.Keys
                 .Where(key => string.Equals(key.AlbumId, albumId, StringComparison.Ordinal) && key.Kind == kind)
+                .Where(key => CanEvictForIncomingPriorityNoLock(key, incomingPriority))
                 .ToList())
             {
                 RemoveMemoryCacheNoLock(key);
@@ -1084,6 +1260,7 @@ public sealed class ImageCacheService
         {
             var oldest = _memoryCache
                 .Where(item => string.Equals(item.Key.AlbumId, albumId, StringComparison.Ordinal) && item.Key.Kind == kind)
+                .Where(item => CanEvictForIncomingPriorityNoLock(item.Key, incomingPriority))
                 .OrderBy(item => item.Value.LastAccessUtc)
                 .Select(item => item.Key)
                 .FirstOrDefault();
@@ -1112,6 +1289,44 @@ public sealed class ImageCacheService
         _memoryCache.Remove(key);
     }
 
+    private static MemoryCacheKey CreateOriginalImagePriorityKey(string albumId, string cacheFileName)
+    {
+        return new MemoryCacheKey(albumId, cacheFileName, AlbumImageCacheKind.OriginalImage);
+    }
+
+    private static MemoryCacheKey CreateOriginalImageDiskPriorityKey(string albumId, string cacheFileName)
+    {
+        return new MemoryCacheKey(albumId, GetCacheFileSystemName(cacheFileName), AlbumImageCacheKind.OriginalImage);
+    }
+
+    private int GetCachePriorityNoLock(MemoryCacheKey key)
+    {
+        if (key.Kind != AlbumImageCacheKind.OriginalImage)
+        {
+            return 0;
+        }
+
+        if (_priority2OriginalImageKeys.Contains(key))
+        {
+            return 2;
+        }
+
+        return _priority1OriginalImageKeys.Contains(key) ? 1 : 0;
+    }
+
+    private bool CanEvictForIncomingPriorityNoLock(MemoryCacheKey key, int incomingPriority)
+    {
+        if (key.Kind != AlbumImageCacheKind.OriginalImage || incomingPriority == int.MaxValue)
+        {
+            return true;
+        }
+
+        var existingPriority = GetCachePriorityNoLock(key);
+        return incomingPriority <= 0
+            ? existingPriority == 0
+            : existingPriority < incomingPriority;
+    }
+
     private long GetBitmapCacheSizeNoLock(string albumId, AlbumImageCacheKind kind)
     {
         return _bitmapCache
@@ -1121,12 +1336,18 @@ public sealed class ImageCacheService
 
     private void TrimBitmapCacheNoLock(string albumId, AlbumImageCacheKind kind, long limit)
     {
+        TrimBitmapCacheNoLock(albumId, kind, limit, incomingPriority: int.MaxValue);
+    }
+
+    private void TrimBitmapCacheNoLock(string albumId, AlbumImageCacheKind kind, long limit, int incomingPriority)
+    {
         if (limit <= 0)
         {
             foreach (var key in _bitmapCache.Keys
                 .Where(key => string.Equals(key.AlbumId, albumId, StringComparison.Ordinal) &&
                     key.Kind == kind &&
                     _bitmapCache[key].ReferenceCount == 0)
+                .Where(key => CanEvictForIncomingPriorityNoLock(key, incomingPriority))
                 .ToList())
             {
                 RemoveBitmapCacheNoLock(key);
@@ -1140,6 +1361,7 @@ public sealed class ImageCacheService
             var oldest = _bitmapCache
                 .Where(item => string.Equals(item.Key.AlbumId, albumId, StringComparison.Ordinal) && item.Key.Kind == kind)
                 .Where(item => item.Value.ReferenceCount == 0)
+                .Where(item => CanEvictForIncomingPriorityNoLock(item.Key, incomingPriority))
                 .OrderBy(item => item.Value.LastAccessUtc)
                 .Select(item => item.Key)
                 .FirstOrDefault();
@@ -1167,6 +1389,18 @@ public sealed class ImageCacheService
         AlbumImageCacheKind kind,
         byte[] bytes,
         AlbumImageCacheReadMode readMode,
+        CancellationToken cancellationToken)
+    {
+        return await AddDiskCacheAsync(albumId, cacheFileName, kind, bytes, readMode, cachePriority: 0, cancellationToken);
+    }
+
+    private async Task<bool> AddDiskCacheAsync(
+        string albumId,
+        string cacheFileName,
+        AlbumImageCacheKind kind,
+        byte[] bytes,
+        AlbumImageCacheReadMode readMode,
+        int cachePriority,
         CancellationToken cancellationToken)
     {
         if (!IsDiskCachingEnabled(kind))
@@ -1209,7 +1443,7 @@ public sealed class ImageCacheService
                     if (readMode == AlbumImageCacheReadMode.Eager)
                     {
                         TrySetLastAccessTimeUtc(cachePath, DateTime.UtcNow);
-                        TrimDiskCache(albumId, kind, limit);
+                        TrimDiskCache(albumId, kind, limit, cachePriority);
                     }
 
                     return true;
@@ -1226,6 +1460,12 @@ public sealed class ImageCacheService
         }
 
         if (readMode == AlbumImageCacheReadMode.Lazy && !CanFitLazyDiskCacheEntry(albumId, cachePath, kind, bytes.LongLength, limit))
+        {
+            return false;
+        }
+
+        if (readMode == AlbumImageCacheReadMode.Eager &&
+            !CanFitPriorityDiskCacheEntry(albumId, cachePath, kind, bytes.LongLength, limit, cachePriority))
         {
             return false;
         }
@@ -1283,7 +1523,7 @@ public sealed class ImageCacheService
 
         if (readMode == AlbumImageCacheReadMode.Eager)
         {
-            TrimDiskCache(albumId, kind, limit);
+            TrimDiskCache(albumId, kind, limit, cachePriority);
         }
 
         return cached;
@@ -1356,6 +1596,34 @@ public sealed class ImageCacheService
         return GetDiskCacheSize(albumId, kind) - existingLength + byteCount <= limit;
     }
 
+    private bool CanFitPriorityDiskCacheEntry(
+        string albumId,
+        string cachePath,
+        AlbumImageCacheKind kind,
+        long byteCount,
+        long limit,
+        int incomingPriority)
+    {
+        var existingLength = 0L;
+        try
+        {
+            if (File.Exists(cachePath))
+            {
+                existingLength = new FileInfo(cachePath).Length;
+            }
+        }
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
+
+        var targetLimit = limit - byteCount + existingLength;
+        TrimDiskCache(albumId, kind, targetLimit, incomingPriority);
+        return GetDiskCacheSize(albumId, kind) - existingLength + byteCount <= limit;
+    }
+
     private void TrimAllDiskCaches()
     {
         if (!Directory.Exists(_rootPath))
@@ -1382,7 +1650,12 @@ public sealed class ImageCacheService
             DeleteLegacyDisplayCacheFiles(albumPath);
             foreach (AlbumImageCacheKind kind in Enum.GetValues<AlbumImageCacheKind>())
             {
-                TrimDiskCachePath(albumPath, kind, IsDiskCachingEnabled(kind) ? Limits.GetDiskBytes(kind) : 0);
+                TrimDiskCachePath(
+                    albumPath,
+                    Path.GetFileName(albumPath),
+                    kind,
+                    IsDiskCachingEnabled(kind) ? Limits.GetDiskBytes(kind) : 0,
+                    incomingPriority: int.MaxValue);
             }
         }
     }
@@ -1415,10 +1688,15 @@ public sealed class ImageCacheService
 
     private void TrimDiskCache(string albumId, AlbumImageCacheKind kind, long limit)
     {
-        TrimDiskCachePath(GetAlbumCachePath(albumId), kind, limit);
+        TrimDiskCache(albumId, kind, limit, incomingPriority: int.MaxValue);
     }
 
-    private static void TrimDiskCachePath(string albumPath, AlbumImageCacheKind kind, long limit)
+    private void TrimDiskCache(string albumId, AlbumImageCacheKind kind, long limit, int incomingPriority)
+    {
+        TrimDiskCachePath(GetAlbumCachePath(albumId), albumId, kind, limit, incomingPriority);
+    }
+
+    private void TrimDiskCachePath(string albumPath, string albumId, AlbumImageCacheKind kind, long limit, int incomingPriority)
     {
         if (!Directory.Exists(albumPath))
         {
@@ -1432,6 +1710,7 @@ public sealed class ImageCacheService
             {
                 paths = Directory.EnumerateFiles(albumPath)
                     .Where(path => IsCacheFileForKind(path, kind))
+                    .Where(path => CanEvictDiskPathForIncomingPriority(path, albumId, kind, incomingPriority))
                     .ToList();
             }
             catch
@@ -1463,6 +1742,11 @@ public sealed class ImageCacheService
             {
                 try
                 {
+                    if (!CanEvictDiskPathForIncomingPriority(path, albumId, kind, incomingPriority))
+                    {
+                        continue;
+                    }
+
                     var file = new FileInfo(path);
                     files.Add(new DiskCacheFileInfo(file, file.Length, file.LastAccessTimeUtc));
                 }
@@ -1500,6 +1784,37 @@ public sealed class ImageCacheService
             catch
             {
             }
+        }
+    }
+
+    private bool CanEvictDiskPathForIncomingPriority(
+        string path,
+        string albumId,
+        AlbumImageCacheKind kind,
+        int incomingPriority)
+    {
+        if (kind != AlbumImageCacheKind.OriginalImage || incomingPriority == int.MaxValue)
+        {
+            return true;
+        }
+
+        var cacheFileName = Path.GetFileName(path);
+        var priorityKey = new MemoryCacheKey(albumId, cacheFileName, kind);
+        lock (_memoryCacheSync)
+        {
+            if (kind != AlbumImageCacheKind.OriginalImage)
+            {
+                return true;
+            }
+
+            var existingPriority = _priority2OriginalImageDiskKeys.Contains(priorityKey)
+                ? 2
+                : _priority1OriginalImageDiskKeys.Contains(priorityKey)
+                    ? 1
+                    : 0;
+            return incomingPriority <= 0
+                ? existingPriority == 0
+                : existingPriority < incomingPriority;
         }
     }
 

@@ -29,22 +29,29 @@
                     BorderThickness="{Binding CardBorderThickness}"
                     CornerRadius="6"
                     Loaded="AlbumPhoto_Loaded"
-                    Unloaded="AlbumPhoto_Unloaded">
+                    Unloaded="AlbumPhoto_Unloaded"
+                    Tapped="AlbumPhotoCard_Tapped">
               <Grid RowDefinitions="*,40">
                 <Button Click="AlbumPhoto_Click"
                         Padding="0"
-                        Background="Transparent"
+                        Background="#01000000"
                         BorderThickness="0"
                         ClipToBounds="True"
                         HorizontalContentAlignment="Stretch"
                         VerticalContentAlignment="Stretch">
-                  <Image Source="{Binding Image}"
-                         Stretch="UniformToFill"
-                         RenderTransformOrigin="50%,50%">
-                    <Image.RenderTransform>
-                      <RotateTransform Angle="{Binding RotationDegrees}"/>
-                    </Image.RenderTransform>
-                  </Image>
+                  <Border Background="#01000000"
+                          HorizontalAlignment="Stretch"
+                          VerticalAlignment="Stretch">
+                    <Image Source="{Binding Image}"
+                           Stretch="UniformToFill"
+                           HorizontalAlignment="Stretch"
+                           VerticalAlignment="Stretch"
+                           RenderTransformOrigin="50%,50%">
+                      <Image.RenderTransform>
+                        <RotateTransform Angle="{Binding RotationDegrees}"/>
+                      </Image.RenderTransform>
+                    </Image>
+                  </Border>
                 </Button>
                 <Grid Width="70"
                       Height="36"
@@ -127,6 +134,7 @@
                   </Grid>
                 </Border>
                 <Button HorizontalAlignment="Right"
+                        x:Name="AlbumPhotoSelectionButton"
                         VerticalAlignment="Top"
                         MinWidth="38"
                         Height="32"

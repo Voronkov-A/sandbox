@@ -363,7 +363,7 @@ public partial class MainView : UserControl
         }
     }
 
-    private void PhotoViewerOverlay_KeyDown(object? sender, KeyEventArgs e)
+    private async void PhotoViewerOverlay_KeyDown(object? sender, KeyEventArgs e)
     {
         if (DataContext is not MainViewModel { IsPhotoViewerVisible: true } viewModel)
         {
@@ -375,6 +375,37 @@ public partial class MainView : UserControl
             viewModel.ClosePhotoViewerCommand.Execute(null);
             e.Handled = true;
         }
+        else if (e.Key is Key.Left or Key.Right)
+        {
+            var direction = e.Key == Key.Left ? -1 : 1;
+            if (_photoViewerZoom > MinimumPhotoViewerZoom + 0.001)
+            {
+                PanPhotoViewerHorizontally(direction);
+            }
+            else if (viewModel.CanNavigatePhotoViewerDuplicateStrip)
+            {
+                await viewModel.MovePhotoViewerInDuplicateStripAsync(direction);
+            }
+            else if (direction < 0)
+            {
+                viewModel.ShowPreviousPhotoInCategoryCommand.Execute(null);
+            }
+            else
+            {
+                viewModel.ShowNextPhotoInCategoryCommand.Execute(null);
+            }
+
+            e.Handled = true;
+        }
+    }
+
+    private void PanPhotoViewerHorizontally(int direction)
+    {
+        var viewport = GetPhotoViewerViewportSize();
+        var step = Math.Clamp(viewport.Width * 0.16, 48, 180);
+        SetPhotoViewerImageOrigin(new Point(
+            _photoViewerImageOrigin.X - direction * step,
+            _photoViewerImageOrigin.Y));
     }
 
     private void FocusPhotoViewerOverlay()
@@ -1791,8 +1822,20 @@ public partial class MainView : UserControl
         if (DataContext is MainViewModel viewModel &&
             sender is Control { DataContext: AlbumPhotoViewModel photo })
         {
-            await viewModel.OpenPhotoViewerAsync(photo);
-            await Dispatcher.UIThread.InvokeAsync(ResetPhotoViewerZoom, DispatcherPriority.Render);
+            await OpenAlbumPhotoInViewerAsync(viewModel, photo);
+            e.Handled = true;
+        }
+    }
+
+    private async void AlbumPhotoCard_Tapped(object? sender, TappedEventArgs e)
+    {
+        if (DataContext is MainViewModel viewModel &&
+            sender is Control { DataContext: AlbumPhotoViewModel photo } &&
+            e.Source is Control source &&
+            !IsFromAlbumPhotoSelectionButton(source))
+        {
+            await OpenAlbumPhotoInViewerAsync(viewModel, photo);
+            e.Handled = true;
         }
     }
 
@@ -1804,6 +1847,20 @@ public partial class MainView : UserControl
             viewModel.TogglePhotoSelection(photo);
             e.Handled = true;
         }
+    }
+
+    private async Task OpenAlbumPhotoInViewerAsync(MainViewModel viewModel, AlbumPhotoViewModel photo)
+    {
+        await viewModel.OpenPhotoViewerAsync(photo);
+        await Dispatcher.UIThread.InvokeAsync(ResetPhotoViewerZoom, DispatcherPriority.Render);
+    }
+
+    private static bool IsFromAlbumPhotoSelectionButton(Control source)
+    {
+        return source.Name == "AlbumPhotoSelectionButton" ||
+            source.GetVisualAncestors()
+                .OfType<Control>()
+                .Any(control => control.Name == "AlbumPhotoSelectionButton");
     }
 
     private async void DuplicatePhotoViewerItem_Click(object? sender, RoutedEventArgs e)

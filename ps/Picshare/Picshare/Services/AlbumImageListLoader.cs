@@ -21,6 +21,16 @@ public sealed class AlbumImageListLoader : IDisposable
     private HashSet<AlbumImageWarmupKey> _skippedWarmupKeys = new();
     private HashSet<AlbumImageWarmupKey> _failedVisibleKeys = new();
     private Dictionary<int, ActiveImageWork> _activeImageWorks = new();
+    private bool _isFullImageWarmupActive;
+    private string _fullImageWarmupAlbumId = "";
+    private string _activeFullImageDuplicateGroupId = "";
+    private AlbumPhotoViewModel? _fullImageWarmupCurrentPhoto;
+    private List<AlbumPhotoViewModel> _fullImageWarmupNavigationPhotos = new();
+    private List<AlbumPhotoViewModel> _fullImageWarmupDuplicatePhotos = new();
+    private List<AlbumPhotoViewModel> _fullImageWarmupQueue = new();
+    private HashSet<AlbumPhotoViewModel> _fullImageWarmupPriority1Photos = new();
+    private HashSet<AlbumPhotoViewModel> _activeFullImageDuplicateContextPhotos = new();
+    private HashSet<AlbumPhotoViewModel> _attemptedFullImageWarmupPhotos = new();
     private CancellationTokenSource? _lifetime;
     private readonly List<Task> _workerTasks = new();
     private Task _stoppedWorkerTasks = Task.CompletedTask;
@@ -31,6 +41,7 @@ public sealed class AlbumImageListLoader : IDisposable
     private int _pendingWorkerSignalCount;
     private long _generation;
     private bool _disposed;
+    private const int FullImageWarmupRadius = 8;
 
     public AlbumImageListLoader(ImageCacheService imageCache, HttpClient httpClient)
     {
@@ -107,6 +118,68 @@ public sealed class AlbumImageListLoader : IDisposable
             _detailedThumbnailPixelWidth = Math.Max(1, pixelWidth);
             _detailedThumbnailPixelHeight = Math.Max(1, pixelHeight);
         }
+    }
+
+    public (int PixelWidth, int PixelHeight) GetDetailedThumbnailSize()
+    {
+        lock (_sync)
+        {
+            return (_detailedThumbnailPixelWidth, _detailedThumbnailPixelHeight);
+        }
+    }
+
+    public void UpdateFullImageWarmup(
+        AlbumPhotoViewModel? currentPhoto,
+        IReadOnlyList<AlbumPhotoViewModel> navigationPhotos,
+        IReadOnlyList<AlbumPhotoViewModel> duplicatePhotos)
+    {
+        lock (_sync)
+        {
+            if (currentPhoto is null)
+            {
+                ClearFullImageWarmupNoLock();
+            }
+            else
+            {
+                _isFullImageWarmupActive = true;
+                _fullImageWarmupAlbumId = currentPhoto.AlbumId;
+                _fullImageWarmupCurrentPhoto = currentPhoto;
+                _fullImageWarmupNavigationPhotos = navigationPhotos
+                    .Where(photo => string.Equals(photo.AlbumId, currentPhoto.AlbumId, StringComparison.Ordinal))
+                    .Distinct()
+                    .ToList();
+                _fullImageWarmupDuplicatePhotos = duplicatePhotos
+                    .Where(photo => string.Equals(photo.AlbumId, currentPhoto.AlbumId, StringComparison.Ordinal))
+                    .Distinct()
+                    .ToList();
+
+                var duplicateGroupId = currentPhoto.DuplicateGroupId ?? "";
+                if (!string.Equals(_activeFullImageDuplicateGroupId, duplicateGroupId, StringComparison.Ordinal))
+                {
+                    _activeFullImageDuplicateGroupId = duplicateGroupId;
+                    _activeFullImageDuplicateContextPhotos.Clear();
+                }
+
+                if (!string.IsNullOrWhiteSpace(duplicateGroupId))
+                {
+                    _activeFullImageDuplicateContextPhotos.Add(currentPhoto);
+                }
+
+                RebuildFullImageWarmupNoLock();
+            }
+        }
+
+        SignalWorkers();
+    }
+
+    public void ClearFullImageWarmup()
+    {
+        lock (_sync)
+        {
+            ClearFullImageWarmupNoLock();
+        }
+
+        SignalWorkers();
     }
 
     public void RestartPreservingState(int maximumParallelism)
@@ -278,7 +351,23 @@ public sealed class AlbumImageListLoader : IDisposable
             _skippedWarmupKeys = new HashSet<AlbumImageWarmupKey>();
             _failedVisibleKeys = new HashSet<AlbumImageWarmupKey>();
             _activeImageWorks = new Dictionary<int, ActiveImageWork>();
+            ClearFullImageWarmupNoLock();
         }
+    }
+
+    private void ClearFullImageWarmupNoLock()
+    {
+        _isFullImageWarmupActive = false;
+        _fullImageWarmupAlbumId = "";
+        _activeFullImageDuplicateGroupId = "";
+        _fullImageWarmupCurrentPhoto = null;
+        _fullImageWarmupNavigationPhotos = new List<AlbumPhotoViewModel>();
+        _fullImageWarmupDuplicatePhotos = new List<AlbumPhotoViewModel>();
+        _fullImageWarmupQueue = new List<AlbumPhotoViewModel>();
+        _fullImageWarmupPriority1Photos = new HashSet<AlbumPhotoViewModel>();
+        _activeFullImageDuplicateContextPhotos = new HashSet<AlbumPhotoViewModel>();
+        _attemptedFullImageWarmupPhotos = new HashSet<AlbumPhotoViewModel>();
+        _imageCache.SetOriginalImageCachePrioritySets("", [], []);
     }
 
     public async Task ClearAndWaitAsync()
@@ -650,6 +739,176 @@ public sealed class AlbumImageListLoader : IDisposable
         return Volatile.Read(ref _generation) == generation;
     }
 
+    private void RebuildFullImageWarmupNoLock()
+    {
+        if (!_isFullImageWarmupActive || _fullImageWarmupCurrentPhoto is null)
+        {
+            _imageCache.SetOriginalImageCachePrioritySets("", [], []);
+            return;
+        }
+
+        var priority2Photos = _activeFullImageDuplicateContextPhotos
+            .Append(_fullImageWarmupCurrentPhoto)
+            .Where(photo => string.Equals(photo.AlbumId, _fullImageWarmupAlbumId, StringComparison.Ordinal))
+            .Distinct()
+            .ToList();
+        var currentAnchor = GetFullImageWarmupNavigationAnchorNoLock(_fullImageWarmupCurrentPhoto);
+        var currentIndex = _fullImageWarmupNavigationPhotos.FindIndex(photo => ReferenceEquals(photo, currentAnchor));
+        if (currentIndex < 0)
+        {
+            currentIndex = _fullImageWarmupNavigationPhotos.FindIndex(photo => ReferenceEquals(photo, _fullImageWarmupCurrentPhoto));
+        }
+
+        var priority1Photos = new List<AlbumPhotoViewModel>();
+        if (currentIndex >= 0 && _fullImageWarmupNavigationPhotos.Count > 1)
+        {
+            for (var distance = 1; distance <= FullImageWarmupRadius; distance++)
+            {
+                AddFullImageWarmupCandidateNoLock(priority1Photos, currentIndex + distance);
+                AddFullImageWarmupCandidateNoLock(priority1Photos, currentIndex - distance);
+            }
+        }
+
+        var priority2Set = priority2Photos.ToHashSet();
+        priority1Photos = priority1Photos
+            .Where(photo => !priority2Set.Contains(photo))
+            .Distinct()
+            .ToList();
+        _fullImageWarmupPriority1Photos = priority1Photos.ToHashSet();
+        _fullImageWarmupQueue = priority1Photos
+            .Where(photo => !_attemptedFullImageWarmupPhotos.Contains(photo))
+            .ToList();
+        var warmupTargetPhotos = priority1Photos
+            .Concat(GetFullImageDuplicateWarmupCandidatesNoLock(priority1Photos, priority2Set))
+            .ToHashSet();
+        _attemptedFullImageWarmupPhotos.RemoveWhere(photo => !warmupTargetPhotos.Contains(photo));
+
+        _imageCache.SetOriginalImageCachePrioritySets(
+            _fullImageWarmupAlbumId,
+            priority1Photos.Select(GetOriginalCacheFileName),
+            priority2Photos.Select(GetOriginalCacheFileName));
+    }
+
+    private IEnumerable<AlbumPhotoViewModel> GetFullImageDuplicateWarmupCandidatesNoLock(
+        IReadOnlyCollection<AlbumPhotoViewModel> priority1Photos,
+        IReadOnlySet<AlbumPhotoViewModel> priority2Photos)
+    {
+        return _fullImageWarmupDuplicatePhotos
+            .Where(photo => !ReferenceEquals(photo, _fullImageWarmupCurrentPhoto) &&
+                !priority2Photos.Contains(photo) &&
+                !priority1Photos.Contains(photo))
+            .Distinct();
+    }
+
+    private AlbumPhotoViewModel GetFullImageWarmupNavigationAnchorNoLock(AlbumPhotoViewModel photo)
+    {
+        if (!string.IsNullOrWhiteSpace(photo.DuplicateGroupId))
+        {
+            var mainPhoto = _fullImageWarmupNavigationPhotos.FirstOrDefault(candidate =>
+                string.Equals(candidate.DuplicateGroupId, photo.DuplicateGroupId, StringComparison.Ordinal) &&
+                candidate.IsDuplicateGroupMain);
+            if (mainPhoto is not null)
+            {
+                return mainPhoto;
+            }
+        }
+
+        return photo;
+    }
+
+    private void AddFullImageWarmupCandidateNoLock(List<AlbumPhotoViewModel> candidates, int index)
+    {
+        if (_fullImageWarmupNavigationPhotos.Count == 0)
+        {
+            return;
+        }
+
+        var normalizedIndex = index % _fullImageWarmupNavigationPhotos.Count;
+        if (normalizedIndex < 0)
+        {
+            normalizedIndex += _fullImageWarmupNavigationPhotos.Count;
+        }
+
+        var candidate = _fullImageWarmupNavigationPhotos[normalizedIndex];
+        if (!ReferenceEquals(candidate, _fullImageWarmupCurrentPhoto))
+        {
+            candidates.Add(candidate);
+        }
+    }
+
+    private bool TryTakeFullImageOriginalWarmup(
+        long generation,
+        out AlbumPhotoViewModel photo,
+        out int workToken)
+    {
+        lock (_sync)
+        {
+            if (!_isFullImageWarmupActive || !IsCurrentGeneration(generation))
+            {
+                photo = null!;
+                workToken = 0;
+                return false;
+            }
+
+            foreach (var candidate in _fullImageWarmupQueue.ToList())
+            {
+                _fullImageWarmupQueue.Remove(candidate);
+                if (_attemptedFullImageWarmupPhotos.Contains(candidate) ||
+                    candidate.OriginalImageStatus != AlbumImageItemStatus.Unloaded ||
+                    !candidate.TryBeginOriginalImageLoad(out workToken))
+                {
+                    continue;
+                }
+
+                photo = candidate;
+                return true;
+            }
+        }
+
+        photo = null!;
+        workToken = 0;
+        return false;
+    }
+
+    private bool TryTakeFullImageDuplicateOriginalWarmup(
+        long generation,
+        out AlbumPhotoViewModel photo,
+        out int workToken)
+    {
+        lock (_sync)
+        {
+            if (!_isFullImageWarmupActive || !IsCurrentGeneration(generation))
+            {
+                photo = null!;
+                workToken = 0;
+                return false;
+            }
+
+            var priority1Photos = _fullImageWarmupPriority1Photos;
+            var priority2Photos = _activeFullImageDuplicateContextPhotos
+                .Append(_fullImageWarmupCurrentPhoto)
+                .Where(candidate => candidate is not null)
+                .Cast<AlbumPhotoViewModel>()
+                .ToHashSet();
+            foreach (var candidate in GetFullImageDuplicateWarmupCandidatesNoLock(priority1Photos, priority2Photos))
+            {
+                if (_attemptedFullImageWarmupPhotos.Contains(candidate) ||
+                    candidate.OriginalImageStatus != AlbumImageItemStatus.Unloaded ||
+                    !candidate.TryBeginOriginalImageLoad(out workToken))
+                {
+                    continue;
+                }
+
+                photo = candidate;
+                return true;
+            }
+        }
+
+        photo = null!;
+        workToken = 0;
+        return false;
+    }
+
     private async Task RunWorkerAsync(AlbumImageWorkerKind kind, long generation, CancellationToken cancellationToken)
     {
         while (!cancellationToken.IsCancellationRequested && IsCurrentGeneration(generation))
@@ -764,6 +1023,12 @@ public sealed class AlbumImageListLoader : IDisposable
             return true;
         }
 
+        if (TryTakeFullImageOriginalWarmup(generation, out var fullImageWarmupPhoto, out var fullImageWarmupToken))
+        {
+            await ExecuteFullImageOriginalWarmupAsync(fullImageWarmupPhoto, fullImageWarmupToken, generation, cancellationToken);
+            return true;
+        }
+
         if (_imageCache.HasCacheRoom(GetAlbumId(), AlbumImageCacheKind.DetailedThumbnail) &&
             TryTakeNearestWork(generation, AlbumImageWork.DetailedThumbnail, out var detailedPhoto, out var detailedOwnsOriginalLoad, out var detailedWorkToken))
         {
@@ -782,6 +1047,13 @@ public sealed class AlbumImageListLoader : IDisposable
             TryTakeNearestWork(generation, AlbumImageWork.OriginalImage, out var originalPhoto, out _, out var originalWorkToken))
         {
             await ExecuteOriginalWarmupAsync(originalPhoto, originalWorkToken, generation, cancellationToken);
+            return true;
+        }
+
+        if (_imageCache.HasCacheRoom(GetAlbumId(), AlbumImageCacheKind.OriginalImage) &&
+            TryTakeFullImageDuplicateOriginalWarmup(generation, out var duplicateWarmupPhoto, out var duplicateWarmupToken))
+        {
+            await ExecuteFullImageOriginalWarmupAsync(duplicateWarmupPhoto, duplicateWarmupToken, generation, cancellationToken);
             return true;
         }
 
@@ -1484,6 +1756,62 @@ public sealed class AlbumImageListLoader : IDisposable
             SignalWorkers();
             ClearActiveWork(photo);
         }
+    }
+
+    private async Task ExecuteFullImageOriginalWarmupAsync(
+        AlbumPhotoViewModel photo,
+        int workToken,
+        long generation,
+        CancellationToken cancellationToken)
+    {
+        MarkActiveWork(photo, AlbumImageWork.OriginalImage, isVisible: false);
+        try
+        {
+            var originalLoaded = await _imageCache.WarmOriginalAsync(
+                photo.AlbumId,
+                GetOriginalCacheFileName(photo),
+                photo.DownloadUrl,
+                _httpClient,
+                AlbumImageCacheReadMode.Eager,
+                cachePriority: 1,
+                cancellationToken);
+            lock (_sync)
+            {
+                _attemptedFullImageWarmupPhotos.Add(photo);
+                _fullImageWarmupQueue.Remove(photo);
+            }
+
+            photo.CompleteOriginalImageLoad(originalLoaded, workToken);
+        }
+        catch (OperationCanceledException)
+        {
+            photo.CompleteOriginalImageLoad(loaded: false, workToken);
+        }
+        catch (Exception ex)
+        {
+            if (IsCurrentGeneration(generation))
+            {
+                LogImageLoadFailure(photo, AlbumImageWork.OriginalImage, isVisible: false, ex);
+            }
+
+            lock (_sync)
+            {
+                _attemptedFullImageWarmupPhotos.Add(photo);
+                _fullImageWarmupQueue.Remove(photo);
+            }
+
+            photo.CompleteOriginalImageLoad(loaded: false, workToken);
+        }
+        finally
+        {
+            SignalWorkers();
+            ClearActiveWork(photo);
+        }
+    }
+
+    private static string GetOriginalCacheFileName(AlbumPhotoViewModel photo)
+    {
+        return $"{photo.PhotoId}-full{photo.FileExtension}";
     }
 
     private static void ResetWorkStatus(
