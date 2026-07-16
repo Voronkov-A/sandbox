@@ -25,6 +25,9 @@ public partial class MainView : UserControl
     private const double FooterActionButtonCompactThreshold = 70;
     private const double FooterActionButtonSpacing = 8;
     private const double PhotoViewerFooterHorizontalPadding = 16;
+    private const double AlbumDownloadDropdownMaxWidth = 182;
+    private const double AlbumDownloadActionButtonPreferredWidth = 128;
+    private const double AlbumDownloadControlMinWidth = 5;
     private const double OverlayCornerRadius = 6;
     private const double PhotoViewerZoomSliderDefaultHeight = 180;
     private const double PhotoViewerOverlayVerticalGap = 8;
@@ -204,6 +207,10 @@ public partial class MainView : UserControl
         else if (e.PropertyName is nameof(MainViewModel.IsPhotoViewerVisible))
         {
             _ = Dispatcher.UIThread.InvokeAsync(FocusPhotoViewerOverlay, DispatcherPriority.Render);
+        }
+        else if (e.PropertyName is nameof(MainViewModel.IsAlbumDownloadDialogVisible))
+        {
+            _ = Dispatcher.UIThread.InvokeAsync(FocusAlbumDownloadDialogOverlay, DispatcherPriority.Render);
         }
         else if (e.PropertyName is nameof(MainViewModel.ZoomPower)
             or nameof(MainViewModel.PhotoViewerAspectRatioMode))
@@ -414,6 +421,42 @@ public partial class MainView : UserControl
         {
             PhotoViewerOverlay.Focus();
         }
+    }
+
+    private void FocusAlbumDownloadDialogOverlay()
+    {
+        if (DataContext is MainViewModel { IsAlbumDownloadDialogVisible: true })
+        {
+            AlbumDownloadDialogOverlay.Focus();
+        }
+    }
+
+    private void AlbumDownloadDialogOverlay_KeyDown(object? sender, KeyEventArgs e)
+    {
+        if (DataContext is not MainViewModel { IsAlbumDownloadDialogVisible: true } viewModel)
+        {
+            return;
+        }
+
+        if (e.Key is Key.Escape or Key.BrowserBack or Key.Back)
+        {
+            viewModel.CancelAlbumDownloadDialogCommand.Execute(null);
+            e.Handled = true;
+        }
+    }
+
+    private void AlbumDownloadDialogOverlay_PointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (DataContext is MainViewModel { IsAlbumDownloadDialogVisible: true } viewModel)
+        {
+            viewModel.CancelAlbumDownloadDialogCommand.Execute(null);
+            e.Handled = true;
+        }
+    }
+
+    private void AlbumDownloadDialog_PointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        e.Handled = true;
     }
 
     private async void CopyAlbumLink_Click(object? sender, RoutedEventArgs e)
@@ -982,6 +1025,65 @@ public partial class MainView : UserControl
                 category.DestinationDirectoryPath = destinationPath;
             }
         }
+    }
+
+    private void AlbumDownloadRowGrid_SizeChanged(object? sender, SizeChangedEventArgs e)
+    {
+        if (sender is not Grid grid || grid.ColumnDefinitions.Count < 3)
+        {
+            return;
+        }
+
+        UpdateAlbumDownloadRowWidths(grid);
+    }
+
+    private void AlbumDownloadActionHost_SizeChanged(object? sender, SizeChangedEventArgs e)
+    {
+        if (sender is not Control host)
+        {
+            return;
+        }
+
+        var width = Math.Max(
+            AlbumDownloadControlMinWidth,
+            Math.Min(AlbumDownloadActionButtonPreferredWidth, (host.Bounds.Width - 8) / 2));
+        AlbumDownloadButton.Width = width;
+        CancelAlbumDownloadButton.Width = width;
+    }
+
+    private static void UpdateAlbumDownloadRowWidths(Grid grid)
+    {
+        const double squareWidth = 42;
+        const double spacing = 8;
+        var controlWidth = Math.Max(
+            AlbumDownloadControlMinWidth * 3,
+            grid.Bounds.Width - spacing * 2);
+
+        double dropdownWidth;
+        double textBoxWidth;
+        double selectWidth;
+        if (controlWidth >= AlbumDownloadDropdownMaxWidth * 2 + squareWidth)
+        {
+            dropdownWidth = AlbumDownloadDropdownMaxWidth;
+            selectWidth = squareWidth;
+            textBoxWidth = controlWidth - dropdownWidth - selectWidth;
+        }
+        else if (controlWidth >= squareWidth * 3)
+        {
+            selectWidth = squareWidth;
+            dropdownWidth = (controlWidth - selectWidth) / 2;
+            textBoxWidth = dropdownWidth;
+        }
+        else
+        {
+            dropdownWidth = textBoxWidth = selectWidth = Math.Max(
+                AlbumDownloadControlMinWidth,
+                controlWidth / 3);
+        }
+
+        grid.ColumnDefinitions[0].Width = new GridLength(dropdownWidth);
+        grid.ColumnDefinitions[1].Width = new GridLength(textBoxWidth);
+        grid.ColumnDefinitions[2].Width = new GridLength(selectWidth);
     }
 
     private async Task ChooseSettingsDownloadDirectoryAsync(

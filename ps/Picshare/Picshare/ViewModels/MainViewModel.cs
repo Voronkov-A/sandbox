@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.IO.Compression;
 using System.Net.Mail;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform.Storage;
@@ -4833,8 +4834,6 @@ public partial class MainViewModel : ViewModelBase
     {
         var destinationDirectory = Path.GetFullPath(destinationDirectoryPath.Trim());
         Directory.CreateDirectory(destinationDirectory);
-        var reservedDestinationPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var destinationLock = new object();
         var completed = 0;
 
         await Parallel.ForEachAsync(
@@ -4848,12 +4847,7 @@ public partial class MainViewModel : ViewModelBase
             {
                 Dispatcher.UIThread.Post(() => AlbumDownloadProgressMessage = $"Downloading {progressScope}: {photo.FileName}");
 
-                string destinationPath;
-                lock (destinationLock)
-                {
-                    destinationPath = GetAvailableDestinationPath(destinationDirectory, GetSafeDownloadFileName(photo), reservedDestinationPaths);
-                    reservedDestinationPaths.Add(destinationPath);
-                }
+                string destinationPath = GetAvailableDestinationPath(destinationDirectory, GetSafeDownloadFileName(photo));
 
                 var tempPath = Path.Combine(destinationDirectory, $".{Guid.NewGuid():N}.tmp");
                 try
@@ -4984,18 +4978,12 @@ public partial class MainViewModel : ViewModelBase
         return string.IsNullOrWhiteSpace(sanitized) ? "album.zip" : sanitized;
     }
 
-    private static string GetAvailableDestinationPath(string destinationDirectoryPath, string fileName)
-    {
-        return GetAvailableDestinationPath(destinationDirectoryPath, fileName, null);
-    }
-
     private static string GetAvailableDestinationPath(
         string destinationDirectoryPath,
-        string fileName,
-        HashSet<string>? reservedDestinationPaths)
+        string fileName)
     {
         var targetPath = Path.Combine(destinationDirectoryPath, fileName);
-        if (!File.Exists(targetPath) && reservedDestinationPaths?.Contains(targetPath) != true)
+        if (!File.Exists(targetPath))
         {
             return targetPath;
         }
@@ -5005,7 +4993,7 @@ public partial class MainViewModel : ViewModelBase
         for (var index = 1; ; index++)
         {
             targetPath = Path.Combine(destinationDirectoryPath, $"{baseName} ({index}){extension}");
-            if (!File.Exists(targetPath) && reservedDestinationPaths?.Contains(targetPath) != true)
+            if (!File.Exists(targetPath))
             {
                 return targetPath;
             }

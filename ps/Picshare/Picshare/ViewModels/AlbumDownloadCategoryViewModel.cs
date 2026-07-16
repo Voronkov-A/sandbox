@@ -58,7 +58,7 @@ public sealed partial class AlbumDownloadCategoryViewModel : ObservableObject
 
     public string DestinationPathWatermark => IsArchiveMode ? "Destination archive file" : "Destination directory";
 
-    public string DestinationSelectButtonText => IsArchiveMode ? "Save as" : "Select";
+    public string DestinationSelectButtonText => "Select";
 
     partial void OnSelectedModeChanged(AlbumDownloadModeViewModel value)
     {

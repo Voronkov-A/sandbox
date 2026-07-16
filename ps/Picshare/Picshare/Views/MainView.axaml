@@ -295,6 +295,30 @@
     <Style Selector="Button.compact-footer-action TextBlock.footer-action-label">
       <Setter Property="IsVisible" Value="False"/>
     </Style>
+    <Style Selector="Button.album-download-control">
+      <Setter Property="Background" Value="White"/>
+      <Setter Property="BorderBrush" Value="#D6D8D1"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="Foreground" Value="#27343B"/>
+      <Setter Property="CornerRadius" Value="6"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+    </Style>
+    <Style Selector="ComboBox.album-download-control">
+      <Setter Property="Background" Value="White"/>
+      <Setter Property="BorderBrush" Value="#D6D8D1"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="Foreground" Value="#27343B"/>
+      <Setter Property="CornerRadius" Value="6"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="HorizontalContentAlignment" Value="Center"/>
+    </Style>
+    <Style Selector="TextBox.album-download-control">
+      <Setter Property="Background" Value="White"/>
+      <Setter Property="BorderBrush" Value="#D6D8D1"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="Foreground" Value="#27343B"/>
+      <Setter Property="CornerRadius" Value="6"/>
+    </Style>
     <Style Selector="Button.review-tab-header">
       <Setter Property="MinHeight" Value="36"/>
       <Setter Property="Padding" Value="14,8"/>
@@ -2160,9 +2184,14 @@
     </Grid>
 
     <Grid Grid.RowSpan="3"
+          x:Name="AlbumDownloadDialogOverlay"
           Background="#80000000"
+          Focusable="True"
+          KeyDown="AlbumDownloadDialogOverlay_KeyDown"
+          PointerPressed="AlbumDownloadDialogOverlay_PointerPressed"
           IsVisible="{Binding IsAlbumDownloadDialogVisible}">
-      <Border Background="White"
+      <Border x:Name="AlbumDownloadDialog"
+              Background="White"
               BorderBrush="#D6D8D1"
               BorderThickness="1"
               CornerRadius="6"
@@ -2170,7 +2199,8 @@
               Margin="20"
               MaxWidth="780"
               HorizontalAlignment="Stretch"
-              VerticalAlignment="Center">
+              VerticalAlignment="Center"
+              PointerPressed="AlbumDownloadDialog_PointerPressed">
         <Grid RowDefinitions="Auto,*,Auto" MaxHeight="560">
           <TextBlock Text="Download album" FontSize="18" FontWeight="SemiBold"/>
           <ScrollViewer Grid.Row="1" Margin="0,12,0,12">
@@ -2182,50 +2212,110 @@
                           CornerRadius="6"
                           Padding="10"
                           Margin="0,0,0,8">
-                    <Grid ColumnDefinitions="150,170,*,Auto">
+                    <StackPanel Spacing="8">
                       <TextBlock Text="{Binding Header}"
                                  FontWeight="SemiBold"
-                                 VerticalAlignment="Center"
-                                 Margin="0,0,10,0"/>
-                      <ComboBox Grid.Column="1"
-                                ItemsSource="{Binding ModeOptions}"
-                                SelectedItem="{Binding SelectedMode}"
-                                Margin="0,0,10,0">
-                        <ComboBox.ItemTemplate>
-                          <DataTemplate x:DataType="vm:AlbumDownloadModeViewModel">
-                            <TextBlock Text="{Binding Name}"/>
-                          </DataTemplate>
-                        </ComboBox.ItemTemplate>
-                      </ComboBox>
-                      <TextBox Grid.Column="2"
-                               Text="{Binding DestinationDirectoryPath}"
-                               IsEnabled="{Binding IsDestinationDirectoryEnabled}"
-                               Watermark="{Binding DestinationPathWatermark}"
-                               Margin="0,0,10,0"/>
-                      <Button Grid.Column="3"
-                              Click="ChooseAlbumDownloadCategoryDestination_Click"
-                              IsEnabled="{Binding IsDestinationDirectoryEnabled}"
-                              Padding="12,8">
-                        <TextBlock Text="{Binding DestinationSelectButtonText}"/>
-                      </Button>
-                    </Grid>
+                                 VerticalAlignment="Center"/>
+                      <Grid x:Name="AlbumDownloadRowGrid"
+                            ColumnDefinitions="182,*,42"
+                            ColumnSpacing="8"
+                            SizeChanged="AlbumDownloadRowGrid_SizeChanged">
+                        <ComboBox x:Name="AlbumDownloadModeComboBox"
+                                  Classes="album-download-control"
+                                  ItemsSource="{Binding ModeOptions}"
+                                  SelectedItem="{Binding SelectedMode}"
+                                  Height="42"
+                                  MinWidth="5"
+                                  HorizontalAlignment="Stretch"
+                                  HorizontalContentAlignment="Stretch"
+                                  VerticalContentAlignment="Center">
+                          <ComboBox.ItemTemplate>
+                            <DataTemplate x:DataType="vm:AlbumDownloadModeViewModel">
+                              <TextBlock Text="{Binding Name}"
+                                         TextAlignment="Center"
+                                         HorizontalAlignment="Stretch"
+                                         TextTrimming="CharacterEllipsis"/>
+                            </DataTemplate>
+                          </ComboBox.ItemTemplate>
+                        </ComboBox>
+                        <TextBox x:Name="AlbumDownloadDestinationTextBox"
+                                 Classes="album-download-control"
+                                 Grid.Column="1"
+                                 Text="{Binding DestinationDirectoryPath}"
+                                 IsEnabled="{Binding IsDestinationDirectoryEnabled}"
+                                 Watermark="{Binding DestinationPathWatermark}"
+                                 Height="42"
+                                 MinWidth="5"
+                                 HorizontalAlignment="Stretch"
+                                 VerticalContentAlignment="Center"/>
+                        <Button x:Name="AlbumDownloadDestinationSelectButton"
+                                Classes="album-download-control"
+                                Grid.Column="2"
+                                Click="ChooseAlbumDownloadCategoryDestination_Click"
+                                IsEnabled="{Binding IsDestinationDirectoryEnabled}"
+                                MaxWidth="42"
+                                Height="42"
+                                MinWidth="5"
+                                Padding="0"
+                                HorizontalAlignment="Stretch"
+                                HorizontalContentAlignment="Center"
+                                VerticalContentAlignment="Center"
+                                ToolTip.Tip="{Binding DestinationSelectButtonText}">
+                          <Canvas Width="22" Height="22">
+                            <Path Data="M3,7 L8,7 L10,9 L19,9 L19,17 L3,17 Z"
+                                  Stroke="#27343B"
+                                  StrokeThickness="1.7"
+                                  Fill="Transparent"
+                                  StrokeJoin="Round"/>
+                            <Path Data="M3,8 L3,5 L8,5 L10,7 L15,7"
+                                  Stroke="#27343B"
+                                  StrokeThickness="1.7"
+                                  Fill="Transparent"
+                                  StrokeJoin="Round"/>
+                          </Canvas>
+                        </Button>
+                      </Grid>
+                    </StackPanel>
                   </Border>
                 </DataTemplate>
               </ItemsControl.ItemTemplate>
             </ItemsControl>
           </ScrollViewer>
-          <Grid Grid.Row="2" ColumnDefinitions="*,Auto,Auto">
-            <Button Grid.Column="1"
-                    Command="{Binding CancelAlbumDownloadDialogCommand}"
-                    Padding="12,8"
-                    Margin="0,0,8,0">
-              Cancel
-            </Button>
-            <Button Grid.Column="2"
-                    Command="{Binding DownloadAlbumCommand}"
-                    Padding="12,8">
-              Download
-            </Button>
+          <Grid Grid.Row="2"
+                x:Name="AlbumDownloadActionHost"
+                HorizontalAlignment="Stretch"
+                SizeChanged="AlbumDownloadActionHost_SizeChanged">
+            <StackPanel x:Name="AlbumDownloadActionPanel"
+                        Orientation="Horizontal"
+                        Spacing="8"
+                        HorizontalAlignment="Right">
+              <Button x:Name="AlbumDownloadButton"
+                      Classes="album-download-control"
+                      Command="{Binding DownloadAlbumCommand}"
+                      Height="42"
+                      MinWidth="5"
+                      Padding="12,0"
+                      HorizontalContentAlignment="Center"
+                      VerticalContentAlignment="Center">
+                <TextBlock Text="Download"
+                           TextAlignment="Center"
+                           TextTrimming="CharacterEllipsis"
+                           VerticalAlignment="Center"/>
+              </Button>
+              <Button x:Name="CancelAlbumDownloadButton"
+                      Classes="album-download-control"
+                      Command="{Binding CancelAlbumDownloadDialogCommand}"
+                      Height="42"
+                      MinWidth="5"
+                      Padding="12,0"
+                      HorizontalContentAlignment="Center"
+                      VerticalContentAlignment="Center">
+                <TextBlock Text="Cancel"
+                           TextAlignment="Center"
+                           TextTrimming="CharacterEllipsis"
+                           VerticalAlignment="Center"/>
+              </Button>
+            </StackPanel>
           </Grid>
         </Grid>
       </Border>
