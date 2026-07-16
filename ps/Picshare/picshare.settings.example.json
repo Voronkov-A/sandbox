@@ -6,6 +6,7 @@
   "defaultSettings": {
     "fixedHeader": true,
     "fixedTabs": true,
-    "fixedActionPanel": true
+    "fixedActionPanel": true,
+    "showPhotoViewerPreviousNextButtons": true
   }
 }
