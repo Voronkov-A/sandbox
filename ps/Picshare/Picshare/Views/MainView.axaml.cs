@@ -14,6 +14,8 @@ namespace Picshare.Views;
 
 public partial class MainView : UserControl
 {
+    private readonly HashSet<NumericUpDown> _settingsNumericUpDownsWithClamp = [];
+    private bool _isUpdatingSettingsNumericText;
     private const double MinimumPhotoViewerZoom = 1;
     private const double AlbumReviewHeaderScrollStep = 180;
     private const double AlbumReviewHeaderDragThreshold = 6;
@@ -32,6 +34,15 @@ public partial class MainView : UserControl
     private const double PhotoViewerZoomSliderDefaultHeight = 180;
     private const double PhotoViewerOverlayVerticalGap = 8;
     private const double PhotoViewerDuplicateStripScrollStep = 180;
+    private const double SettingsNumericSpinnerWidthThreshold = 130;
+    private const double SettingsPreferredLabelWidth = 150;
+    private const double SettingsMinimumLabelWidth = 60;
+    private const double SettingsInputWidthThreshold = 210;
+    private const double SettingsMinimumColumnWidth = 5;
+    private const double SettingsCacheInputSpacing = 8;
+    private const double SettingsCacheInputCount = 3;
+    private const double SettingsMinimumInputWidth =
+        SettingsMinimumColumnWidth * SettingsCacheInputCount + SettingsCacheInputSpacing * (SettingsCacheInputCount - 1);
     private static readonly IReadOnlyList<FilePickerFileType> ZipFileTypeChoices =
     [
         new("Zip archive")
@@ -73,12 +84,18 @@ public partial class MainView : UserControl
     private double _mainHeaderHiddenHeight;
     private double _albumReviewTabHeaderHiddenHeight;
     private double _imageListFooterHiddenHeight;
+    private double _settingsScrollOffset;
     private bool _isVisibleAlbumPhotoPriorityUpdateQueued;
     private DateTime _lastBlankPhotoDiagnosticsUtc = DateTime.MinValue;
 
     public MainView()
     {
         InitializeComponent();
+        AddHandler(
+            InputElement.KeyDownEvent,
+            SettingsBack_KeyDown,
+            RoutingStrategies.Tunnel,
+            handledEventsToo: true);
         AlbumReviewContentHost.AddHandler(
             InputElement.PointerPressedEvent,
             AlbumReviewContent_PointerPressed,
@@ -749,6 +766,289 @@ public partial class MainView : UserControl
         UpdateFooterActionButtonWidths(FooterActionPanelHost, FooterActionPanel);
         UpdateFooterActionButtonWidths(PhotoViewerActionFooterHost, PhotoViewerActionFooter);
         UpdatePhotoViewerAdaptiveOverlayWidths();
+    }
+
+    private void SettingsBack_KeyDown(object? sender, KeyEventArgs e)
+    {
+        if (DataContext is not MainViewModel { IsSettingsViewVisible: true } viewModel)
+        {
+            return;
+        }
+
+        if (e.Key is Key.BrowserBack)
+        {
+            viewModel.CloseSettingsCommand.Execute(null);
+            e.Handled = true;
+        }
+    }
+
+    private void SettingsNumericUpDown_SizeChanged(object? sender, SizeChangedEventArgs e)
+    {
+        if (sender is NumericUpDown numeric)
+        {
+            if (_settingsNumericUpDownsWithClamp.Add(numeric))
+            {
+                numeric.PropertyChanged += SettingsNumericUpDown_PropertyChanged;
+            }
+
+            numeric.ShowButtonSpinner = e.NewSize.Width >= SettingsNumericSpinnerWidthThreshold;
+            ResetSettingsNumericUpDownBlankText(numeric);
+            ClampSettingsNumericUpDownValue(numeric);
+        }
+    }
+
+    private void SettingsNumericUpDown_PropertyChanged(object? sender, AvaloniaPropertyChangedEventArgs e)
+    {
+        if (sender is not NumericUpDown numeric)
+        {
+            return;
+        }
+
+        if (e.Property == NumericUpDown.TextProperty)
+        {
+            ResetSettingsNumericUpDownBlankText(numeric);
+        }
+        else if (e.Property == NumericUpDown.ValueProperty)
+        {
+            ClampSettingsNumericUpDownValue(numeric);
+        }
+    }
+
+    private void ResetSettingsNumericUpDownBlankText(NumericUpDown numeric)
+    {
+        if (_isUpdatingSettingsNumericText || !string.IsNullOrWhiteSpace(numeric.Text))
+        {
+            return;
+        }
+
+        _isUpdatingSettingsNumericText = true;
+        try
+        {
+            var minimum = GetSettingsNumericUpDownMinimum(numeric);
+            numeric.Value = minimum;
+            numeric.Text = minimum.ToString("0");
+        }
+        finally
+        {
+            _isUpdatingSettingsNumericText = false;
+        }
+    }
+
+    private static void ClampSettingsNumericUpDownValue(NumericUpDown numeric)
+    {
+        var minimum = GetSettingsNumericUpDownMinimum(numeric);
+        var maximum = GetSettingsNumericUpDownMaximum(numeric);
+        if (numeric.Value < minimum)
+        {
+            numeric.Value = minimum;
+        }
+        else if (numeric.Value > maximum)
+        {
+            numeric.Value = maximum;
+        }
+    }
+
+    private static decimal GetSettingsNumericUpDownMinimum(NumericUpDown numeric)
+    {
+        if (TryGetSettingsNumericUpDownRange(numeric, out var minimum, out _))
+        {
+            return minimum;
+        }
+
+        return numeric.Minimum;
+    }
+
+    private static decimal GetSettingsNumericUpDownMaximum(NumericUpDown numeric)
+    {
+        if (TryGetSettingsNumericUpDownRange(numeric, out _, out var maximum))
+        {
+            return maximum;
+        }
+
+        return numeric.Tag switch
+        {
+            decimal tagMaximum => tagMaximum,
+            double tagMaximum => (decimal)tagMaximum,
+            int tagMaximum => tagMaximum,
+            string text when decimal.TryParse(text, out var tagMaximum) => tagMaximum,
+            _ => numeric.Maximum
+        };
+    }
+
+    private static bool TryGetSettingsNumericUpDownRange(NumericUpDown numeric, out decimal minimum, out decimal maximum)
+    {
+        minimum = default;
+        maximum = default;
+        if (numeric.Tag is not string text)
+        {
+            return false;
+        }
+
+        var parts = text.Split(':', 2);
+        return parts.Length == 2 &&
+            decimal.TryParse(parts[0], out minimum) &&
+            decimal.TryParse(parts[1], out maximum);
+    }
+
+    private void SettingsContentPanel_SizeChanged(object? sender, SizeChangedEventArgs e)
+    {
+        UpdateSettingsRowWidths();
+    }
+
+    private void SettingsScrollViewer_ScrollChanged(object? sender, ScrollChangedEventArgs e)
+    {
+        if (sender is not ScrollViewer scrollViewer ||
+            DataContext is not MainViewModel { IsSettingsViewVisible: true } viewModel)
+        {
+            return;
+        }
+
+        var currentOffset = scrollViewer.Offset.Y;
+        var previousOffset = _settingsScrollOffset;
+        _settingsScrollOffset = currentOffset;
+        var delta = currentOffset - previousOffset;
+        if (Math.Abs(delta) < 0.5)
+        {
+            return;
+        }
+
+        var mainHeaderHeight = GetChromeSurfaceHeight(MainHeader, MainHeaderRow());
+        if (!viewModel.FixedHeader)
+        {
+            _mainHeaderHiddenHeight = Math.Clamp(_mainHeaderHiddenHeight + delta, 0, mainHeaderHeight);
+        }
+
+        var maxOffset = Math.Max(0, scrollViewer.Extent.Height - scrollViewer.Viewport.Height);
+        if (currentOffset <= 0.5 && delta < 0)
+        {
+            _mainHeaderHiddenHeight = 0;
+        }
+        else if (currentOffset >= maxOffset - 0.5 && delta > 0)
+        {
+            _mainHeaderHiddenHeight = viewModel.FixedHeader ? 0 : mainHeaderHeight;
+        }
+
+        ApplyChromeSurface(MainHeader, MainHeaderRow(), viewModel.FixedHeader ? 0 : _mainHeaderHiddenHeight, topSurface: true);
+    }
+
+    private void UpdateSettingsRowWidths()
+    {
+        var rowWidth = new[]
+            {
+                AnonymousNameSettingsRow.Bounds.Width,
+                ColumnsSettingsRow.Bounds.Width,
+                ZoomPowerSettingsRow.Bounds.Width,
+                ParallelismSettingsRow.Bounds.Width,
+                CacheLimitSettingsGrid.Bounds.Width,
+                CachedImagesSettingsRow.Bounds.Width
+            }
+            .Where(width => width > 1)
+            .DefaultIfEmpty(SettingsContentPanel.Bounds.Width)
+            .Min();
+        if (rowWidth <= 1)
+        {
+            return;
+        }
+
+        var (labelWidth, inputWidth) = CalculateSettingsColumnWidths(rowWidth);
+        ApplySettingsRowWidths(AnonymousNameSettingsRow, labelWidth, inputWidth);
+        ApplySettingsRowWidths(ColumnsSettingsRow, labelWidth, inputWidth);
+        ApplySettingsRowWidths(ZoomPowerSettingsRow, labelWidth, inputWidth);
+        ApplySettingsRowWidths(ParallelismSettingsRow, labelWidth, inputWidth);
+        ApplySettingsRowWidths(CacheLimitSettingsGrid, labelWidth, inputWidth);
+        ApplySettingsRowWidths(CachedImagesSettingsRow, labelWidth, inputWidth);
+    }
+
+    private static void SettingsSquareButtonRow_SizeChanged(object? sender, SizeChangedEventArgs e)
+    {
+        if (sender is not Grid grid || grid.ColumnDefinitions.Count < 3)
+        {
+            return;
+        }
+
+        const double squareWidth = 42;
+        const double spacing = 8;
+        var controlWidth = Math.Max(SettingsMinimumColumnWidth * 3, grid.Bounds.Width - spacing * 2);
+
+        double textBoxWidth;
+        double buttonWidth;
+        if (controlWidth >= squareWidth * 3)
+        {
+            buttonWidth = squareWidth;
+            textBoxWidth = controlWidth - buttonWidth * 2;
+        }
+        else
+        {
+            textBoxWidth = buttonWidth = Math.Max(SettingsMinimumColumnWidth, controlWidth / 3);
+        }
+
+        grid.ColumnDefinitions[0].Width = new GridLength(textBoxWidth);
+        grid.ColumnDefinitions[1].Width = new GridLength(buttonWidth);
+        grid.ColumnDefinitions[2].Width = new GridLength(buttonWidth);
+    }
+
+    private static void SettingsGoogleAuthorizationRow_SizeChanged(object? sender, SizeChangedEventArgs e)
+    {
+        if (sender is not Grid grid || grid.ColumnDefinitions.Count < 3)
+        {
+            return;
+        }
+
+        var signInButton = grid.Children
+            .OfType<Button>()
+            .FirstOrDefault(button => Grid.GetColumn(button) == 1);
+        var signOutButton = grid.Children
+            .OfType<Button>()
+            .FirstOrDefault(button => Grid.GetColumn(button) == 2);
+
+        if (signOutButton?.IsVisible == true)
+        {
+            const double squareWidth = 42;
+            const double spacing = 8;
+            var controlWidth = Math.Max(SettingsMinimumColumnWidth * 2, grid.Bounds.Width - spacing);
+            var buttonWidth = controlWidth >= squareWidth * 2
+                ? squareWidth
+                : Math.Max(SettingsMinimumColumnWidth, controlWidth / 2);
+            grid.ColumnDefinitions[0].Width = new GridLength(controlWidth - buttonWidth);
+            grid.ColumnDefinitions[1].Width = new GridLength(0);
+            grid.ColumnDefinitions[2].Width = new GridLength(buttonWidth);
+            return;
+        }
+
+        grid.ColumnDefinitions[0].Width = new GridLength(1, GridUnitType.Star);
+        grid.ColumnDefinitions[1].Width = signInButton?.IsVisible == true
+            ? new GridLength(1, GridUnitType.Auto)
+            : new GridLength(0);
+        grid.ColumnDefinitions[2].Width = new GridLength(0);
+    }
+
+    private static (double LabelWidth, double InputWidth) CalculateSettingsColumnWidths(double rowWidth)
+    {
+        if (rowWidth >= SettingsPreferredLabelWidth + SettingsInputWidthThreshold)
+        {
+            return (SettingsPreferredLabelWidth, rowWidth - SettingsPreferredLabelWidth);
+        }
+
+        if (rowWidth >= SettingsMinimumLabelWidth + SettingsInputWidthThreshold)
+        {
+            return (rowWidth - SettingsInputWidthThreshold, SettingsInputWidthThreshold);
+        }
+
+        if (rowWidth >= SettingsMinimumLabelWidth + SettingsMinimumInputWidth)
+        {
+            return (SettingsMinimumLabelWidth, rowWidth - SettingsMinimumLabelWidth);
+        }
+
+        var scale = rowWidth / (SettingsMinimumLabelWidth + SettingsMinimumInputWidth);
+        var labelWidth = Math.Max(SettingsMinimumColumnWidth, SettingsMinimumLabelWidth * scale);
+        var inputWidth = Math.Max(SettingsMinimumColumnWidth, rowWidth - labelWidth);
+        return (labelWidth, inputWidth);
+    }
+
+    private static void ApplySettingsRowWidths(Grid grid, double labelWidth, double inputWidth)
+    {
+        grid.ColumnDefinitions[0].Width = new GridLength(labelWidth);
+        grid.ColumnDefinitions[1].Width = new GridLength(inputWidth);
     }
 
     private void UpdatePhotoViewerAdaptiveOverlayWidths()

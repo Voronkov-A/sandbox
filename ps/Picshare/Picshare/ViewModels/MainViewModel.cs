@@ -162,12 +162,6 @@ public partial class MainViewModel : ViewModelBase
     private int _numberOfPicturesPerRow = LocalUserSettings.DefaultPicturesPerRow;
 
     [ObservableProperty]
-    private bool _cacheThumbnails = true;
-
-    [ObservableProperty]
-    private bool _cacheOriginalImages = true;
-
-    [ObservableProperty]
     private bool _fixedHeader = true;
 
     [ObservableProperty]
@@ -411,6 +405,18 @@ public partial class MainViewModel : ViewModelBase
 
     [ObservableProperty]
     private int _albumDeletionProgressMaximum = 1;
+
+    [ObservableProperty]
+    private bool _isAlbumOpenProgressVisible;
+
+    [ObservableProperty]
+    private string _albumOpenProgressMessage = "";
+
+    [ObservableProperty]
+    private int _albumOpenProgressValue;
+
+    [ObservableProperty]
+    private int _albumOpenProgressMaximum = 1;
 
     [ObservableProperty]
     private bool _isCancelAlbumDeletionConfirmationVisible;
@@ -667,6 +673,16 @@ public partial class MainViewModel : ViewModelBase
             ? "Waiting for consent"
             : "Not connected";
 
+    public string GoogleAuthorizationStatus => IsGoogleSignedIn
+        ? string.IsNullOrWhiteSpace(_googleTokenSet?.Email)
+            ? "Signed in"
+            : _googleTokenSet.Email
+        : IsGoogleSignInPending
+            ? "Waiting for consent"
+            : "Signed out";
+
+    public bool IsGoogleSignedOut => !IsGoogleSignedIn;
+
     public bool IsAlbumWorkflowStatusVisible => !string.IsNullOrWhiteSpace(AlbumWorkflowStatus);
 
     public ObservableCollection<AlbumPhotoSourceViewModel> AlbumPhotos { get; } = new();
@@ -768,6 +784,7 @@ public partial class MainViewModel : ViewModelBase
     private CancellationTokenSource? _albumDownloadCancellation;
     private CancellationTokenSource? _albumCreationCancellation;
     private CancellationTokenSource? _albumDeletionCancellation;
+    private CancellationTokenSource? _albumOpenCancellation;
     private PendingAlbumCreation? _activePendingAlbumCreation;
     private AlbumManifest? _activeDeletingAlbumManifest;
     private PendingAlbumCreation? _failedPendingAlbumCreation;
@@ -785,12 +802,14 @@ public partial class MainViewModel : ViewModelBase
     private readonly Dictionary<string, IReadOnlyList<AlbumPhotoViewModel>> _duplicateGroupsById = new(StringComparer.Ordinal);
     private bool _isFlowTabActive;
     private string _activeReviewTabId = UncategorizedReviewTabId;
+    private int _settingsReturnTabIndex;
     private int _unfrozenCollectedPhotoCount;
     private bool _hasCollectedFeedback;
     private bool _isFeedbackFinalized;
     private string _lastOpenAlbumLink = "";
     private readonly List<FeedbackUndoEntry> _feedbackUndoHistory = new();
     private readonly SemaphoreSlim _feedbackSyncGate = new(1);
+    private readonly SemaphoreSlim _feedbackSyncWake = new(0);
     private string? _driveNextPageToken;
     private bool _isBulkPhotoActionPanelPinned;
     private bool _isBulkPhotoActionPanelCollapsed;
@@ -802,6 +821,7 @@ public partial class MainViewModel : ViewModelBase
     private Guid? _albumCreationLongRunningOperationId;
     private Guid? _albumDeletionLongRunningOperationId;
     private Guid? _albumDownloadLongRunningOperationId;
+    private Guid? _albumOpenLongRunningOperationId;
 
     public bool HasMoreDriveItems => !string.IsNullOrWhiteSpace(_driveNextPageToken);
 
@@ -892,8 +912,6 @@ public partial class MainViewModel : ViewModelBase
             AnonymousReviewerName = localSettings.AnonymousReviewerName;
             MaximumParallelism = NormalizeMaximumParallelism(localSettings.MaximumParallelism);
             NumberOfPicturesPerRow = NormalizeNumberOfPicturesPerRow(localSettings.NumberOfPicturesPerRow);
-            CacheThumbnails = localSettings.CacheThumbnails;
-            CacheOriginalImages = localSettings.CacheOriginalImages;
             FixedHeader = localSettings.FixedHeader ?? _settingsProvider.DefaultSettings.FixedHeader ?? true;
             FixedTabs = localSettings.FixedTabs ?? _settingsProvider.DefaultSettings.FixedTabs ?? true;
             FixedActionPanel = localSettings.FixedActionPanel ?? _settingsProvider.DefaultSettings.FixedActionPanel ?? true;
@@ -2603,7 +2621,7 @@ public partial class MainViewModel : ViewModelBase
         ShareLink = result.PicshareLink;
         DriveFolderLink = result.AlbumLocation;
         Status = $"Album created with {result.Manifest.Photos.Count} photo(s).";
-        await LoadAlbumAsync(result.Manifest);
+        await LoadAlbumAsync(result.Manifest, CancellationToken.None, preferLocalFeedback: true, syncImmediately: true);
         SaveOpenedAlbumReference(result.Manifest, result.PicshareLink);
         OpenAlbumLink = "";
         MainTabIndex = 1;
@@ -3212,8 +3230,21 @@ public partial class MainViewModel : ViewModelBase
     [RelayCommand]
     private void ShowSettings()
     {
+        if (MainTabIndex != 2)
+        {
+            _settingsReturnTabIndex = MainTabIndex;
+        }
+
         MainTabIndex = 2;
         IsSidebarOpen = false;
+    }
+
+    [RelayCommand]
+    private void CloseSettings()
+    {
+        MainTabIndex = _settingsReturnTabIndex is 0 or 1
+            ? _settingsReturnTabIndex
+            : _currentManifest is null ? 0 : 1;
     }
 
     [RelayCommand]
@@ -3284,6 +3315,8 @@ public partial class MainViewModel : ViewModelBase
             return;
         }
 
+        var previousManifest = _currentManifest;
+        CancellationTokenSource? cancellation = null;
         try
         {
             if (showBusy)
@@ -3291,19 +3324,38 @@ public partial class MainViewModel : ViewModelBase
                 IsBusy = true;
             }
 
-            Status = "Opening album...";
+            _albumOpenCancellation?.Cancel();
+            _albumOpenCancellation?.Dispose();
+            cancellation = new CancellationTokenSource();
+            _albumOpenCancellation = cancellation;
+            IsAlbumOpenProgressVisible = true;
+            AlbumOpenProgressValue = 0;
+            AlbumOpenProgressMaximum = 4;
+            AlbumOpenProgressMessage = "Opening album...";
+            Status = AlbumOpenProgressMessage;
+            await using var longRunningOperation = await BeginLongRunningOperationAsync(
+                LongRunningOperationKind.AlbumOpen,
+                "Opening Picshare album",
+                AlbumOpenProgressMessage,
+                AlbumOpenProgressValue,
+                AlbumOpenProgressMaximum,
+                cancellation.Token);
+
             var manifest = localManifestPath is not null
-                ? await _albumLoader.LoadFromLocalFileAsync(localManifestPath, CancellationToken.None)
-                : await _albumLoader.LoadFromPublicDriveFileAsync(manifestFileId!, CancellationToken.None);
+                ? await _albumLoader.LoadFromLocalFileAsync(localManifestPath, cancellation.Token)
+                : await _albumLoader.LoadFromPublicDriveFileAsync(manifestFileId!, cancellation.Token);
+            AlbumOpenProgressValue = 1;
+            AlbumOpenProgressMessage = "Checking album access...";
             DriveFolderLink = manifest.GoogleDrive?.AlbumFolderUrl ?? manifest.LocalFileSystem?.RootPath ?? "";
             ShareLink = GetAlbumShareLink(manifest);
 
-            if (await RequiresGoogleAuthorizationPromptAsync(manifest))
+            if (await RequiresGoogleAuthorizationPromptAsync(manifest, cancellation.Token))
             {
                 PreparePendingAuthorizedAlbumOpen(manifest);
                 return;
             }
 
+            cancellation.Token.ThrowIfCancellationRequested();
             if (UsesLocalFileSystemBackend(manifest) && CreateLocalReviewerIdentity() is null)
             {
                 StopFeedbackSync();
@@ -3326,7 +3378,9 @@ public partial class MainViewModel : ViewModelBase
                 return;
             }
 
-            await LoadAlbumAsync(manifest);
+            AlbumOpenProgressValue = 2;
+            AlbumOpenProgressMessage = "Loading local album state...";
+            await LoadAlbumAsync(manifest, cancellation.Token, preferLocalFeedback: true, syncImmediately: true);
             if (_currentManifest is not null)
             {
                 if (saveHistory)
@@ -3340,8 +3394,15 @@ public partial class MainViewModel : ViewModelBase
 
                 MainTabIndex = 1;
                 OpenAlbumLink = "";
+                AlbumOpenProgressValue = AlbumOpenProgressMaximum;
+                AlbumOpenProgressMessage = "Album opened.";
                 Status = $"Opened {manifest.Title} with {manifest.Photos.Count} photo(s).";
             }
+        }
+        catch (OperationCanceledException)
+        {
+            Status = "Album opening cancelled.";
+            await RestoreAlbumAfterOpenCancellationAsync(previousManifest);
         }
         catch (Exception ex)
         {
@@ -3349,10 +3410,44 @@ public partial class MainViewModel : ViewModelBase
         }
         finally
         {
+            if (cancellation is not null && ReferenceEquals(_albumOpenCancellation, cancellation))
+            {
+                IsAlbumOpenProgressVisible = false;
+                ClearLongRunningOperation(LongRunningOperationKind.AlbumOpen);
+                cancellation.Dispose();
+                _albumOpenCancellation = null;
+            }
+
             if (showBusy)
             {
                 IsBusy = false;
             }
+        }
+    }
+
+    [RelayCommand]
+    private void CancelAlbumOpenProgress()
+    {
+        _albumOpenCancellation?.Cancel();
+    }
+
+    private async Task RestoreAlbumAfterOpenCancellationAsync(AlbumManifest? previousManifest)
+    {
+        if (previousManifest is null)
+        {
+            ClearOpenedAlbumState();
+            return;
+        }
+
+        try
+        {
+            await LoadAlbumAsync(previousManifest, CancellationToken.None, preferLocalFeedback: true, syncImmediately: true);
+            CurrentSidebarAlbum = CreateSidebarAlbum(previousManifest, GetAlbumShareLink(previousManifest));
+            MainTabIndex = 1;
+        }
+        catch
+        {
+            ClearOpenedAlbumState();
         }
     }
 
@@ -3411,8 +3506,13 @@ public partial class MainViewModel : ViewModelBase
         Status = "Google authorization is required before this album can be opened.";
     }
 
-    private async Task LoadAlbumAsync(AlbumManifest manifest)
+    private async Task LoadAlbumAsync(
+        AlbumManifest manifest,
+        CancellationToken cancellationToken,
+        bool preferLocalFeedback,
+        bool syncImmediately)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         StopFeedbackSync();
         StopFlowMonitor();
         _currentManifest = manifest;
@@ -3463,6 +3563,7 @@ public partial class MainViewModel : ViewModelBase
 
         foreach (var photo in manifest.Photos)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             Photos.Add(new AlbumPhotoViewModel(
                 manifest.AlbumId,
                 photo.Id,
@@ -3478,7 +3579,7 @@ public partial class MainViewModel : ViewModelBase
 
         if (UsesReviewerFeedbackBackend(manifest))
         {
-            await LoadReviewerFeedbackAsync(manifest);
+            await LoadReviewerFeedbackAsync(manifest, cancellationToken, preferLocalFeedback, syncImmediately);
         }
 
         ApplyFeedbackDatabaseToPhotos();
@@ -5058,7 +5159,7 @@ public partial class MainViewModel : ViewModelBase
         return string.IsNullOrWhiteSpace(picturesPath) ? "" : picturesPath;
     }
 
-    private async Task<bool> RequiresGoogleAuthorizationPromptAsync(AlbumManifest manifest)
+    private async Task<bool> RequiresGoogleAuthorizationPromptAsync(AlbumManifest manifest, CancellationToken cancellationToken)
     {
         if (!UsesGoogleDriveBackend(manifest))
         {
@@ -5072,7 +5173,7 @@ public partial class MainViewModel : ViewModelBase
 
         try
         {
-            await GetGoogleAccessTokenAsync(CancellationToken.None);
+            await GetGoogleAccessTokenAsync(cancellationToken);
             return false;
         }
         catch
@@ -5096,7 +5197,7 @@ public partial class MainViewModel : ViewModelBase
         _pendingGoogleAuthorizationManifest = null;
         IsGoogleAuthorizationRequired = false;
         GoogleAuthorizationMessage = "";
-        await LoadAlbumAsync(manifest);
+        await LoadAlbumAsync(manifest, CancellationToken.None, preferLocalFeedback: true, syncImmediately: true);
         if (_currentManifest is not null)
         {
             SaveOpenedAlbumReference(manifest, GetAlbumShareLink(manifest));
@@ -5228,7 +5329,11 @@ public partial class MainViewModel : ViewModelBase
             : AlbumLinkParser.CreateLocalPicshareLink(manifest.LocalFileSystem!.ManifestFilePath);
     }
 
-    private async Task LoadReviewerFeedbackAsync(AlbumManifest manifest)
+    private async Task LoadReviewerFeedbackAsync(
+        AlbumManifest manifest,
+        CancellationToken cancellationToken,
+        bool preferLocalFeedback,
+        bool syncImmediately)
     {
         var reviewerIdentity = CreateReviewerIdentity(manifest);
         if (reviewerIdentity is null)
@@ -5242,32 +5347,42 @@ public partial class MainViewModel : ViewModelBase
             return;
         }
 
-        var backend = await CreateFeedbackBackendAsync(manifest, CancellationToken.None);
-        var deletionMarker = await backend.LoadAlbumDeletionMarkerAsync(CancellationToken.None);
-        if (deletionMarker is not null)
+        ReviewerFeedbackLoadResult? result = null;
+        if (preferLocalFeedback)
         {
-            if (IsCurrentReviewerAuthor(manifest))
-            {
-                _currentReviewerIdentity = reviewerIdentity;
-                IsAuthorFlowVisible = true;
-                Status = "Album deletion was already started. Continuing deletion...";
-                PrepareOpenAlbumForDeletion();
-                await ExecuteAlbumDeletionAsync(manifest, reviewerIdentity, backend, CancellationToken.None, showProgress: true);
-            }
-            else
-            {
-                await CloseOpenedAlbumLocallyAsync(manifest);
-                Status = "This album is being deleted by its author.";
-            }
-
-            return;
+            result = await _reviewerFeedbackService.TryLoadLocalAsync(manifest, reviewerIdentity, cancellationToken);
         }
 
-        var result = await _reviewerFeedbackService.LoadAsync(
-            manifest,
-            reviewerIdentity,
-            backend,
-            CancellationToken.None);
+        IReviewerFeedbackBackend? backend = null;
+        if (result is null)
+        {
+            backend = await CreateFeedbackBackendAsync(manifest, cancellationToken);
+            var deletionMarker = await backend.LoadAlbumDeletionMarkerAsync(cancellationToken);
+            if (deletionMarker is not null)
+            {
+                if (IsCurrentReviewerAuthor(manifest))
+                {
+                    _currentReviewerIdentity = reviewerIdentity;
+                    IsAuthorFlowVisible = true;
+                    Status = "Album deletion was already started. Continuing deletion...";
+                    PrepareOpenAlbumForDeletion();
+                    await ExecuteAlbumDeletionAsync(manifest, reviewerIdentity, backend, cancellationToken, showProgress: true);
+                }
+                else
+                {
+                    await CloseOpenedAlbumLocallyAsync(manifest);
+                    Status = "This album is being deleted by its author.";
+                }
+
+                return;
+            }
+
+            result = await _reviewerFeedbackService.LoadAsync(
+                manifest,
+                reviewerIdentity,
+                backend,
+                cancellationToken);
+        }
 
         _currentReviewerIdentity = reviewerIdentity;
         _feedbackSession = result.Session;
@@ -5277,12 +5392,12 @@ public partial class MainViewModel : ViewModelBase
         IsFeedbackPassed = _feedbackStatus.Status == ReviewerFeedbackStatusKind.Passed;
         IsFeedbackLeft = _feedbackStatus.Status == ReviewerFeedbackStatusKind.Left;
         IsAuthorFlowVisible = IsCurrentReviewerAuthor(manifest);
-        if (IsAuthorFlowVisible)
+        if (IsAuthorFlowVisible && backend is not null)
         {
             await _reviewerFeedbackService.EnsureInitialWorkflowHistoryAsync(
                 manifest,
                 backend,
-                CancellationToken.None);
+                cancellationToken);
         }
 
         CanCollectFeedback = IsAuthorFlowVisible;
@@ -5294,7 +5409,7 @@ public partial class MainViewModel : ViewModelBase
             ShowFeedbackConflictNotice();
         }
 
-        StartFeedbackSync();
+        StartFeedbackSync(syncImmediately);
     }
 
     private async Task ExecuteAlbumDeletionAsync(
@@ -5673,11 +5788,15 @@ public partial class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(WorkflowHistoryHeader));
     }
 
-    private void StartFeedbackSync()
+    private void StartFeedbackSync(bool syncImmediately = false)
     {
         StopFeedbackSync();
         _feedbackSyncCancellation = new CancellationTokenSource();
         _ = RunFeedbackSyncLoopAsync(_feedbackSyncCancellation.Token);
+        if (syncImmediately)
+        {
+            WakeFeedbackSync();
+        }
     }
 
     private void StopFeedbackSync()
@@ -5691,15 +5810,20 @@ public partial class MainViewModel : ViewModelBase
     {
         try
         {
-            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(30));
-            while (await timer.WaitForNextTickAsync(cancellationToken))
+            while (!cancellationToken.IsCancellationRequested)
             {
+                await _feedbackSyncWake.WaitAsync(TimeSpan.FromSeconds(30), cancellationToken);
                 await SyncFeedbackAsync(cancellationToken);
             }
         }
         catch (OperationCanceledException)
         {
         }
+    }
+
+    private void WakeFeedbackSync()
+    {
+        _feedbackSyncWake.Release();
     }
 
     private async Task SyncFeedbackAsync(CancellationToken cancellationToken = default)
@@ -6087,6 +6211,9 @@ public partial class MainViewModel : ViewModelBase
 
         switch (kind)
         {
+            case LongRunningOperationKind.AlbumOpen:
+                _albumOpenLongRunningOperationId = scope.OperationId;
+                break;
             case LongRunningOperationKind.AlbumCreation:
             case LongRunningOperationKind.AlbumCreationCancellation:
                 _albumCreationLongRunningOperationId = scope.OperationId;
@@ -6129,6 +6256,9 @@ public partial class MainViewModel : ViewModelBase
     {
         switch (kind)
         {
+            case LongRunningOperationKind.AlbumOpen:
+                _albumOpenLongRunningOperationId = null;
+                break;
             case LongRunningOperationKind.AlbumCreation:
             case LongRunningOperationKind.AlbumCreationCancellation:
                 _albumCreationLongRunningOperationId = null;
@@ -6963,8 +7093,6 @@ public partial class MainViewModel : ViewModelBase
             AnonymousReviewerName = AnonymousReviewerName.Trim(),
             MaximumParallelism = GetMaximumParallelism(),
             NumberOfPicturesPerRow = NormalizeNumberOfPicturesPerRow(NumberOfPicturesPerRow),
-            CacheThumbnails = CacheThumbnails,
-            CacheOriginalImages = CacheOriginalImages,
             FixedHeader = FixedHeader,
             FixedTabs = FixedTabs,
             FixedActionPanel = FixedActionPanel,
@@ -6991,8 +7119,6 @@ public partial class MainViewModel : ViewModelBase
 
     private void ApplyImageCacheSettings()
     {
-        var previousCacheThumbnails = _imageCache.CacheThumbnails;
-        var previousCacheOriginalImages = _imageCache.CacheOriginalImages;
         var previousLimits = _imageCache.Limits;
         var limits = new AlbumImageCacheLimits(
             AlbumImageCacheLimits.Megabytes(GetCacheSizeMb(AlbumFastThumbnailMemoryCacheSizeMb, 256)),
@@ -7004,12 +7130,8 @@ public partial class MainViewModel : ViewModelBase
             AlbumImageCacheLimits.Megabytes(GetCacheSizeMb(AlbumFastThumbnailDiskCacheSizeMb, 512)),
             AlbumImageCacheLimits.Megabytes(GetCacheSizeMb(AlbumDetailedThumbnailDiskCacheSizeMb, 2048)),
             AlbumImageCacheLimits.Megabytes(GetCacheSizeMb(AlbumOriginalImageDiskCacheSizeMb, 2048)));
-        var cacheSettingsChanged = previousCacheThumbnails != CacheThumbnails ||
-            previousCacheOriginalImages != CacheOriginalImages ||
-            previousLimits != limits;
+        var cacheSettingsChanged = previousLimits != limits;
 
-        _imageCache.CacheThumbnails = CacheThumbnails;
-        _imageCache.CacheOriginalImages = CacheOriginalImages;
         _imageCache.Limits = limits;
         if (cacheSettingsChanged)
         {
@@ -7154,16 +7276,6 @@ public partial class MainViewModel : ViewModelBase
         NumberOfPicturesPerRow = NormalizeNumberOfPicturesPerRow(value);
         RebuildCategoryRows();
         UpdateAlbumPhotoCardSize(_lastAlbumPhotoListWidth);
-        PersistLocalUserSettingsIfReady();
-    }
-
-    partial void OnCacheThumbnailsChanged(bool value)
-    {
-        PersistLocalUserSettingsIfReady();
-    }
-
-    partial void OnCacheOriginalImagesChanged(bool value)
-    {
         PersistLocalUserSettingsIfReady();
     }
 
@@ -7428,6 +7540,39 @@ public partial class MainViewModel : ViewModelBase
             value);
     }
 
+    partial void OnAlbumOpenProgressMessageChanged(string value)
+    {
+        UpdateLongRunningOperation(
+            _albumOpenLongRunningOperationId,
+            LongRunningOperationKind.AlbumOpen,
+            "Opening Picshare album",
+            value,
+            AlbumOpenProgressValue,
+            AlbumOpenProgressMaximum);
+    }
+
+    partial void OnAlbumOpenProgressValueChanged(int value)
+    {
+        UpdateLongRunningOperation(
+            _albumOpenLongRunningOperationId,
+            LongRunningOperationKind.AlbumOpen,
+            "Opening Picshare album",
+            AlbumOpenProgressMessage,
+            value,
+            AlbumOpenProgressMaximum);
+    }
+
+    partial void OnAlbumOpenProgressMaximumChanged(int value)
+    {
+        UpdateLongRunningOperation(
+            _albumOpenLongRunningOperationId,
+            LongRunningOperationKind.AlbumOpen,
+            "Opening Picshare album",
+            AlbumOpenProgressMessage,
+            AlbumOpenProgressValue,
+            value);
+    }
+
     partial void OnGoogleSignInUrlChanged(string value)
     {
         OnPropertyChanged(nameof(IsGoogleSignInInstructionVisible));
@@ -7437,11 +7582,14 @@ public partial class MainViewModel : ViewModelBase
     {
         OnPropertyChanged(nameof(IsGoogleSignInInstructionVisible));
         OnPropertyChanged(nameof(GoogleConnectionStatus));
+        OnPropertyChanged(nameof(GoogleAuthorizationStatus));
     }
 
     partial void OnIsGoogleSignedInChanged(bool value)
     {
         OnPropertyChanged(nameof(GoogleConnectionStatus));
+        OnPropertyChanged(nameof(GoogleAuthorizationStatus));
+        OnPropertyChanged(nameof(IsGoogleSignedOut));
     }
 
     private sealed record FeedbackUndoScope(

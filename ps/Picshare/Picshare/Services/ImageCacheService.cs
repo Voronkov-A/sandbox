@@ -27,39 +27,6 @@ public sealed class ImageCacheService
         _rootPath = Path.Combine(basePath, "Picshare", "cache", "images");
     }
 
-    private bool _cacheThumbnails = true;
-    private bool _cacheOriginalImages = true;
-
-    public bool CacheThumbnails
-    {
-        get => _cacheThumbnails;
-        set
-        {
-            if (_cacheThumbnails == value)
-            {
-                return;
-            }
-
-            _cacheThumbnails = value;
-            TrimAllDiskCaches();
-        }
-    }
-
-    public bool CacheOriginalImages
-    {
-        get => _cacheOriginalImages;
-        set
-        {
-            if (_cacheOriginalImages == value)
-            {
-                return;
-            }
-
-            _cacheOriginalImages = value;
-            TrimAllDiskCaches();
-        }
-    }
-
     public AlbumImageCacheLimits Limits
     {
         get => _limits;
@@ -1905,12 +1872,7 @@ public sealed class ImageCacheService
 
     private bool IsDiskCachingEnabled(AlbumImageCacheKind kind)
     {
-        return kind switch
-        {
-            AlbumImageCacheKind.FastThumbnail or AlbumImageCacheKind.DetailedThumbnail => CacheThumbnails,
-            AlbumImageCacheKind.OriginalImage => CacheOriginalImages,
-            _ => true
-        };
+        return Limits.GetDiskBytes(kind) > 0;
     }
 
     private static string GetFastThumbnailCacheFileName(string photoId)
@@ -2258,7 +2220,7 @@ public sealed class ImageCacheService
     {
         return Limits.OriginalImageMemoryBytes > 0 ||
             Limits.OriginalImageBitmapMemoryBytes > 0 ||
-            CacheOriginalImages && Limits.OriginalImageDiskBytes > 0;
+            Limits.OriginalImageDiskBytes > 0;
     }
 
     private static string GetLocalStorageRootPath(string? configuredRootPath)

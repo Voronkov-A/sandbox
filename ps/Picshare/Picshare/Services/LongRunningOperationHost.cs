@@ -2,6 +2,7 @@ namespace Picshare.Services;
 
 public enum LongRunningOperationKind
 {
+    AlbumOpen,
     AlbumCreation,
     AlbumCreationCancellation,
     AlbumDeletion,

@@ -406,7 +406,7 @@ public sealed class ImageCacheServiceWarmupTests
             CancellationToken.None));
         Assert.NotEmpty(Directory.EnumerateFiles(tempDirectory.Path, "*", SearchOption.AllDirectories));
 
-        imageCache.CacheOriginalImages = false;
+        imageCache.Limits = imageCache.Limits with { OriginalImageDiskBytes = 0 };
 
         Assert.Empty(Directory.EnumerateFiles(tempDirectory.Path, "*", SearchOption.AllDirectories));
     }
@@ -436,7 +436,7 @@ public sealed class ImageCacheServiceWarmupTests
             CancellationToken.None));
         Assert.NotEmpty(Directory.EnumerateFiles(tempDirectory.Path, "*", SearchOption.AllDirectories));
 
-        imageCache.CacheOriginalImages = false;
+        imageCache.Limits = imageCache.Limits with { OriginalImageDiskBytes = 0 };
 
         Assert.Empty(Directory.EnumerateFiles(tempDirectory.Path, "*", SearchOption.AllDirectories));
     }
@@ -466,7 +466,7 @@ public sealed class ImageCacheServiceWarmupTests
             CancellationToken.None));
         Assert.NotEmpty(Directory.EnumerateFiles(tempDirectory.Path, "*", SearchOption.AllDirectories));
 
-        imageCache.CacheOriginalImages = false;
+        imageCache.Limits = imageCache.Limits with { OriginalImageDiskBytes = 0 };
 
         Assert.Empty(Directory.EnumerateFiles(tempDirectory.Path, "*", SearchOption.AllDirectories));
     }
@@ -495,7 +495,7 @@ public sealed class ImageCacheServiceWarmupTests
             AlbumImageCacheReadMode.Eager,
             CancellationToken.None));
 
-        imageCache.CacheOriginalImages = false;
+        imageCache.Limits = imageCache.Limits with { OriginalImageDiskBytes = 0 };
 
         Assert.True(await imageCache.WarmFastThumbnailAsync(
             "album",

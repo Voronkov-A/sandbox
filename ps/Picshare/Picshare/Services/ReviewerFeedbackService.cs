@@ -83,6 +83,41 @@ public sealed class ReviewerFeedbackService
             databaseLoad.ConcurrentRemoteUpdate || statusLoad.ConcurrentRemoteUpdate);
     }
 
+    public async Task<ReviewerFeedbackLoadResult?> TryLoadLocalAsync(
+        AlbumManifest manifest,
+        FeedbackReviewerIdentity reviewer,
+        CancellationToken cancellationToken)
+    {
+        var localFolderPath = GetLocalFolderPath(manifest.AlbumId, reviewer.BackendType, reviewer.UserId);
+        var localDatabase = await LoadLocalDatabaseAsync(localFolderPath, cancellationToken);
+        var localStatus = await LoadLocalStatusAsync(localFolderPath, cancellationToken);
+        var localState = await LoadLocalStateAsync(localFolderPath, cancellationToken);
+        if (localDatabase is null ||
+            localStatus is null ||
+            string.IsNullOrWhiteSpace(localState.ReviewerStoreId) ||
+            !string.Equals(localDatabase.AlbumId, manifest.AlbumId, StringComparison.Ordinal) ||
+            !string.Equals(localDatabase.ReviewerUserId, reviewer.UserId, StringComparison.Ordinal) ||
+            !string.Equals(localStatus.AlbumId, manifest.AlbumId, StringComparison.Ordinal) ||
+            !string.Equals(localStatus.Reviewer.UserId, reviewer.UserId, StringComparison.Ordinal) ||
+            !string.Equals(localStatus.Reviewer.BackendType, reviewer.BackendType, StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        return new ReviewerFeedbackLoadResult(
+            new ReviewerFeedbackSession
+            {
+                AlbumId = manifest.AlbumId,
+                ReviewerUserId = reviewer.UserId,
+                ReviewerStoreId = localState.ReviewerStoreId,
+                LocalFolderPath = localFolderPath,
+                State = localState
+            },
+            localDatabase,
+            localStatus,
+            ConcurrentRemoteUpdate: false);
+    }
+
     public async Task SaveLocalDecisionAsync(
         ReviewerFeedbackSession session,
         ReviewerFeedbackDatabase database,

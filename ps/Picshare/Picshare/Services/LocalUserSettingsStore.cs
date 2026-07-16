@@ -67,10 +67,6 @@ public sealed class LocalUserSettings
 
     public int NumberOfPicturesPerRow { get; set; } = DefaultPicturesPerRow;
 
-    public bool CacheThumbnails { get; set; } = true;
-
-    public bool CacheOriginalImages { get; set; } = true;
-
     public bool? FixedHeader { get; set; }
 
     public bool? FixedTabs { get; set; }

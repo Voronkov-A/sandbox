@@ -295,6 +295,47 @@
     <Style Selector="Button.compact-footer-action TextBlock.footer-action-label">
       <Setter Property="IsVisible" Value="False"/>
     </Style>
+    <Style Selector="TextBlock.settings-row-label">
+      <Setter Property="VerticalAlignment" Value="Center"/>
+      <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+      <Setter Property="Margin" Value="0,0,8,0"/>
+    </Style>
+    <Style Selector="TextBlock.settings-title">
+      <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+    </Style>
+    <Style Selector="TextBox.settings-control">
+      <Setter Property="Height" Value="42"/>
+      <Setter Property="MinWidth" Value="5"/>
+      <Setter Property="VerticalContentAlignment" Value="Center"/>
+    </Style>
+    <Style Selector="NumericUpDown.settings-control">
+      <Setter Property="Height" Value="42"/>
+      <Setter Property="MinWidth" Value="5"/>
+      <Setter Property="VerticalContentAlignment" Value="Center"/>
+    </Style>
+    <Style Selector="Button.settings-control">
+      <Setter Property="Height" Value="42"/>
+      <Setter Property="MinWidth" Value="5"/>
+      <Setter Property="Padding" Value="12,8"/>
+      <Setter Property="Background" Value="White"/>
+      <Setter Property="BorderBrush" Value="#D6D8D1"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="Foreground" Value="#27343B"/>
+      <Setter Property="CornerRadius" Value="6"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="HorizontalAlignment" Value="Stretch"/>
+      <Setter Property="HorizontalContentAlignment" Value="Center"/>
+      <Setter Property="VerticalContentAlignment" Value="Center"/>
+    </Style>
+    <Style Selector="CheckBox.settings-control">
+      <Setter Property="MinHeight" Value="42"/>
+      <Setter Property="MinWidth" Value="5"/>
+      <Setter Property="HorizontalAlignment" Value="Stretch"/>
+      <Setter Property="VerticalAlignment" Value="Center"/>
+      <Setter Property="ClipToBounds" Value="True"/>
+      <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+      <Setter Property="VerticalContentAlignment" Value="Center"/>
+    </Style>
     <Style Selector="Button.album-download-control">
       <Setter Property="Background" Value="White"/>
       <Setter Property="BorderBrush" Value="#D6D8D1"/>
@@ -374,7 +415,8 @@
         <TranslateTransform/>
       </Border.RenderTransform>
       <Grid ColumnDefinitions="Auto,*,Auto" Margin="12,0">
-        <Button Width="42"
+        <Button Classes="footer-action"
+                Width="42"
                 Height="42"
                 Padding="0"
                 Command="{Binding ToggleSidebarCommand}"
@@ -397,7 +439,17 @@
                    HorizontalAlignment="Center"
                    VerticalAlignment="Center"
                    TextTrimming="CharacterEllipsis"/>
+        <TextBlock Grid.Column="1"
+                   Text="Settings"
+                   IsVisible="{Binding IsSettingsViewVisible}"
+                   FontSize="15"
+                   FontWeight="SemiBold"
+                   Foreground="#27343B"
+                   HorizontalAlignment="Center"
+                   VerticalAlignment="Center"
+                   TextTrimming="CharacterEllipsis"/>
         <Button Grid.Column="2"
+                Classes="footer-action"
                 Width="42"
                 Height="42"
                 Padding="0"
@@ -450,10 +502,29 @@
             </MenuFlyout>
           </Button.Flyout>
         </Button>
+        <Button Grid.Column="2"
+                Classes="footer-action"
+                Width="42"
+                Height="42"
+                Padding="0"
+                IsVisible="{Binding IsSettingsViewVisible}"
+                Command="{Binding CloseSettingsCommand}"
+                ToolTip.Tip="Close settings"
+                HorizontalAlignment="Right"
+                VerticalAlignment="Center"
+                HorizontalContentAlignment="Center"
+                VerticalContentAlignment="Center">
+          <Canvas Width="18" Height="18">
+            <Path Data="M4,4 L14,14 M14,4 L4,14"
+                  Stroke="#27343B"
+                  StrokeThickness="2"
+                  StrokeLineCap="Round"/>
+          </Canvas>
+        </Button>
       </Grid>
     </Border>
 
-    <Grid Grid.Row="1">
+    <Grid Grid.Row="1" Grid.RowSpan="2">
       <Grid IsVisible="{Binding IsCreateViewVisible}" Margin="20">
           <ScrollViewer>
             <Grid ColumnDefinitions="440,*"
@@ -1538,8 +1609,9 @@
               </Border>
           </Grid>
       </Grid>
-      <Grid IsVisible="{Binding IsSettingsViewVisible}" Margin="20">
-        <ScrollViewer>
+      <Grid IsVisible="{Binding IsSettingsViewVisible}" Margin="20,20,20,4">
+        <ScrollViewer x:Name="SettingsScrollViewer"
+                      ScrollChanged="SettingsScrollViewer_ScrollChanged">
           <Border Background="White"
                   BorderBrush="#D6D8D1"
                   BorderThickness="1"
@@ -1547,139 +1619,268 @@
                   Padding="18"
                   MaxWidth="760"
                   HorizontalAlignment="Stretch">
-            <StackPanel Spacing="12">
-              <TextBlock Text="Settings" FontSize="18" FontWeight="SemiBold"/>
-              <StackPanel Spacing="5">
-                <TextBlock Text="Anonymous reviewer name" FontWeight="SemiBold"/>
-                <TextBox Text="{Binding AnonymousReviewerName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                         Watermark="Name shown in local album flow lists"/>
+            <StackPanel x:Name="SettingsContentPanel" Spacing="16" SizeChanged="SettingsContentPanel_SizeChanged">
+              <StackPanel Spacing="8">
+                <TextBlock Classes="settings-title" Text="Authorization" FontSize="16" FontWeight="SemiBold"/>
+                <Border BorderBrush="#D6D8D1" BorderThickness="1" CornerRadius="6" Padding="12">
+                  <StackPanel Spacing="8">
+                    <TextBlock Classes="settings-title" Text="Anonymous" FontWeight="SemiBold"/>
+                    <Grid x:Name="AnonymousNameSettingsRow" ColumnDefinitions="150,*" MinHeight="42">
+                      <TextBlock Classes="settings-row-label" Text="Name"/>
+                      <TextBox Grid.Column="1"
+                               Classes="settings-control"
+                               Text="{Binding AnonymousReviewerName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                               Watermark="Name shown in local album flow lists"/>
+                    </Grid>
+                  </StackPanel>
+                </Border>
+                <Border BorderBrush="#D6D8D1" BorderThickness="1" CornerRadius="6" Padding="12">
+                  <StackPanel Spacing="8">
+                    <TextBlock Classes="settings-title" Text="Google" FontWeight="SemiBold"/>
+                    <Grid ColumnDefinitions="*,Auto,42" ColumnSpacing="8" SizeChanged="SettingsGoogleAuthorizationRow_SizeChanged">
+                      <TextBlock Text="{Binding GoogleAuthorizationStatus}"
+                                 VerticalAlignment="Center"
+                                 TextTrimming="CharacterEllipsis"
+                                 Margin="0"/>
+                      <Button Grid.Column="1"
+                              Classes="settings-control"
+                              Click="SettingsSignInGoogle_Click"
+                              IsVisible="{Binding IsGoogleSignedOut}"
+                              >
+                        Sign in
+                      </Button>
+                      <Button Grid.Column="2"
+                              Classes="settings-control"
+                              Command="{Binding ClearGoogleAuthorizationCommand}"
+                              IsVisible="{Binding IsGoogleSignedIn}"
+                              MaxWidth="42"
+                              Height="42"
+                              MinWidth="5"
+                              Padding="0"
+                              ToolTip.Tip="Sign out">
+                        <Canvas Width="18" Height="18">
+                          <Path Data="M4,4 L14,14 M14,4 L4,14" Stroke="#27343B" StrokeThickness="2" StrokeLineCap="Round"/>
+                        </Canvas>
+                      </Button>
+                    </Grid>
+                  </StackPanel>
+                </Border>
               </StackPanel>
-              <StackPanel Spacing="5">
-                <TextBlock Text="Maximum parallel operations" FontWeight="SemiBold"/>
-                <NumericUpDown Value="{Binding MaximumParallelism}"
-                               Minimum="1"
-                               Maximum="64"
-                               Increment="1"/>
-              </StackPanel>
-              <StackPanel Spacing="5">
-                <TextBlock Text="Number of pictures per row" FontWeight="SemiBold"/>
-                <NumericUpDown Value="{Binding NumberOfPicturesPerRow}"
-                               Minimum="1"
-                               Maximum="8"
-                               Increment="1"/>
-              </StackPanel>
-              <StackPanel Spacing="5">
-                <TextBlock Text="Zoom power" FontWeight="SemiBold"/>
-                <NumericUpDown Value="{Binding ZoomPower}"
-                               Minimum="2"
-                               Maximum="10000"
-                               Increment="1"/>
-              </StackPanel>
-              <StackPanel Spacing="6">
-                <TextBlock Text="Image cache" FontWeight="SemiBold"/>
-                <CheckBox IsChecked="{Binding CacheThumbnails}">
-                  Cache thumbnails
-                </CheckBox>
-                <CheckBox IsChecked="{Binding CacheOriginalImages}">
-                  Cache original images
-                </CheckBox>
-                <Grid ColumnDefinitions="220,*,*,*" RowDefinitions="Auto,Auto,Auto,Auto" Margin="0,4,0,0">
-                  <TextBlock Grid.Column="1" Text="Encoded MB" FontSize="12" Foreground="#6C756F" Margin="0,0,8,4"/>
-                  <TextBlock Grid.Column="2" Text="Bitmap MB" FontSize="12" Foreground="#6C756F" Margin="0,0,8,4"/>
-                  <TextBlock Grid.Column="3" Text="Disk MB" FontSize="12" Foreground="#6C756F" Margin="0,0,0,4"/>
 
-                  <TextBlock Grid.Row="1" Text="Fast thumbnails" VerticalAlignment="Center" Margin="0,0,8,6"/>
-                  <NumericUpDown Grid.Row="1" Grid.Column="1" Value="{Binding AlbumFastThumbnailMemoryCacheSizeMb}" Minimum="0" Maximum="65536" Increment="64" Margin="0,0,8,6"/>
-                  <NumericUpDown Grid.Row="1" Grid.Column="2" Value="{Binding AlbumFastThumbnailBitmapCacheSizeMb}" Minimum="0" Maximum="65536" Increment="64" Margin="0,0,8,6"/>
-                  <NumericUpDown Grid.Row="1" Grid.Column="3" Value="{Binding AlbumFastThumbnailDiskCacheSizeMb}" Minimum="0" Maximum="65536" Increment="64" Margin="0,0,0,6"/>
-
-                  <TextBlock Grid.Row="2" Text="Detailed thumbnails" VerticalAlignment="Center" Margin="0,0,8,6"/>
-                  <NumericUpDown Grid.Row="2" Grid.Column="1" Value="{Binding AlbumDetailedThumbnailMemoryCacheSizeMb}" Minimum="0" Maximum="65536" Increment="64" Margin="0,0,8,6"/>
-                  <NumericUpDown Grid.Row="2" Grid.Column="2" Value="{Binding AlbumDetailedThumbnailBitmapCacheSizeMb}" Minimum="0" Maximum="65536" Increment="64" Margin="0,0,8,6"/>
-                  <NumericUpDown Grid.Row="2" Grid.Column="3" Value="{Binding AlbumDetailedThumbnailDiskCacheSizeMb}" Minimum="0" Maximum="65536" Increment="64" Margin="0,0,0,6"/>
-
-                  <TextBlock Grid.Row="3" Text="Original images" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                  <NumericUpDown Grid.Row="3" Grid.Column="1" Value="{Binding AlbumOriginalImageMemoryCacheSizeMb}" Minimum="0" Maximum="65536" Increment="64" Margin="0,0,8,0"/>
-                  <NumericUpDown Grid.Row="3" Grid.Column="2" Value="{Binding AlbumOriginalImageBitmapCacheSizeMb}" Minimum="0" Maximum="65536" Increment="64" Margin="0,0,8,0"/>
-                  <NumericUpDown Grid.Row="3" Grid.Column="3" Value="{Binding AlbumOriginalImageDiskCacheSizeMb}" Minimum="0" Maximum="65536" Increment="64"/>
-                </Grid>
-              </StackPanel>
-              <StackPanel Spacing="6">
-                <TextBlock Text="Layout" FontWeight="SemiBold"/>
-                <CheckBox IsChecked="{Binding FixedHeader}">
-                  Fixed header
-                </CheckBox>
-                <CheckBox IsChecked="{Binding FixedTabs}">
-                  Fixed tabs
-                </CheckBox>
-                <CheckBox IsChecked="{Binding FixedActionPanel}">
-                  Fixed action panel
-                </CheckBox>
-                <CheckBox IsChecked="{Binding ShowPhotoViewerPreviousNextButtons}">
-                  Show previous/next buttons
-                </CheckBox>
-              </StackPanel>
-              <StackPanel Spacing="5">
-                <TextBlock Text="Default download directories" FontWeight="SemiBold"/>
-                <Grid ColumnDefinitions="150,*,Auto,Auto" RowDefinitions="Auto,Auto,Auto,Auto,Auto">
-                  <TextBlock Text="Picture" VerticalAlignment="Center" Margin="0,0,8,8"/>
-                  <TextBox Grid.Column="1" Text="{Binding PictureDefaultDownloadDirectoryPath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,8,8"/>
-                  <Button Grid.Column="2" Click="ChoosePictureDefaultDownloadDirectory_Click" Padding="12,8" Margin="0,0,8,8">Select</Button>
-                  <Button Grid.Column="3" Command="{Binding SetPictureDefaultDownloadDirectoryToDefaultCommand}" Padding="12,8" Margin="0,0,0,8">Set to default</Button>
-
-                  <TextBlock Grid.Row="1" Text="Todo" VerticalAlignment="Center" Margin="0,0,8,8"/>
-                  <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding UncategorizedDefaultDownloadDirectoryPath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,8,8"/>
-                  <Button Grid.Row="1" Grid.Column="2" Click="ChooseUncategorizedDefaultDownloadDirectory_Click" Padding="12,8" Margin="0,0,8,8">Select</Button>
-                  <Button Grid.Row="1" Grid.Column="3" Command="{Binding SetUncategorizedDefaultDownloadDirectoryToDefaultCommand}" Padding="12,8" Margin="0,0,0,8">Set to default</Button>
-
-                  <TextBlock Grid.Row="2" Text="Nice" VerticalAlignment="Center" Margin="0,0,8,8"/>
-                  <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding NiceDefaultDownloadDirectoryPath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,8,8"/>
-                  <Button Grid.Row="2" Grid.Column="2" Click="ChooseNiceDefaultDownloadDirectory_Click" Padding="12,8" Margin="0,0,8,8">Select</Button>
-                  <Button Grid.Row="2" Grid.Column="3" Command="{Binding SetNiceDefaultDownloadDirectoryToDefaultCommand}" Padding="12,8" Margin="0,0,0,8">Set to default</Button>
-
-                  <TextBlock Grid.Row="3" Text="Okay" VerticalAlignment="Center" Margin="0,0,8,8"/>
-                  <TextBox Grid.Row="3" Grid.Column="1" Text="{Binding OkDefaultDownloadDirectoryPath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,8,8"/>
-                  <Button Grid.Row="3" Grid.Column="2" Click="ChooseOkDefaultDownloadDirectory_Click" Padding="12,8" Margin="0,0,8,8">Select</Button>
-                  <Button Grid.Row="3" Grid.Column="3" Command="{Binding SetOkDefaultDownloadDirectoryToDefaultCommand}" Padding="12,8" Margin="0,0,0,8">Set to default</Button>
-
-                  <TextBlock Grid.Row="4" Text="Trash" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                  <TextBox Grid.Row="4" Grid.Column="1" Text="{Binding TrashDefaultDownloadDirectoryPath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,8,0"/>
-                  <Button Grid.Row="4" Grid.Column="2" Click="ChooseTrashDefaultDownloadDirectory_Click" Padding="12,8" Margin="0,0,8,0">Select</Button>
-                  <Button Grid.Row="4" Grid.Column="3" Command="{Binding SetTrashDefaultDownloadDirectoryToDefaultCommand}" Padding="12,8">Set to default</Button>
-                </Grid>
-              </StackPanel>
               <Border Height="1" Background="#D6D8D1"/>
-              <Grid ColumnDefinitions="*,Auto">
-                <TextBlock Text="Downloaded thumbnails and full images"
-                           VerticalAlignment="Center"
-                           TextWrapping="Wrap"
-                           Foreground="#6C756F"/>
-                <Button Grid.Column="1"
-                        Command="{Binding ClearImageCacheCommand}"
-                        Padding="12,8">
-                  Clear cache
-                </Button>
-              </Grid>
+
+              <StackPanel Spacing="8">
+                <TextBlock Classes="settings-title" Text="View" FontSize="16" FontWeight="SemiBold"/>
+                <Border BorderBrush="#D6D8D1" BorderThickness="1" CornerRadius="6" Padding="12">
+                  <StackPanel Spacing="8">
+                    <Grid x:Name="ColumnsSettingsRow" ColumnDefinitions="150,*" MinHeight="42">
+                      <TextBlock Classes="settings-row-label" Text="Columns"/>
+                      <NumericUpDown Value="{Binding NumberOfPicturesPerRow}"
+                                     Classes="settings-control"
+                                     Grid.Column="1"
+                                     SizeChanged="SettingsNumericUpDown_SizeChanged"
+                                     Minimum="0"
+                                     Maximum="999999"
+                                     Increment="1"
+                                     Tag="1:8"/>
+                    </Grid>
+                    <Grid x:Name="ZoomPowerSettingsRow" ColumnDefinitions="150,*" MinHeight="42">
+                      <TextBlock Classes="settings-row-label" Text="Zoom power"/>
+                      <NumericUpDown Value="{Binding ZoomPower}"
+                                     Classes="settings-control"
+                                     Grid.Column="1"
+                                     SizeChanged="SettingsNumericUpDown_SizeChanged"
+                                     Minimum="0"
+                                     Maximum="999999"
+                                     Increment="1"
+                                     Tag="2:10000"/>
+                    </Grid>
+                    <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto">
+                      <CheckBox Classes="settings-control" IsChecked="{Binding FixedHeader}" Margin="0,0,12,8">
+                        <TextBlock x:Name="FixedHeaderSettingsLabel" Text="Fixed header" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" VerticalAlignment="Center"/>
+                      </CheckBox>
+                      <CheckBox Grid.Column="1" Classes="settings-control" IsChecked="{Binding FixedTabs}" Margin="0,0,0,8">
+                        <TextBlock x:Name="FixedTabsSettingsLabel" Text="Fixed tabs" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" VerticalAlignment="Center"/>
+                      </CheckBox>
+                      <CheckBox Grid.Row="1" Classes="settings-control" IsChecked="{Binding FixedActionPanel}" Margin="0,0,12,0">
+                        <TextBlock x:Name="FixedActionPanelSettingsLabel" Text="Fixed action panel" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" VerticalAlignment="Center"/>
+                      </CheckBox>
+                      <CheckBox Grid.Row="1" Grid.Column="1" Classes="settings-control" IsChecked="{Binding ShowPhotoViewerPreviousNextButtons}">
+                        <TextBlock x:Name="NavigationButtonsSettingsLabel" Text="Navigation buttons" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" VerticalAlignment="Center"/>
+                      </CheckBox>
+                    </Grid>
+                  </StackPanel>
+                </Border>
+              </StackPanel>
+
               <Border Height="1" Background="#D6D8D1"/>
-              <Grid ColumnDefinitions="*,Auto,Auto">
-                <StackPanel Spacing="2" VerticalAlignment="Center">
-                  <TextBlock Text="Google authorization" FontWeight="SemiBold"/>
-                  <TextBlock Text="{Binding GoogleConnectionStatus}"
-                             Foreground="#6C756F"
-                             FontSize="12"/>
+
+              <StackPanel Spacing="8">
+                <TextBlock Classes="settings-title" Text="Default download directories" FontSize="16" FontWeight="SemiBold"/>
+                <StackPanel Spacing="8">
+                  <Border BorderBrush="#D6D8D1" BorderThickness="1" CornerRadius="6" Padding="10">
+                    <StackPanel Spacing="8">
+                      <TextBlock Classes="settings-title" Text="Picture" FontWeight="SemiBold"/>
+                      <Grid ColumnDefinitions="*,42,42" ColumnSpacing="8" SizeChanged="SettingsSquareButtonRow_SizeChanged">
+                        <TextBox Classes="settings-control" Text="{Binding PictureDefaultDownloadDirectoryPath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                        <Button Grid.Column="1" Classes="settings-control" Click="ChoosePictureDefaultDownloadDirectory_Click" MaxWidth="42" Height="42" MinWidth="5" Padding="0" ToolTip.Tip="Select">
+                          <Canvas Width="22" Height="22">
+                            <Path Data="M3,7 L8,7 L10,9 L19,9 L19,17 L3,17 Z" Stroke="#27343B" StrokeThickness="1.7" Fill="Transparent" StrokeJoin="Round"/>
+                            <Path Data="M3,8 L3,5 L8,5 L10,7 L15,7" Stroke="#27343B" StrokeThickness="1.7" Fill="Transparent" StrokeJoin="Round"/>
+                          </Canvas>
+                        </Button>
+                        <Button Grid.Column="2" Classes="settings-control" Command="{Binding SetPictureDefaultDownloadDirectoryToDefaultCommand}" MaxWidth="42" Height="42" MinWidth="5" Padding="0" ToolTip.Tip="Set to default">
+                          <Canvas Width="18" Height="18">
+                            <Path Data="M4,4 L14,14 M14,4 L4,14" Stroke="#27343B" StrokeThickness="2" StrokeLineCap="Round"/>
+                          </Canvas>
+                        </Button>
+                      </Grid>
+                    </StackPanel>
+                  </Border>
+                  <Border BorderBrush="#D6D8D1" BorderThickness="1" CornerRadius="6" Padding="10">
+                    <StackPanel Spacing="8">
+                      <TextBlock Classes="settings-title" Text="Todo" FontWeight="SemiBold"/>
+                      <Grid ColumnDefinitions="*,42,42" ColumnSpacing="8" SizeChanged="SettingsSquareButtonRow_SizeChanged">
+                        <TextBox Classes="settings-control" Text="{Binding UncategorizedDefaultDownloadDirectoryPath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                        <Button Grid.Column="1" Classes="settings-control" Click="ChooseUncategorizedDefaultDownloadDirectory_Click" MaxWidth="42" Height="42" MinWidth="5" Padding="0" ToolTip.Tip="Select">
+                          <Canvas Width="22" Height="22">
+                            <Path Data="M3,7 L8,7 L10,9 L19,9 L19,17 L3,17 Z" Stroke="#27343B" StrokeThickness="1.7" Fill="Transparent" StrokeJoin="Round"/>
+                            <Path Data="M3,8 L3,5 L8,5 L10,7 L15,7" Stroke="#27343B" StrokeThickness="1.7" Fill="Transparent" StrokeJoin="Round"/>
+                          </Canvas>
+                        </Button>
+                        <Button Grid.Column="2" Classes="settings-control" Command="{Binding SetUncategorizedDefaultDownloadDirectoryToDefaultCommand}" MaxWidth="42" Height="42" MinWidth="5" Padding="0" ToolTip.Tip="Set to default">
+                          <Canvas Width="18" Height="18">
+                            <Path Data="M4,4 L14,14 M14,4 L4,14" Stroke="#27343B" StrokeThickness="2" StrokeLineCap="Round"/>
+                          </Canvas>
+                        </Button>
+                      </Grid>
+                    </StackPanel>
+                  </Border>
+                  <Border BorderBrush="#D6D8D1" BorderThickness="1" CornerRadius="6" Padding="10">
+                    <StackPanel Spacing="8">
+                      <TextBlock Classes="settings-title" Text="Nice" FontWeight="SemiBold"/>
+                      <Grid ColumnDefinitions="*,42,42" ColumnSpacing="8" SizeChanged="SettingsSquareButtonRow_SizeChanged">
+                        <TextBox Classes="settings-control" Text="{Binding NiceDefaultDownloadDirectoryPath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                        <Button Grid.Column="1" Classes="settings-control" Click="ChooseNiceDefaultDownloadDirectory_Click" MaxWidth="42" Height="42" MinWidth="5" Padding="0" ToolTip.Tip="Select">
+                          <Canvas Width="22" Height="22">
+                            <Path Data="M3,7 L8,7 L10,9 L19,9 L19,17 L3,17 Z" Stroke="#27343B" StrokeThickness="1.7" Fill="Transparent" StrokeJoin="Round"/>
+                            <Path Data="M3,8 L3,5 L8,5 L10,7 L15,7" Stroke="#27343B" StrokeThickness="1.7" Fill="Transparent" StrokeJoin="Round"/>
+                          </Canvas>
+                        </Button>
+                        <Button Grid.Column="2" Classes="settings-control" Command="{Binding SetNiceDefaultDownloadDirectoryToDefaultCommand}" MaxWidth="42" Height="42" MinWidth="5" Padding="0" ToolTip.Tip="Set to default">
+                          <Canvas Width="18" Height="18">
+                            <Path Data="M4,4 L14,14 M14,4 L4,14" Stroke="#27343B" StrokeThickness="2" StrokeLineCap="Round"/>
+                          </Canvas>
+                        </Button>
+                      </Grid>
+                    </StackPanel>
+                  </Border>
+                  <Border BorderBrush="#D6D8D1" BorderThickness="1" CornerRadius="6" Padding="10">
+                    <StackPanel Spacing="8">
+                      <TextBlock Classes="settings-title" Text="Okay" FontWeight="SemiBold"/>
+                      <Grid ColumnDefinitions="*,42,42" ColumnSpacing="8" SizeChanged="SettingsSquareButtonRow_SizeChanged">
+                        <TextBox Classes="settings-control" Text="{Binding OkDefaultDownloadDirectoryPath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                        <Button Grid.Column="1" Classes="settings-control" Click="ChooseOkDefaultDownloadDirectory_Click" MaxWidth="42" Height="42" MinWidth="5" Padding="0" ToolTip.Tip="Select">
+                          <Canvas Width="22" Height="22">
+                            <Path Data="M3,7 L8,7 L10,9 L19,9 L19,17 L3,17 Z" Stroke="#27343B" StrokeThickness="1.7" Fill="Transparent" StrokeJoin="Round"/>
+                            <Path Data="M3,8 L3,5 L8,5 L10,7 L15,7" Stroke="#27343B" StrokeThickness="1.7" Fill="Transparent" StrokeJoin="Round"/>
+                          </Canvas>
+                        </Button>
+                        <Button Grid.Column="2" Classes="settings-control" Command="{Binding SetOkDefaultDownloadDirectoryToDefaultCommand}" MaxWidth="42" Height="42" MinWidth="5" Padding="0" ToolTip.Tip="Set to default">
+                          <Canvas Width="18" Height="18">
+                            <Path Data="M4,4 L14,14 M14,4 L4,14" Stroke="#27343B" StrokeThickness="2" StrokeLineCap="Round"/>
+                          </Canvas>
+                        </Button>
+                      </Grid>
+                    </StackPanel>
+                  </Border>
+                  <Border BorderBrush="#D6D8D1" BorderThickness="1" CornerRadius="6" Padding="10">
+                    <StackPanel Spacing="8">
+                      <TextBlock Classes="settings-title" Text="Trash" FontWeight="SemiBold"/>
+                      <Grid ColumnDefinitions="*,42,42" ColumnSpacing="8" SizeChanged="SettingsSquareButtonRow_SizeChanged">
+                        <TextBox Classes="settings-control" Text="{Binding TrashDefaultDownloadDirectoryPath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                        <Button Grid.Column="1" Classes="settings-control" Click="ChooseTrashDefaultDownloadDirectory_Click" MaxWidth="42" Height="42" MinWidth="5" Padding="0" ToolTip.Tip="Select">
+                          <Canvas Width="22" Height="22">
+                            <Path Data="M3,7 L8,7 L10,9 L19,9 L19,17 L3,17 Z" Stroke="#27343B" StrokeThickness="1.7" Fill="Transparent" StrokeJoin="Round"/>
+                            <Path Data="M3,8 L3,5 L8,5 L10,7 L15,7" Stroke="#27343B" StrokeThickness="1.7" Fill="Transparent" StrokeJoin="Round"/>
+                          </Canvas>
+                        </Button>
+                        <Button Grid.Column="2" Classes="settings-control" Command="{Binding SetTrashDefaultDownloadDirectoryToDefaultCommand}" MaxWidth="42" Height="42" MinWidth="5" Padding="0" ToolTip.Tip="Set to default">
+                          <Canvas Width="18" Height="18">
+                            <Path Data="M4,4 L14,14 M14,4 L4,14" Stroke="#27343B" StrokeThickness="2" StrokeLineCap="Round"/>
+                          </Canvas>
+                        </Button>
+                      </Grid>
+                    </StackPanel>
+                  </Border>
                 </StackPanel>
-                <Button Grid.Column="1"
-                        Click="SettingsSignInGoogle_Click"
-                        Padding="12,8"
-                        Margin="0,0,8,0">
-                  Sign in
-                </Button>
-                <Button Grid.Column="2"
-                        Command="{Binding ClearGoogleAuthorizationCommand}"
-                        Padding="12,8">
-                  Sign out
-                </Button>
-              </Grid>
+              </StackPanel>
+
+              <Border Height="1" Background="#D6D8D1"/>
+
+              <StackPanel Spacing="8">
+                <TextBlock Classes="settings-title" Text="Performance" FontSize="16" FontWeight="SemiBold"/>
+                <Border BorderBrush="#D6D8D1" BorderThickness="1" CornerRadius="6" Padding="12">
+                  <Grid x:Name="ParallelismSettingsRow" ColumnDefinitions="150,*" MinHeight="42">
+                    <TextBlock Classes="settings-row-label" Text="Parallelism"/>
+                    <NumericUpDown Value="{Binding MaximumParallelism}"
+                                   Classes="settings-control"
+                                   Grid.Column="1"
+                                   SizeChanged="SettingsNumericUpDown_SizeChanged"
+                                   Minimum="0"
+                                   Maximum="999999"
+                                   Increment="1"
+                                   Tag="1:64"/>
+                  </Grid>
+                </Border>
+              </StackPanel>
+
+              <Border Height="1" Background="#D6D8D1"/>
+
+              <StackPanel Spacing="8">
+                <TextBlock Classes="settings-title" Text="Cache" FontSize="16" FontWeight="SemiBold"/>
+                <Border BorderBrush="#D6D8D1" BorderThickness="1" CornerRadius="6" Padding="12">
+                  <StackPanel Spacing="8">
+                    <Grid x:Name="CacheLimitSettingsGrid" ColumnDefinitions="150,*" RowDefinitions="Auto,Auto,Auto,Auto">
+                      <Grid Grid.Column="1" ColumnDefinitions="*,*,*" ColumnSpacing="8" MinWidth="31" Margin="0,0,0,4">
+                        <TextBlock Text="Encoded MB" FontSize="12" Foreground="#6C756F" TextTrimming="CharacterEllipsis"/>
+                        <TextBlock Grid.Column="1" Text="Bitmap MB" FontSize="12" Foreground="#6C756F" TextTrimming="CharacterEllipsis"/>
+                        <TextBlock Grid.Column="2" Text="Disk MB" FontSize="12" Foreground="#6C756F" TextTrimming="CharacterEllipsis"/>
+                      </Grid>
+
+                      <TextBlock Grid.Row="1" Classes="settings-row-label" Text="Fast thumbnails" Margin="0,0,8,6"/>
+                      <Grid Grid.Row="1" Grid.Column="1" ColumnDefinitions="*,*,*" ColumnSpacing="8" MinWidth="31" Margin="0,0,0,6">
+                        <NumericUpDown Classes="settings-control" Value="{Binding AlbumFastThumbnailMemoryCacheSizeMb}" SizeChanged="SettingsNumericUpDown_SizeChanged" Minimum="0" Maximum="999999" Increment="64" Tag="20480"/>
+                        <NumericUpDown Grid.Column="1" Classes="settings-control" Value="{Binding AlbumFastThumbnailBitmapCacheSizeMb}" SizeChanged="SettingsNumericUpDown_SizeChanged" Minimum="0" Maximum="999999" Increment="64" Tag="20480"/>
+                        <NumericUpDown Grid.Column="2" Classes="settings-control" Value="{Binding AlbumFastThumbnailDiskCacheSizeMb}" SizeChanged="SettingsNumericUpDown_SizeChanged" Minimum="0" Maximum="999999" Increment="64" Tag="20480"/>
+                      </Grid>
+
+                      <TextBlock Grid.Row="2" Classes="settings-row-label" Text="Detailed thumbnails" Margin="0,0,8,6"/>
+                      <Grid Grid.Row="2" Grid.Column="1" ColumnDefinitions="*,*,*" ColumnSpacing="8" MinWidth="31" Margin="0,0,0,6">
+                        <NumericUpDown Classes="settings-control" Value="{Binding AlbumDetailedThumbnailMemoryCacheSizeMb}" SizeChanged="SettingsNumericUpDown_SizeChanged" Minimum="0" Maximum="999999" Increment="64" Tag="20480"/>
+                        <NumericUpDown Grid.Column="1" Classes="settings-control" Value="{Binding AlbumDetailedThumbnailBitmapCacheSizeMb}" SizeChanged="SettingsNumericUpDown_SizeChanged" Minimum="0" Maximum="999999" Increment="64" Tag="20480"/>
+                        <NumericUpDown Grid.Column="2" Classes="settings-control" Value="{Binding AlbumDetailedThumbnailDiskCacheSizeMb}" SizeChanged="SettingsNumericUpDown_SizeChanged" Minimum="0" Maximum="999999" Increment="64" Tag="20480"/>
+                      </Grid>
+
+                      <TextBlock Grid.Row="3" Classes="settings-row-label" Text="Original images" Margin="0,0,8,0"/>
+                      <Grid Grid.Row="3" Grid.Column="1" ColumnDefinitions="*,*,*" ColumnSpacing="8" MinWidth="31">
+                        <NumericUpDown Classes="settings-control" Value="{Binding AlbumOriginalImageMemoryCacheSizeMb}" SizeChanged="SettingsNumericUpDown_SizeChanged" Minimum="0" Maximum="999999" Increment="64" Tag="20480"/>
+                        <NumericUpDown Grid.Column="1" Classes="settings-control" Value="{Binding AlbumOriginalImageBitmapCacheSizeMb}" SizeChanged="SettingsNumericUpDown_SizeChanged" Minimum="0" Maximum="999999" Increment="64" Tag="20480"/>
+                        <NumericUpDown Grid.Column="2" Classes="settings-control" Value="{Binding AlbumOriginalImageDiskCacheSizeMb}" SizeChanged="SettingsNumericUpDown_SizeChanged" Minimum="0" Maximum="999999" Increment="64" Tag="20480"/>
+                      </Grid>
+                    </Grid>
+                    <Grid x:Name="CachedImagesSettingsRow" ColumnDefinitions="150,*" MinHeight="42">
+                      <TextBlock Classes="settings-row-label"
+                                 Text="Cached images"/>
+                      <Button Grid.Column="1"
+                              Classes="settings-control"
+                              Command="{Binding ClearImageCacheCommand}">
+                        Clear cache
+                      </Button>
+                    </Grid>
+                  </StackPanel>
+                </Border>
+              </StackPanel>
             </StackPanel>
           </Border>
         </ScrollViewer>
@@ -2318,6 +2519,36 @@
             </StackPanel>
           </Grid>
         </Grid>
+      </Border>
+    </Grid>
+
+    <Grid Grid.RowSpan="3"
+          Background="#80000000"
+          IsVisible="{Binding IsAlbumOpenProgressVisible}">
+      <Border Background="White"
+              BorderBrush="#D6D8D1"
+              BorderThickness="1"
+              CornerRadius="6"
+              Padding="18"
+              Margin="20"
+              MaxWidth="520"
+              HorizontalAlignment="Stretch"
+              VerticalAlignment="Center">
+        <StackPanel Spacing="12">
+          <TextBlock Text="Opening album" FontSize="18" FontWeight="SemiBold"/>
+          <TextBlock Text="{Binding AlbumOpenProgressMessage}" TextWrapping="Wrap"/>
+          <ProgressBar Minimum="0"
+                       Maximum="{Binding AlbumOpenProgressMaximum}"
+                       Value="{Binding AlbumOpenProgressValue}"
+                       Height="10"/>
+          <Grid ColumnDefinitions="*,Auto">
+            <Button Grid.Column="1"
+                    Command="{Binding CancelAlbumOpenProgressCommand}"
+                    Padding="12,8">
+              Cancel
+            </Button>
+          </Grid>
+        </StackPanel>
       </Border>
     </Grid>
 
