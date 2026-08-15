@@ -9,24 +9,40 @@ public sealed class GoogleOAuthClientTests
     public async Task RefreshAsync_RetriesTransientConnectionFailure()
     {
         var handler = new FailThenTokenHandler(failuresBeforeSuccess: 2);
-        var client = new GoogleOAuthClient(new HttpClient(handler));
+        List<TimeSpan> retryDelays = [];
+        var client = new GoogleOAuthClient(
+            new HttpClient(handler),
+            (delay, _) =>
+            {
+                retryDelays.Add(delay);
+                return Task.CompletedTask;
+            });
 
         var token = await client.RefreshAsync("client-id", "client-secret", "refresh-token", CancellationToken.None);
 
         Assert.Equal("access-token", token.AccessToken);
         Assert.Equal(3, handler.RequestCount);
+        Assert.Equal([TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5)], retryDelays);
     }
 
     [Fact]
     public async Task RefreshAsync_RetriesTransientServerFailure()
     {
         var handler = new ServerFailureThenTokenHandler();
-        var client = new GoogleOAuthClient(new HttpClient(handler));
+        List<TimeSpan> retryDelays = [];
+        var client = new GoogleOAuthClient(
+            new HttpClient(handler),
+            (delay, _) =>
+            {
+                retryDelays.Add(delay);
+                return Task.CompletedTask;
+            });
 
         var token = await client.RefreshAsync("client-id", "client-secret", "refresh-token", CancellationToken.None);
 
         Assert.Equal("access-token", token.AccessToken);
         Assert.Equal(2, handler.RequestCount);
+        Assert.Equal([TimeSpan.FromSeconds(5)], retryDelays);
     }
 
     [Fact]

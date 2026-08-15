@@ -267,6 +267,13 @@ public partial class MainView : UserControl
         {
             _ = Dispatcher.UIThread.InvokeAsync(UpdatePhotoViewerAdaptiveOverlayWidths, DispatcherPriority.Render);
         }
+        else if (e.PropertyName is nameof(MainViewModel.IsGoogleSignedIn)
+            or nameof(MainViewModel.IsGoogleSignedOut))
+        {
+            _ = Dispatcher.UIThread.InvokeAsync(
+                () => UpdateSettingsGoogleAuthorizationRowWidths(SettingsGoogleAuthorizationRow),
+                DispatcherPriority.Render);
+        }
     }
 
     private async void ManualPhotoImport_Click(object? sender, RoutedEventArgs e)
@@ -746,6 +753,14 @@ public partial class MainView : UserControl
         }
     }
 
+    private void SettingsCompactActionButton_SizeChanged(object? sender, SizeChangedEventArgs e)
+    {
+        if (sender is Button button)
+        {
+            button.Classes.Set("compact-footer-action", e.NewSize.Width < FooterActionButtonCompactThreshold);
+        }
+    }
+
     private void FooterActionPanelHost_SizeChanged(object? sender, SizeChangedEventArgs e)
     {
         UpdateFooterActionButtonWidths();
@@ -989,37 +1004,75 @@ public partial class MainView : UserControl
 
     private static void SettingsGoogleAuthorizationRow_SizeChanged(object? sender, SizeChangedEventArgs e)
     {
-        if (sender is not Grid grid || grid.ColumnDefinitions.Count < 3)
+        if (sender is not Grid grid || grid.ColumnDefinitions.Count < 2)
         {
             return;
         }
 
-        var signInButton = grid.Children
-            .OfType<Button>()
-            .FirstOrDefault(button => Grid.GetColumn(button) == 1);
-        var signOutButton = grid.Children
-            .OfType<Button>()
-            .FirstOrDefault(button => Grid.GetColumn(button) == 2);
+        UpdateSettingsGoogleAuthorizationRowWidths(grid);
+    }
 
-        if (signOutButton?.IsVisible == true)
+    private static void UpdateSettingsGoogleAuthorizationRowWidths(Grid grid)
+    {
+        var statusLabel = grid.Children
+            .OfType<TextBlock>()
+            .FirstOrDefault(textBlock => Grid.GetColumn(textBlock) == 0);
+        var visibleActionButton = grid.Children
+            .OfType<Button>()
+            .FirstOrDefault(button => Grid.GetColumn(button) == 1 && button.IsVisible);
+
+        const double squareWidth = 42;
+        const double spacing = 8;
+        var preferredButtonWidth = ReferenceEquals(visibleActionButton, grid.FindControl<Button>("SettingsGoogleSignInButton"))
+            ? FooterActionButtonMaxWidth
+            : squareWidth;
+        var availableWidth = Math.Max(SettingsMinimumColumnWidth * 2, grid.Bounds.Width - spacing);
+        var preferredLabelWidth = GetSettingsGoogleAuthorizationLabelPreferredWidth(statusLabel, availableWidth);
+
+        double labelWidth;
+        double buttonWidth;
+        if (availableWidth >= preferredLabelWidth + preferredButtonWidth)
         {
-            const double squareWidth = 42;
-            const double spacing = 8;
-            var controlWidth = Math.Max(SettingsMinimumColumnWidth * 2, grid.Bounds.Width - spacing);
-            var buttonWidth = controlWidth >= squareWidth * 2
-                ? squareWidth
-                : Math.Max(SettingsMinimumColumnWidth, controlWidth / 2);
-            grid.ColumnDefinitions[0].Width = new GridLength(controlWidth - buttonWidth);
-            grid.ColumnDefinitions[1].Width = new GridLength(0);
-            grid.ColumnDefinitions[2].Width = new GridLength(buttonWidth);
-            return;
+            buttonWidth = preferredButtonWidth;
+            labelWidth = availableWidth - buttonWidth;
+        }
+        else if (availableWidth >= preferredLabelWidth + squareWidth)
+        {
+            labelWidth = preferredLabelWidth;
+            buttonWidth = availableWidth - labelWidth;
+        }
+        else if (availableWidth >= squareWidth * 2)
+        {
+            buttonWidth = squareWidth;
+            labelWidth = availableWidth - buttonWidth;
+        }
+        else
+        {
+            labelWidth = buttonWidth = Math.Max(SettingsMinimumColumnWidth, availableWidth / 2);
         }
 
-        grid.ColumnDefinitions[0].Width = new GridLength(1, GridUnitType.Star);
-        grid.ColumnDefinitions[1].Width = signInButton?.IsVisible == true
-            ? new GridLength(1, GridUnitType.Auto)
-            : new GridLength(0);
-        grid.ColumnDefinitions[2].Width = new GridLength(0);
+        grid.ColumnDefinitions[0].Width = new GridLength(labelWidth);
+        grid.ColumnDefinitions[1].Width = new GridLength(buttonWidth);
+
+        if (visibleActionButton is not null)
+        {
+            visibleActionButton.Width = buttonWidth;
+            visibleActionButton.Classes.Set("compact-footer-action", buttonWidth < FooterActionButtonCompactThreshold);
+        }
+    }
+
+    private static double GetSettingsGoogleAuthorizationLabelPreferredWidth(TextBlock? statusLabel, double fallbackWidth)
+    {
+        if (statusLabel is null)
+        {
+            return fallbackWidth;
+        }
+
+        statusLabel.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+        return Math.Clamp(
+            statusLabel.DesiredSize.Width,
+            SettingsMinimumColumnWidth,
+            Math.Max(SettingsMinimumColumnWidth, fallbackWidth));
     }
 
     private static (double LabelWidth, double InputWidth) CalculateSettingsColumnWidths(double rowWidth)

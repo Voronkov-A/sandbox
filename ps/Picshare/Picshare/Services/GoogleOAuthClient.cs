@@ -10,6 +10,7 @@ public sealed class GoogleOAuthClient
 {
     private const string AuthorizationEndpoint = "https://accounts.google.com/o/oauth2/v2/auth";
     private const string TokenEndpoint = "https://oauth2.googleapis.com/token";
+    private static readonly TimeSpan TokenRetryDelay = TimeSpan.FromSeconds(5);
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly string[] Scopes =
@@ -22,10 +23,14 @@ public sealed class GoogleOAuthClient
     };
 
     private readonly HttpClient _httpClient;
+    private readonly Func<TimeSpan, CancellationToken, Task> _delayAsync;
 
-    public GoogleOAuthClient(HttpClient? httpClient = null)
+    public GoogleOAuthClient(
+        HttpClient? httpClient = null,
+        Func<TimeSpan, CancellationToken, Task>? delayAsync = null)
     {
         _httpClient = httpClient ?? new HttpClient();
+        _delayAsync = delayAsync ?? Task.Delay;
     }
 
     public async Task<GoogleOAuthTokenSet> SignInWithLoopbackAsync(
@@ -130,14 +135,18 @@ public sealed class GoogleOAuthClient
         IReadOnlyDictionary<string, string> form,
         CancellationToken cancellationToken)
     {
-        return await TransientRetryPolicy.ExecuteAsync(
-            async token =>
+        var attempt = 0;
+
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
             {
                 using var content = new FormUrlEncodedContent(form);
-                var response = await _httpClient.PostAsync(TokenEndpoint, content, token);
+                var response = await _httpClient.PostAsync(TokenEndpoint, content, cancellationToken);
                 try
                 {
-                    await EnsureSuccessAsync(response, token);
+                    await EnsureSuccessAsync(response, cancellationToken);
                     return response;
                 }
                 catch
@@ -145,9 +154,14 @@ public sealed class GoogleOAuthClient
                     response.Dispose();
                     throw;
                 }
-            },
-            reportWarning: null,
-            cancellationToken);
+            }
+            catch (Exception ex) when (TransientRetryPolicy.IsTransient(ex, cancellationToken))
+            {
+                attempt++;
+                LogTokenRetry(ex, attempt);
+                await _delayAsync(TokenRetryDelay, cancellationToken);
+            }
+        }
     }
 
     private static HttpListener CreateLoopbackListener()
@@ -320,6 +334,19 @@ public sealed class GoogleOAuthClient
     {
         return string.Join("&", values.Select(pair =>
             $"{Uri.EscapeDataString(pair.Key)}={Uri.EscapeDataString(pair.Value)}"));
+    }
+
+    private static string GetShortMessage(Exception exception)
+    {
+        var message = exception.Message.ReplaceLineEndings(" ").Trim();
+        return message.Length <= 220 ? message : message[..220] + "...";
+    }
+
+    private static void LogTokenRetry(Exception exception, int attempt)
+    {
+        Console.WriteLine(
+            $"PicshareRetry: transient {exception.GetType().Name} during Google OAuth token exchange on attempt {attempt}; retrying in 5 seconds. {GetShortMessage(exception)}");
+        Console.WriteLine($"PicshareRetry: exception detail: {exception}");
     }
 
     private static string CreateUrlSafeRandomString(int byteCount)

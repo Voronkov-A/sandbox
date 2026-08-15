@@ -212,7 +212,7 @@ public sealed class ImageCacheService
                 detailedReadMode,
                 async () =>
                 {
-                    var original = await GetEncodedImageBytesAsync(
+                    using var original = await GetEncodedImageBytesAsync(
                         albumId,
                         originalCacheFileName,
                         AlbumImageCacheKind.OriginalImage,
@@ -341,7 +341,7 @@ public sealed class ImageCacheService
                 detailedReadMode,
                 async () =>
                 {
-                    var original = await GetEncodedImageBytesAsync(
+                    using var original = await GetEncodedImageBytesAsync(
                         albumId,
                         originalCacheFileName,
                         AlbumImageCacheKind.OriginalImage,
@@ -442,23 +442,30 @@ public sealed class ImageCacheService
 
         if (cached is not null)
         {
-            if (!destination.CanSeek)
+            try
             {
-                await destination.WriteAsync(cached.Bytes, cancellationToken);
+                if (!destination.CanSeek)
+                {
+                    await destination.WriteAsync(cached.Bytes.ReadOnlyMemory, cancellationToken);
+                    return;
+                }
+
+                var cachedDestinationStart = destination.Position;
+                await TransientRetryPolicy.ExecuteAsync(
+                    async token =>
+                    {
+                        destination.Position = cachedDestinationStart;
+                        destination.SetLength(cachedDestinationStart);
+                        await destination.WriteAsync(cached.Bytes.ReadOnlyMemory, token);
+                    },
+                    null,
+                    cancellationToken);
                 return;
             }
-
-            var cachedDestinationStart = destination.Position;
-            await TransientRetryPolicy.ExecuteAsync(
-                async token =>
-                {
-                    destination.Position = cachedDestinationStart;
-                    destination.SetLength(cachedDestinationStart);
-                    await destination.WriteAsync(cached.Bytes, token);
-                },
-                null,
-                cancellationToken);
-            return;
+            finally
+            {
+                cached.Dispose();
+            }
         }
 
         if (!destination.CanSeek)
@@ -467,7 +474,7 @@ public sealed class ImageCacheService
                 async token =>
                 {
                     await using var source = await OpenSourceStreamAsync(downloadUrl, httpClient, token);
-                    var memory = new MemoryStream();
+                    var memory = PooledMemoryStreamFactory.GetStream("ImageCacheService.CopyOriginalToAsync");
                     await source.CopyToAsync(memory, token);
                     memory.Position = 0;
                     return memory;
@@ -718,7 +725,7 @@ public sealed class ImageCacheService
             return new AlbumImageBitmapCacheLoadResult(memoryBitmap, IsCached: true);
         }
 
-        var result = await GetEncodedImageBytesAsync(
+        using var result = await GetEncodedImageBytesAsync(
             albumId,
             cacheFileName,
             kind,
@@ -767,17 +774,20 @@ public sealed class ImageCacheService
     {
         if (TryGetEncodedMemoryCache(albumId, cacheFileName, kind, readMode, out var memoryBytes))
         {
-            if (readMode == AlbumImageCacheReadMode.Lookup ||
-                !ShouldAttemptDiskWarmup(albumId, cacheFileName, kind))
+            using (memoryBytes)
             {
-                return true;
-            }
+                if (readMode == AlbumImageCacheReadMode.Lookup ||
+                    !ShouldAttemptDiskWarmup(albumId, cacheFileName, kind))
+                {
+                    return true;
+                }
 
-            var diskCached = await AddDiskCacheAsync(albumId, cacheFileName, kind, memoryBytes, readMode, cachePriority, cancellationToken);
-            return diskCached || IsEncodedMemoryCacheStored(albumId, cacheFileName, kind);
+                var diskCached = await AddDiskCacheAsync(albumId, cacheFileName, kind, memoryBytes.Bytes, readMode, cachePriority, cancellationToken);
+                return diskCached || IsEncodedMemoryCacheStored(albumId, cacheFileName, kind);
+            }
         }
 
-        var result = await GetEncodedImageBytesAsync(
+        using var result = await GetEncodedImageBytesAsync(
             albumId,
             cacheFileName,
             kind,
@@ -842,7 +852,7 @@ public sealed class ImageCacheService
     {
         if (TryGetEncodedMemoryCache(albumId, cacheFileName, kind, readMode, out var memoryBytes))
         {
-            return new AlbumImageCacheLoadResult(memoryBytes, IsCached: true);
+            return new AlbumImageCacheLoadResult(memoryBytes, true);
         }
 
         var diskLimit = Limits.GetDiskBytes(kind);
@@ -886,7 +896,7 @@ public sealed class ImageCacheService
                     TrySetLastAccessTimeUtc(diskPath, DateTime.UtcNow);
                 }
 
-                var diskBytes = await File.ReadAllBytesAsync(diskPath, cancellationToken);
+                var diskBytes = await PooledByteBuffer.FromFileAsync(diskPath, cancellationToken);
                 if (readMode == AlbumImageCacheReadMode.Eager)
                 {
                     TrimDiskCache(albumId, kind, diskLimit, cachePriority);
@@ -894,10 +904,14 @@ public sealed class ImageCacheService
 
                 if (readMode == AlbumImageCacheReadMode.Eager)
                 {
-                    AddEncodedMemoryCache(albumId, cacheFileName, kind, diskBytes, readMode, cachePriority);
+                    if (AddEncodedMemoryCache(albumId, cacheFileName, kind, diskBytes, readMode, cachePriority, out var cacheLease))
+                    {
+                        diskBytes = null!;
+                        return new AlbumImageCacheLoadResult(cacheLease, true);
+                    }
                 }
 
-                return new AlbumImageCacheLoadResult(diskBytes, IsCached: true);
+                return new AlbumImageCacheLoadResult(diskBytes, true);
             }
             catch (FileNotFoundException)
             {
@@ -922,15 +936,18 @@ public sealed class ImageCacheService
             async token =>
             {
                 await using var source = await openSourceAsync();
-                await using var memory = new MemoryStream();
-                await source.CopyToAsync(memory, token);
-                return memory.ToArray();
+                return await PooledByteBuffer.FromStreamAsync(source, token);
             },
             null,
             cancellationToken);
         var diskCached = await AddDiskCacheAsync(albumId, cacheFileName, kind, bytes, readMode, cachePriority, cancellationToken);
-        var memoryCached = AddEncodedMemoryCache(albumId, cacheFileName, kind, bytes, readMode, cachePriority);
-        return new AlbumImageCacheLoadResult(bytes, diskCached || memoryCached);
+        if (AddEncodedMemoryCache(albumId, cacheFileName, kind, bytes, readMode, cachePriority, out var memoryLease))
+        {
+            bytes = null!;
+            return new AlbumImageCacheLoadResult(memoryLease, true);
+        }
+
+        return new AlbumImageCacheLoadResult(bytes, diskCached);
     }
 
     private bool TryGetEncodedMemoryCache(
@@ -938,7 +955,7 @@ public sealed class ImageCacheService
         string cacheFileName,
         AlbumImageCacheKind kind,
         AlbumImageCacheReadMode readMode,
-        out byte[] bytes)
+        out AlbumImageEncodedLease bytes)
     {
         var limit = Limits.GetMemoryBytes(kind);
         if (limit <= 0)
@@ -954,7 +971,7 @@ public sealed class ImageCacheService
             {
                 if (entry.EstimatedBytes > limit)
                 {
-                    _memoryCache.Remove(key);
+                    RemoveMemoryCacheNoLock(key);
                     bytes = null!;
                     return false;
                 }
@@ -964,8 +981,7 @@ public sealed class ImageCacheService
                     entry.LastAccessUtc = DateTime.UtcNow;
                 }
 
-                bytes = entry.Bytes;
-                return true;
+                return entry.TryAcquire(out bytes);
             }
         }
 
@@ -1016,24 +1032,26 @@ public sealed class ImageCacheService
         string albumId,
         string cacheFileName,
         AlbumImageCacheKind kind,
-        byte[] bytes,
+        PooledByteBuffer bytes,
         AlbumImageCacheReadMode readMode)
     {
-        return AddEncodedMemoryCache(albumId, cacheFileName, kind, bytes, readMode, cachePriority: 0);
+        return AddEncodedMemoryCache(albumId, cacheFileName, kind, bytes, readMode, cachePriority: 0, out _);
     }
 
     private bool AddEncodedMemoryCache(
         string albumId,
         string cacheFileName,
         AlbumImageCacheKind kind,
-        byte[] bytes,
+        PooledByteBuffer bytes,
         AlbumImageCacheReadMode readMode,
-        int cachePriority)
+        int cachePriority,
+        out AlbumImageEncodedLease lease)
     {
         var limit = Limits.GetMemoryBytes(kind);
-        var estimatedBytes = bytes.LongLength;
+        var estimatedBytes = bytes.Length;
         if (limit <= 0 || estimatedBytes > limit || readMode == AlbumImageCacheReadMode.Lookup)
         {
+            lease = null!;
             return false;
         }
 
@@ -1043,12 +1061,14 @@ public sealed class ImageCacheService
             _memoryCache.TryGetValue(key, out var existingEntry);
             if (existingEntry is not null && readMode == AlbumImageCacheReadMode.Lazy)
             {
-                return true;
+                lease = null!;
+                return false;
             }
 
             var albumKindSize = GetMemoryCacheSizeNoLock(albumId, kind) - (existingEntry?.EstimatedBytes ?? 0);
             if (readMode == AlbumImageCacheReadMode.Lazy && albumKindSize + estimatedBytes > limit)
             {
+                lease = null!;
                 return false;
             }
 
@@ -1058,11 +1078,24 @@ public sealed class ImageCacheService
                 albumKindSize = GetMemoryCacheSizeNoLock(albumId, kind) - (existingEntry?.EstimatedBytes ?? 0);
                 if (albumKindSize + estimatedBytes > limit)
                 {
+                    lease = null!;
                     return false;
                 }
             }
 
-            _memoryCache[key] = new EncodedMemoryCacheEntry(bytes, estimatedBytes, DateTime.UtcNow);
+            if (existingEntry is not null)
+            {
+                RemoveMemoryCacheNoLock(key);
+            }
+
+            var entry = new EncodedMemoryCacheEntry(bytes, estimatedBytes, DateTime.UtcNow);
+            if (!entry.TryAcquire(out lease))
+            {
+                lease = null!;
+                return false;
+            }
+
+            _memoryCache[key] = entry;
             if (readMode == AlbumImageCacheReadMode.Eager)
             {
                 TrimMemoryCacheNoLock(albumId, kind, limit, cachePriority);
@@ -1243,7 +1276,10 @@ public sealed class ImageCacheService
 
     private void ClearMemoryCacheNoLock()
     {
-        _memoryCache.Clear();
+        foreach (var key in _memoryCache.Keys.ToList())
+        {
+            RemoveMemoryCacheNoLock(key);
+        }
 
         foreach (var key in _bitmapCache.Keys.ToList())
         {
@@ -1253,7 +1289,10 @@ public sealed class ImageCacheService
 
     private void RemoveMemoryCacheNoLock(MemoryCacheKey key)
     {
-        _memoryCache.Remove(key);
+        if (_memoryCache.Remove(key, out var entry))
+        {
+            entry.RemoveFromCache();
+        }
     }
 
     private static MemoryCacheKey CreateOriginalImagePriorityKey(string albumId, string cacheFileName)
@@ -1354,7 +1393,7 @@ public sealed class ImageCacheService
         string albumId,
         string cacheFileName,
         AlbumImageCacheKind kind,
-        byte[] bytes,
+        AlbumImageEncodedLease bytes,
         AlbumImageCacheReadMode readMode,
         CancellationToken cancellationToken)
     {
@@ -1365,7 +1404,19 @@ public sealed class ImageCacheService
         string albumId,
         string cacheFileName,
         AlbumImageCacheKind kind,
-        byte[] bytes,
+        AlbumImageEncodedLease bytes,
+        AlbumImageCacheReadMode readMode,
+        int cachePriority,
+        CancellationToken cancellationToken)
+    {
+        return await AddDiskCacheAsync(albumId, cacheFileName, kind, bytes.Bytes, readMode, cachePriority, cancellationToken);
+    }
+
+    private async Task<bool> AddDiskCacheAsync(
+        string albumId,
+        string cacheFileName,
+        AlbumImageCacheKind kind,
+        PooledByteBuffer bytes,
         AlbumImageCacheReadMode readMode,
         int cachePriority,
         CancellationToken cancellationToken)
@@ -1376,7 +1427,7 @@ public sealed class ImageCacheService
         }
 
         var limit = Limits.GetDiskBytes(kind);
-        if (limit <= 0 || bytes.LongLength > limit)
+        if (limit <= 0 || bytes.Length > limit)
         {
             return false;
         }
@@ -1426,13 +1477,13 @@ public sealed class ImageCacheService
             return false;
         }
 
-        if (readMode == AlbumImageCacheReadMode.Lazy && !CanFitLazyDiskCacheEntry(albumId, cachePath, kind, bytes.LongLength, limit))
+        if (readMode == AlbumImageCacheReadMode.Lazy && !CanFitLazyDiskCacheEntry(albumId, cachePath, kind, bytes.Length, limit))
         {
             return false;
         }
 
         if (readMode == AlbumImageCacheReadMode.Eager &&
-            !CanFitPriorityDiskCacheEntry(albumId, cachePath, kind, bytes.LongLength, limit, cachePriority))
+            !CanFitPriorityDiskCacheEntry(albumId, cachePath, kind, bytes.Length, limit, cachePriority))
         {
             return false;
         }
@@ -1441,7 +1492,10 @@ public sealed class ImageCacheService
         var cached = false;
         try
         {
-            await File.WriteAllBytesAsync(tempPath, bytes, cancellationToken);
+            await using (var stream = new FileStream(tempPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            {
+                await stream.WriteAsync(bytes.ReadOnlyMemory, cancellationToken);
+            }
             TrySetLastAccessTimeUtc(tempPath, DateTime.UtcNow);
             File.Move(tempPath, cachePath, overwrite: false);
             cached = true;
@@ -1885,12 +1939,12 @@ public sealed class ImageCacheService
         return $"{photoId}-detailed-{Math.Max(1, maxPixelWidth)}x{Math.Max(1, maxPixelHeight)}.jpg";
     }
 
-    private static async Task<Bitmap> DecodeBitmapAsync(byte[] bytes, CancellationToken cancellationToken)
+    private static async Task<Bitmap> DecodeBitmapAsync(AlbumImageEncodedLease bytes, CancellationToken cancellationToken)
     {
         await DecodeGate.WaitAsync(cancellationToken);
         try
         {
-            await using var stream = new MemoryStream(bytes, writable: false);
+            await using var stream = bytes.OpenReadStream();
             return new Bitmap(stream);
         }
         finally
@@ -2163,7 +2217,7 @@ public sealed class ImageCacheService
         CancellationToken cancellationToken)
     {
         using var displayBitmap = CreateDisplayBitmap(original, maxPixelWidth, maxPixelHeight, cancellationToken);
-        var output = new MemoryStream();
+        var output = PooledMemoryStreamFactory.GetStream("ImageCacheService.CreateDisplayImageStream.Bitmap");
         displayBitmap.Save(output, 86);
         output.Position = 0;
         return output;
@@ -2268,7 +2322,7 @@ public sealed class ImageCacheService
 
                 await using (stream)
                 {
-                    var memory = new MemoryStream();
+                    var memory = PooledMemoryStreamFactory.GetStream("ImageCacheService.OpenSeekableSourceStreamAsync");
                     await stream.CopyToAsync(memory, token);
                     memory.Position = 0;
                     return memory;
@@ -2286,39 +2340,76 @@ public sealed class ImageCacheService
     {
         using var codec = SKCodec.Create(input)
             ?? throw new InvalidOperationException("The cached image could not be decoded.");
-        using var original = SKBitmap.Decode(codec)
-            ?? throw new InvalidOperationException("The cached image could not be decoded.");
+        var sourceInfo = codec.Info;
 
         cancellationToken.ThrowIfCancellationRequested();
 
         var scale = Math.Min(
             1d,
-            Math.Min((double)maxPixelWidth / original.Width, (double)maxPixelHeight / original.Height));
-        var targetWidth = Math.Max(1, (int)Math.Round(original.Width * scale));
-        var targetHeight = Math.Max(1, (int)Math.Round(original.Height * scale));
+            Math.Min((double)maxPixelWidth / sourceInfo.Width, (double)maxPixelHeight / sourceInfo.Height));
+        var targetWidth = Math.Max(1, (int)Math.Round(sourceInfo.Width * scale));
+        var targetHeight = Math.Max(1, (int)Math.Round(sourceInfo.Height * scale));
 
-        using var displayBitmap = scale < 1d
-            ? original.Resize(new SKImageInfo(targetWidth, targetHeight), SKFilterQuality.Medium)
-                ?? throw new InvalidOperationException("The cached image could not be resized.")
-            : original.Copy();
+        SKBitmap? decodedBitmap = null;
+        SKBitmap? displayBitmap = null;
+        try
+        {
+            if (scale < 1d)
+            {
+                var scaledSize = codec.GetScaledDimensions((float)scale);
+                var decodeInfo = new SKImageInfo(
+                    Math.Max(1, scaledSize.Width),
+                    Math.Max(1, scaledSize.Height),
+                    SKColorType.Bgra8888,
+                    SKAlphaType.Premul);
 
-        using var image = SKImage.FromBitmap(displayBitmap);
-        using var data = image.Encode(SKEncodedImageFormat.Jpeg, 86)
-            ?? throw new InvalidOperationException("The cached image could not be encoded.");
+                decodedBitmap = new SKBitmap(decodeInfo);
+                var decodeResult = codec.GetPixels(decodeInfo, decodedBitmap.GetPixels());
+                if (decodeResult != SKCodecResult.Success)
+                {
+                    throw new InvalidOperationException("The cached image could not be decoded.");
+                }
 
-        var output = new MemoryStream();
-        data.SaveTo(output);
-        output.Position = 0;
-        return output;
+                cancellationToken.ThrowIfCancellationRequested();
+
+                displayBitmap = decodeInfo.Width == targetWidth && decodeInfo.Height == targetHeight
+                    ? decodedBitmap
+                    : decodedBitmap.Resize(new SKImageInfo(targetWidth, targetHeight), SKFilterQuality.Medium)
+                        ?? throw new InvalidOperationException("The cached image could not be resized.");
+            }
+            else
+            {
+                displayBitmap = SKBitmap.Decode(codec)
+                    ?? throw new InvalidOperationException("The cached image could not be decoded.");
+            }
+
+            using var image = SKImage.FromBitmap(displayBitmap);
+            using var data = image.Encode(SKEncodedImageFormat.Jpeg, 86)
+                ?? throw new InvalidOperationException("The cached image could not be encoded.");
+
+            var output = PooledMemoryStreamFactory.GetStream("ImageCacheService.CreateDisplayImageStream.Stream");
+            data.SaveTo(output);
+            output.Position = 0;
+            return output;
+        }
+        finally
+        {
+            if (!ReferenceEquals(displayBitmap, decodedBitmap))
+            {
+                displayBitmap?.Dispose();
+            }
+
+            decodedBitmap?.Dispose();
+        }
     }
 
     private static MemoryStream CreateDisplayImageStream(
-        byte[] input,
+        AlbumImageEncodedLease input,
         int maxPixelWidth,
         int maxPixelHeight,
         CancellationToken cancellationToken)
     {
-        using var stream = new MemoryStream(input, writable: false);
+        using var stream = input.OpenReadStream();
         return CreateDisplayImageStream(stream, maxPixelWidth, maxPixelHeight, cancellationToken);
     }
 
@@ -2326,17 +2417,122 @@ public sealed class ImageCacheService
 
     private sealed record DiskCacheFileInfo(FileInfo File, long Length, DateTime LastAccessTimeUtc);
 
-    private sealed record AlbumImageCacheLoadResult(byte[] Bytes, bool IsCached);
+    private sealed class AlbumImageCacheLoadResult(AlbumImageEncodedLease bytes, bool isCached) : IDisposable
+    {
+        public AlbumImageCacheLoadResult(PooledByteBuffer bytes, bool isCached)
+            : this(new AlbumImageEncodedLease(bytes, bytes.Dispose), isCached)
+        {
+        }
+
+        public AlbumImageEncodedLease Bytes { get; } = bytes;
+
+        public bool IsCached { get; } = isCached;
+
+        public void Dispose()
+        {
+            Bytes.Dispose();
+        }
+    }
 
     private sealed record AlbumImageBitmapCacheLoadResult(AlbumImageBitmapLease Bitmap, bool IsCached);
 
-    private sealed class EncodedMemoryCacheEntry(byte[] bytes, long estimatedBytes, DateTime lastAccessUtc)
+    private sealed class EncodedMemoryCacheEntry(PooledByteBuffer bytes, long estimatedBytes, DateTime lastAccessUtc)
     {
-        public byte[] Bytes { get; } = bytes;
+        private readonly object _sync = new();
+        private bool _removed;
+        private int _referenceCount;
+
+        public PooledByteBuffer Bytes { get; } = bytes;
 
         public long EstimatedBytes { get; } = estimatedBytes;
 
         public DateTime LastAccessUtc { get; set; } = lastAccessUtc;
+
+        public bool TryAcquire(out AlbumImageEncodedLease lease)
+        {
+            lock (_sync)
+            {
+                if (_removed)
+                {
+                    lease = null!;
+                    return false;
+                }
+
+                _referenceCount++;
+                lease = new AlbumImageEncodedLease(Bytes, Release);
+                return true;
+            }
+        }
+
+        public void RemoveFromCache()
+        {
+            var shouldDispose = false;
+            lock (_sync)
+            {
+                if (_removed)
+                {
+                    return;
+                }
+
+                _removed = true;
+                shouldDispose = _referenceCount == 0;
+            }
+
+            if (shouldDispose)
+            {
+                Bytes.Dispose();
+            }
+        }
+
+        private void Release()
+        {
+            var shouldDispose = false;
+            lock (_sync)
+            {
+                if (_referenceCount <= 0)
+                {
+                    return;
+                }
+
+                _referenceCount--;
+                shouldDispose = _removed && _referenceCount == 0;
+            }
+
+            if (shouldDispose)
+            {
+                Bytes.Dispose();
+            }
+        }
+    }
+
+    private sealed class AlbumImageEncodedLease : IDisposable
+    {
+        private readonly Action _release;
+        private PooledByteBuffer? _bytes;
+
+        public AlbumImageEncodedLease(PooledByteBuffer bytes, Action release)
+        {
+            _bytes = bytes;
+            _release = release;
+        }
+
+        public PooledByteBuffer Bytes => _bytes ?? throw new ObjectDisposedException(nameof(AlbumImageEncodedLease));
+
+        public ReadOnlyMemory<byte> ReadOnlyMemory => Bytes.ReadOnlyMemory;
+
+        public MemoryStream OpenReadStream()
+        {
+            var bytes = Bytes;
+            return new MemoryStream(bytes.Array, 0, bytes.Length, writable: false);
+        }
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _bytes, null) is not null)
+            {
+                _release();
+            }
+        }
     }
 
     private sealed class BitmapMemoryCacheEntry(Bitmap bitmap, long estimatedBytes, DateTime lastAccessUtc)

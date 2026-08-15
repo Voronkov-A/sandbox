@@ -1637,25 +1637,55 @@
                 <Border BorderBrush="#D6D8D1" BorderThickness="1" CornerRadius="6" Padding="12">
                   <StackPanel Spacing="8">
                     <TextBlock Classes="settings-title" Text="Google" FontWeight="SemiBold"/>
-                    <Grid ColumnDefinitions="*,Auto,42" ColumnSpacing="8" SizeChanged="SettingsGoogleAuthorizationRow_SizeChanged">
-                      <TextBlock Text="{Binding GoogleAuthorizationStatus}"
+                    <Grid x:Name="SettingsGoogleAuthorizationRow"
+                          ColumnDefinitions="*,92"
+                          ColumnSpacing="8"
+                          SizeChanged="SettingsGoogleAuthorizationRow_SizeChanged">
+                      <TextBlock x:Name="SettingsGoogleAuthorizationStatusLabel"
+                                 Text="{Binding GoogleAuthorizationStatus}"
                                  VerticalAlignment="Center"
                                  TextTrimming="CharacterEllipsis"
                                  Margin="0"/>
-                      <Button Grid.Column="1"
+                      <Button x:Name="SettingsGoogleSignInButton"
+                              Grid.Column="1"
                               Classes="settings-control"
                               Click="SettingsSignInGoogle_Click"
                               IsVisible="{Binding IsGoogleSignedOut}"
-                              >
-                        Sign in
+                              SizeChanged="SettingsCompactActionButton_SizeChanged"
+                              Width="92"
+                              MaxWidth="92">
+                        <Grid ColumnDefinitions="Auto,Auto" ColumnSpacing="6" HorizontalAlignment="Center">
+                          <Canvas Width="20" Height="20">
+                            <Path Data="M13,4 L17,4 L17,16 L13,16"
+                                  Stroke="#27343B"
+                                  StrokeThickness="1.7"
+                                  Fill="Transparent"
+                                  StrokeLineCap="Round"
+                                  StrokeJoin="Round"/>
+                            <Path Data="M3,10 L13,10 M9,6 L13,10 L9,14"
+                                  Stroke="#27343B"
+                                  StrokeThickness="1.7"
+                                  Fill="Transparent"
+                                  StrokeLineCap="Round"
+                                  StrokeJoin="Round"/>
+                          </Canvas>
+                          <TextBlock Grid.Column="1"
+                                     Classes="footer-action-label"
+                                     Text="Sign in"
+                                     FontWeight="SemiBold"
+                                     VerticalAlignment="Center"/>
+                        </Grid>
                       </Button>
-                      <Button Grid.Column="2"
+                      <Button x:Name="SettingsGoogleSignOutButton"
+                              Grid.Column="1"
                               Classes="settings-control"
                               Command="{Binding ClearGoogleAuthorizationCommand}"
                               IsVisible="{Binding IsGoogleSignedIn}"
+                              Width="42"
                               MaxWidth="42"
                               Height="42"
                               MinWidth="5"
+                              HorizontalAlignment="Right"
                               Padding="0"
                               ToolTip.Tip="Sign out">
                         <Canvas Width="18" Height="18">
@@ -1872,10 +1902,39 @@
                     <Grid x:Name="CachedImagesSettingsRow" ColumnDefinitions="150,*" MinHeight="42">
                       <TextBlock Classes="settings-row-label"
                                  Text="Cached images"/>
-                      <Button Grid.Column="1"
+                      <Button x:Name="ClearImageCacheButton"
+                              Grid.Column="1"
                               Classes="settings-control"
-                              Command="{Binding ClearImageCacheCommand}">
-                        Clear cache
+                              Command="{Binding ClearImageCacheCommand}"
+                              SizeChanged="SettingsCompactActionButton_SizeChanged">
+                        <Grid ColumnDefinitions="Auto,Auto" ColumnSpacing="6" HorizontalAlignment="Center">
+                          <Canvas Width="20" Height="20">
+                            <Path Data="M5,7 L15,7"
+                                  Stroke="#27343B"
+                                  StrokeThickness="1.7"
+                                  StrokeLineCap="Round"/>
+                            <Path Data="M8,7 L8,5 L12,5 L12,7"
+                                  Stroke="#27343B"
+                                  StrokeThickness="1.7"
+                                  Fill="Transparent"
+                                  StrokeLineCap="Round"
+                                  StrokeJoin="Round"/>
+                            <Path Data="M7,7 L8,17 L14,17 L15,7"
+                                  Stroke="#27343B"
+                                  StrokeThickness="1.7"
+                                  Fill="Transparent"
+                                  StrokeJoin="Round"/>
+                            <Path Data="M10,10 L10,15 M12,10 L12,15"
+                                  Stroke="#27343B"
+                                  StrokeThickness="1.4"
+                                  StrokeLineCap="Round"/>
+                          </Canvas>
+                          <TextBlock Grid.Column="1"
+                                     Classes="footer-action-label"
+                                     Text="Clear"
+                                     FontWeight="SemiBold"
+                                     VerticalAlignment="Center"/>
+                        </Grid>
                       </Button>
                     </Grid>
                   </StackPanel>

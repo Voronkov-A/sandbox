@@ -5020,7 +5020,7 @@ public partial class MainViewModel : ViewModelBase
 
                     var entry = archive.CreateEntry(GetAvailableArchiveEntryName(entryNames, GetSafeDownloadFileName(photo)));
                     await using var destination = entry.Open();
-                    await using var retryBuffer = new MemoryStream();
+                    await using var retryBuffer = PooledMemoryStreamFactory.GetStream("MainViewModel.DownloadPhotoArchiveAsync");
                     await TransientRetryPolicy.ExecuteAsync(
                         async token =>
                         {
@@ -6354,10 +6354,15 @@ public partial class MainViewModel : ViewModelBase
             .ToList();
 
         return actionPhotos.All(photo =>
-            !photo.IsFrozen &&
-            (string.IsNullOrWhiteSpace(category)
-                ? !string.IsNullOrWhiteSpace(photo.Category)
-                : !string.Equals(photo.Category, category, StringComparison.Ordinal)));
+            !photo.IsFrozen) &&
+            actionPhotos.Any(photo => CanChangePhotoCategory(photo, category));
+    }
+
+    private static bool CanChangePhotoCategory(AlbumPhotoViewModel photo, string category)
+    {
+        return string.IsNullOrWhiteSpace(category)
+            ? !string.IsNullOrWhiteSpace(photo.Category)
+            : !string.Equals(photo.Category, category, StringComparison.Ordinal);
     }
 
     private void UpdateFeedbackControlState()
@@ -6788,6 +6793,7 @@ public partial class MainViewModel : ViewModelBase
     {
         return OrderPhotosForCurrentWorkflow(GetVisiblePhotos().Where(photo =>
             photo.HasDuplicateGroup &&
+            !string.Equals(photo.Category, TrashReviewTabId, StringComparison.Ordinal) &&
             _duplicateGroupsById.TryGetValue(photo.DuplicateGroupId, out var members) &&
             !members.Any(member => member.IsBestInDuplicateGroup)));
     }

@@ -281,8 +281,8 @@ public sealed class AlbumImageListLoader : IDisposable
     {
         lock (_sync)
         {
-            _priorityIndices.Clear();
-            _orderedPriorityIndices.Clear();
+            _priorityIndices = new HashSet<int>();
+            _orderedPriorityIndices = new List<int>();
         }
 
         SignalWorkers();
@@ -633,17 +633,18 @@ public sealed class AlbumImageListLoader : IDisposable
 
     private void RefreshViewportIndicesNoLock()
     {
-        _orderedViewportIndices = _orderedViewportIndices
+        var orderedViewportIndices = _orderedViewportIndices
             .Where(index => _viewportSnapshotIndexCounts.ContainsKey(index))
             .ToList();
         foreach (var index in _viewportSnapshotIndexCounts.Keys)
         {
-            if (index >= 0 && index < _photos.Count && !_orderedViewportIndices.Contains(index))
+            if (index >= 0 && index < _photos.Count && !orderedViewportIndices.Contains(index))
             {
-                _orderedViewportIndices.Add(index);
+                orderedViewportIndices.Add(index);
             }
         }
 
+        _orderedViewportIndices = orderedViewportIndices;
         _viewportIndices = _viewportSnapshotIndexCounts.Keys
             .ToHashSet();
     }
@@ -715,7 +716,9 @@ public sealed class AlbumImageListLoader : IDisposable
         if (!_viewportSnapshotIndexCounts.ContainsKey(index) &&
             !_viewportLoadedIndexCounts.ContainsKey(index))
         {
-            _orderedViewportIndices.Remove(index);
+            _orderedViewportIndices = _orderedViewportIndices
+                .Where(candidate => candidate != index)
+                .ToList();
         }
 
         RefreshViewportIndicesNoLock();
@@ -729,7 +732,9 @@ public sealed class AlbumImageListLoader : IDisposable
             if (_priorityIndices.Add(index))
             {
                 ClearVisibleFailureSkippedNoLock(index);
-                _orderedPriorityIndices.Add(index);
+                _orderedPriorityIndices = _orderedPriorityIndices
+                    .Append(index)
+                    .ToList();
             }
         }
     }
@@ -1322,66 +1327,127 @@ public sealed class AlbumImageListLoader : IDisposable
     {
         ownsOriginalLoad = false;
         workToken = 0;
-        foreach (var candidate in GetPhotosByViewportDistance())
+        lock (_sync)
         {
-            if (work == AlbumImageWork.FastThumbnail &&
-                candidate.FastThumbnailStatus == AlbumImageItemStatus.Unloaded &&
-                IsCurrentGeneration(generation) &&
-                !IsWarmupSkipped(candidate, work) &&
-                !IsVisibleFailureSkipped(candidate, work) &&
-                candidate.TryBeginFastThumbnailLoad(out workToken))
+            var seedIndices = _orderedViewportIndices.Count > 0
+                ? _orderedViewportIndices
+                : _orderedPriorityIndices;
+            if (_photos.Count > 0 && seedIndices.Count > 0)
             {
-                if (!IsCurrentGeneration(generation))
+                HashSet<int> yielded = new();
+                foreach (var index in seedIndices)
                 {
-                    candidate.CompleteFastThumbnailLoad(loaded: false, workToken);
-                    continue;
+                    if (TryTakeNearestWorkCandidateNoLock(index, generation, work, yielded, out photo, ref ownsOriginalLoad, out workToken))
+                    {
+                        return true;
+                    }
                 }
 
-                photo = candidate;
-                return true;
-            }
-
-            if (work == AlbumImageWork.DetailedThumbnail &&
-                candidate.DetailedThumbnailStatus == AlbumImageItemStatus.Unloaded &&
-                IsCurrentGeneration(generation) &&
-                !IsWarmupSkipped(candidate, work) &&
-                !IsVisibleFailureSkipped(candidate, work) &&
-                candidate.TryBeginDetailedThumbnailLoad(out ownsOriginalLoad, out workToken))
-            {
-                if (!IsCurrentGeneration(generation))
+                for (var distance = 1; distance < _photos.Count; distance++)
                 {
-                    candidate.CompleteDetailedThumbnailLoad(
-                        loaded: false,
-                        originalLoaded: false,
-                        ownsOriginalLoad,
-                        workToken);
-                    continue;
+                    var yieldedAny = false;
+                    foreach (var seedIndex in seedIndices)
+                    {
+                        var down = seedIndex + distance;
+                        yieldedAny |= down >= 0 && down < _photos.Count;
+                        if (TryTakeNearestWorkCandidateNoLock(down, generation, work, yielded, out photo, ref ownsOriginalLoad, out workToken))
+                        {
+                            return true;
+                        }
+
+                        var up = seedIndex - distance;
+                        yieldedAny |= up >= 0 && up < _photos.Count;
+                        if (TryTakeNearestWorkCandidateNoLock(up, generation, work, yielded, out photo, ref ownsOriginalLoad, out workToken))
+                        {
+                            return true;
+                        }
+                    }
+
+                    if (!yieldedAny)
+                    {
+                        break;
+                    }
                 }
-
-                photo = candidate;
-                return true;
-            }
-
-            if (work == AlbumImageWork.OriginalImage &&
-                candidate.OriginalImageStatus == AlbumImageItemStatus.Unloaded &&
-                IsCurrentGeneration(generation) &&
-                !IsWarmupSkipped(candidate, work) &&
-                candidate.TryBeginOriginalImageLoad(out workToken))
-            {
-                if (!IsCurrentGeneration(generation))
-                {
-                    candidate.CompleteOriginalImageLoad(loaded: false, workToken);
-                    continue;
-                }
-
-                photo = candidate;
-                return true;
             }
         }
 
         photo = null!;
         ownsOriginalLoad = false;
         workToken = 0;
+        return false;
+    }
+
+    private bool TryTakeNearestWorkCandidateNoLock(
+        int index,
+        long generation,
+        AlbumImageWork work,
+        HashSet<int> yielded,
+        out AlbumPhotoViewModel photo,
+        ref bool ownsOriginalLoad,
+        out int workToken)
+    {
+        photo = null!;
+        workToken = 0;
+        if (index < 0 || index >= _photos.Count || !yielded.Add(index))
+        {
+            return false;
+        }
+
+        var candidate = _photos[index];
+        if (work == AlbumImageWork.FastThumbnail &&
+            candidate.FastThumbnailStatus == AlbumImageItemStatus.Unloaded &&
+            IsCurrentGeneration(generation) &&
+            !IsWarmupSkipped(candidate, work) &&
+            !IsVisibleFailureSkipped(candidate, work) &&
+            candidate.TryBeginFastThumbnailLoad(out workToken))
+        {
+            if (!IsCurrentGeneration(generation))
+            {
+                candidate.CompleteFastThumbnailLoad(loaded: false, workToken);
+                return false;
+            }
+
+            photo = candidate;
+            return true;
+        }
+
+        if (work == AlbumImageWork.DetailedThumbnail &&
+            candidate.DetailedThumbnailStatus == AlbumImageItemStatus.Unloaded &&
+            IsCurrentGeneration(generation) &&
+            !IsWarmupSkipped(candidate, work) &&
+            !IsVisibleFailureSkipped(candidate, work) &&
+            candidate.TryBeginDetailedThumbnailLoad(out ownsOriginalLoad, out workToken))
+        {
+            if (!IsCurrentGeneration(generation))
+            {
+                candidate.CompleteDetailedThumbnailLoad(
+                    loaded: false,
+                    originalLoaded: false,
+                    ownsOriginalLoad,
+                    workToken);
+                return false;
+            }
+
+            photo = candidate;
+            return true;
+        }
+
+        if (work == AlbumImageWork.OriginalImage &&
+            candidate.OriginalImageStatus == AlbumImageItemStatus.Unloaded &&
+            IsCurrentGeneration(generation) &&
+            !IsWarmupSkipped(candidate, work) &&
+            candidate.TryBeginOriginalImageLoad(out workToken))
+        {
+            if (!IsCurrentGeneration(generation))
+            {
+                candidate.CompleteOriginalImageLoad(loaded: false, workToken);
+                return false;
+            }
+
+            photo = candidate;
+            return true;
+        }
+
         return false;
     }
 
@@ -2046,73 +2112,6 @@ public sealed class AlbumImageListLoader : IDisposable
         return _viewportLoadedRegistrations
             .SelectMany(item => item.Value.Select(indices => new LoadedViewportRegistration(item.Key, indices.ToArray())))
             .ToList();
-    }
-
-    private IEnumerable<AlbumPhotoViewModel> GetPhotosByViewportDistance()
-    {
-        IReadOnlyList<AlbumPhotoViewModel> photos;
-        IReadOnlyList<int> seedIndices;
-        lock (_sync)
-        {
-            photos = _photos;
-            if (_orderedViewportIndices.Count > 0)
-            {
-                seedIndices = _orderedViewportIndices.ToArray();
-            }
-            else if (_orderedPriorityIndices.Count > 0)
-            {
-                seedIndices = _orderedPriorityIndices.ToArray();
-            }
-            else
-            {
-                seedIndices = [];
-            }
-        }
-
-        if (photos.Count == 0)
-        {
-            yield break;
-        }
-
-        if (seedIndices.Count == 0)
-        {
-            yield break;
-        }
-
-        HashSet<int> yielded = new();
-        foreach (var index in seedIndices)
-        {
-            if (index >= 0 && index < photos.Count && yielded.Add(index))
-            {
-                yield return photos[index];
-            }
-        }
-
-        for (var distance = 1; distance < photos.Count; distance++)
-        {
-            var yieldedAny = false;
-            foreach (var seedIndex in seedIndices)
-            {
-                var down = seedIndex + distance;
-                if (down >= 0 && down < photos.Count && yielded.Add(down))
-                {
-                    yieldedAny = true;
-                    yield return photos[down];
-                }
-
-                var up = seedIndex - distance;
-                if (up >= 0 && up < photos.Count && yielded.Add(up))
-                {
-                    yieldedAny = true;
-                    yield return photos[up];
-                }
-            }
-
-            if (!yieldedAny && yielded.Count >= photos.Count)
-            {
-                yield break;
-            }
-        }
     }
 
     private string GetAlbumId()

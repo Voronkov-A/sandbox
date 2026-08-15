@@ -200,7 +200,7 @@ public sealed class GoogleDriveRestClient
         using var response = await _httpClient.SendAsync(request, cancellationToken);
         await EnsureSuccessAsync(response, cancellationToken);
 
-        var memoryStream = new MemoryStream();
+        var memoryStream = PooledMemoryStreamFactory.GetStream("GoogleDriveRestClient.DownloadFileAsync");
         await using var responseStream = await response.Content.ReadAsStreamAsync(cancellationToken);
         await responseStream.CopyToAsync(memoryStream, cancellationToken);
         memoryStream.Position = 0;
