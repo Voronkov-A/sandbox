@@ -6,16 +6,23 @@ namespace Picshare.Services;
 
 public sealed class GooglePeopleRestClient
 {
+    public const string OtherContactsReadOnlyScope = "https://www.googleapis.com/auth/contacts.other.readonly";
+    private const string OtherContactsSearchEndpoint = "https://people.googleapis.com/v1/otherContacts:search";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly HttpClient _httpClient;
+    private readonly Func<TimeSpan, CancellationToken, Task> _delayAsync;
+    private readonly DiagnosticLogService _logs;
 
-    public GooglePeopleRestClient(string accessToken, HttpClient? httpClient = null)
+    public GooglePeopleRestClient(string accessToken, HttpClient? httpClient = null,
+        Func<TimeSpan, CancellationToken, Task>? delayAsync = null, DiagnosticLogService? logs = null)
     {
-        _httpClient = httpClient ?? new HttpClient();
+        _httpClient = httpClient ?? DiagnosticLogging.CreateHttpClient();
         _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        _delayAsync = delayAsync ?? Task.Delay;
+        _logs = logs ?? DiagnosticLogging.Current;
     }
 
-    public async Task<IReadOnlyList<GoogleContactSearchResult>> SearchContactsAsync(
+    public async Task<IReadOnlyList<GoogleContactSearchResult>> SearchOtherContactsAsync(
         string query,
         int pageSize,
         CancellationToken cancellationToken)
@@ -26,7 +33,7 @@ public sealed class GooglePeopleRestClient
         }
 
         var url =
-            "https://people.googleapis.com/v1/people:searchContacts" +
+            OtherContactsSearchEndpoint +
             $"?query={Uri.EscapeDataString(query.Trim())}" +
             $"&pageSize={Math.Clamp(pageSize, 1, 30)}" +
             "&readMask=names,emailAddresses";
@@ -39,10 +46,11 @@ public sealed class GooglePeopleRestClient
         var searchResponse = await JsonSerializer.DeserializeAsync<PeopleSearchResponse>(stream, JsonOptions, cancellationToken);
         if (searchResponse?.Results is null)
         {
+            _logs.Write("Debug", "Contacts", "Other Contacts search returned no results");
             return Array.Empty<GoogleContactSearchResult>();
         }
 
-        return searchResponse.Results
+        var results = searchResponse.Results
             .SelectMany(result =>
             {
                 var displayName = result.Person?.Names?.FirstOrDefault(name => !string.IsNullOrWhiteSpace(name.DisplayName))?.DisplayName ?? "";
@@ -53,14 +61,20 @@ public sealed class GooglePeopleRestClient
             })
             .DistinctBy(result => result.EmailAddress, StringComparer.OrdinalIgnoreCase)
             .ToList();
+        _logs.Write("Debug", "Contacts", $"Other Contacts search parsed; people={searchResponse.Results.Count}; uniqueEmailResults={results.Count}");
+        return results;
     }
 
-    public async Task WarmupContactSearchAsync(CancellationToken cancellationToken)
+    public async Task WarmupOtherContactSearchAsync(CancellationToken cancellationToken)
     {
-        var url = "https://people.googleapis.com/v1/people:searchContacts?query=&pageSize=1&readMask=names,emailAddresses";
+        var url = OtherContactsSearchEndpoint + "?query=&pageSize=1&readMask=names,emailAddresses";
         using var request = new HttpRequestMessage(HttpMethod.Get, url);
         using var response = await _httpClient.SendAsync(request, cancellationToken);
         await EnsureSuccessAsync(response, cancellationToken);
+        // Other Contacts uses a lazy cache; Google's guide waits five seconds after warmup.
+        // https://developers.google.com/people/v1/other-contacts#search_the_users_other_contacts
+        _logs.Write("Debug", "Contacts", "Other Contacts cache warmup accepted; waiting 5 seconds");
+        await _delayAsync(TimeSpan.FromSeconds(5), cancellationToken);
     }
 
     private static async Task EnsureSuccessAsync(HttpResponseMessage response, CancellationToken cancellationToken)

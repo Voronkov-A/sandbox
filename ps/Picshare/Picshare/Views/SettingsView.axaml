@@ -1,0 +1,428 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:vm="clr-namespace:Picshare.ViewModels"
+             mc:Ignorable="d" d:DesignWidth="1000" d:DesignHeight="700"
+             x:Class="Picshare.Views.SettingsView"
+             x:DataType="vm:MainViewModel">
+  <UserControl.Styles>
+    <Style Selector="TextBlock.settings-row-label">
+      <Setter Property="VerticalAlignment" Value="Center"/>
+      <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+      <Setter Property="Margin" Value="0,0,8,0"/>
+    </Style>
+    <Style Selector="TextBlock.settings-title">
+      <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+    </Style>
+    <Style Selector="TextBox.settings-control">
+      <Setter Property="Height" Value="42"/>
+      <Setter Property="MinWidth" Value="5"/>
+      <Setter Property="VerticalContentAlignment" Value="Center"/>
+    </Style>
+    <Style Selector="NumericUpDown.settings-control">
+      <Setter Property="Height" Value="42"/>
+      <Setter Property="MinWidth" Value="5"/>
+      <Setter Property="VerticalContentAlignment" Value="Center"/>
+    </Style>
+    <Style Selector="Button.settings-control">
+      <Setter Property="Height" Value="42"/>
+      <Setter Property="MinWidth" Value="5"/>
+      <Setter Property="Padding" Value="12,8"/>
+      <Setter Property="Background" Value="White"/>
+      <Setter Property="BorderBrush" Value="#D6D8D1"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="Foreground" Value="#27343B"/>
+      <Setter Property="CornerRadius" Value="6"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="HorizontalAlignment" Value="Stretch"/>
+      <Setter Property="HorizontalContentAlignment" Value="Center"/>
+      <Setter Property="VerticalContentAlignment" Value="Center"/>
+    </Style>
+    <Style Selector="CheckBox.settings-control">
+      <Setter Property="MinHeight" Value="42"/>
+      <Setter Property="MinWidth" Value="5"/>
+      <Setter Property="HorizontalAlignment" Value="Stretch"/>
+      <Setter Property="VerticalAlignment" Value="Center"/>
+      <Setter Property="ClipToBounds" Value="True"/>
+      <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+      <Setter Property="VerticalContentAlignment" Value="Center"/>
+    </Style>
+    <Style Selector="Button.compact-footer-action TextBlock.footer-action-label">
+      <Setter Property="IsVisible" Value="False"/>
+    </Style>
+  </UserControl.Styles>
+
+  <Grid Margin="20,20,20,4">
+    <ScrollViewer x:Name="SettingsScrollViewer"
+                  ScrollChanged="SettingsScrollViewer_ScrollChanged">
+      <Border x:Name="SettingsCard" Background="White"
+              BorderBrush="#D6D8D1"
+              BorderThickness="1"
+              CornerRadius="6"
+              Padding="18"
+              MaxWidth="760"
+              HorizontalAlignment="Stretch">
+        <StackPanel x:Name="SettingsContentPanel" Spacing="16" SizeChanged="SettingsContentPanel_SizeChanged">
+          <StackPanel Spacing="8">
+            <TextBlock Classes="settings-title" Text="Authorization" FontSize="16" FontWeight="SemiBold"/>
+            <Border BorderBrush="#D6D8D1" BorderThickness="1" CornerRadius="6" Padding="12">
+              <StackPanel Spacing="8">
+                <TextBlock Classes="settings-title" Text="Anonymous" FontWeight="SemiBold"/>
+                <Grid x:Name="AnonymousNameSettingsRow" ColumnDefinitions="150,*" MinHeight="42">
+                  <TextBlock Classes="settings-row-label" Text="Name"/>
+                  <TextBox Grid.Column="1"
+                           Classes="settings-control"
+                           Text="{Binding AnonymousReviewerName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                           Watermark="Name shown in local album flow lists"/>
+                </Grid>
+              </StackPanel>
+            </Border>
+            <Border BorderBrush="#D6D8D1" BorderThickness="1" CornerRadius="6" Padding="12">
+              <StackPanel Spacing="8">
+                <TextBlock Classes="settings-title" Text="Google" FontWeight="SemiBold"/>
+                <Grid x:Name="SettingsGoogleAuthorizationRow"
+                      ColumnDefinitions="*,92"
+                      ColumnSpacing="8"
+                      SizeChanged="SettingsGoogleAuthorizationRow_SizeChanged">
+                  <TextBlock x:Name="SettingsGoogleAuthorizationStatusLabel"
+                             Text="{Binding GoogleAuthorizationStatus}"
+                             VerticalAlignment="Center"
+                             TextTrimming="CharacterEllipsis"
+                             Margin="0"/>
+                  <Button x:Name="SettingsGoogleSignInButton"
+                          Grid.Column="1"
+                          Classes="settings-control"
+                          Click="SettingsSignInGoogle_Click"
+                          IsVisible="{Binding IsGoogleSignedOut}"
+                          SizeChanged="SettingsCompactActionButton_SizeChanged"
+                          Width="92"
+                          MaxWidth="92">
+                    <Grid ColumnDefinitions="Auto,Auto" ColumnSpacing="6" HorizontalAlignment="Center">
+                      <Canvas Width="20" Height="20">
+                        <Path Data="M13,4 L17,4 L17,16 L13,16"
+                              Stroke="#27343B"
+                              StrokeThickness="1.7"
+                              Fill="Transparent"
+                              StrokeLineCap="Round"
+                              StrokeJoin="Round"/>
+                        <Path Data="M3,10 L13,10 M9,6 L13,10 L9,14"
+                              Stroke="#27343B"
+                              StrokeThickness="1.7"
+                              Fill="Transparent"
+                              StrokeLineCap="Round"
+                              StrokeJoin="Round"/>
+                      </Canvas>
+                      <TextBlock Grid.Column="1"
+                                 Classes="footer-action-label"
+                                 Text="Sign in"
+                                 FontWeight="SemiBold"
+                                 VerticalAlignment="Center"/>
+                    </Grid>
+                  </Button>
+                  <Button x:Name="SettingsGoogleSignOutButton"
+                          Grid.Column="1"
+                          Classes="settings-control"
+                          Command="{Binding ClearGoogleAuthorizationCommand}"
+                          IsVisible="{Binding IsGoogleSignedIn}"
+                          Width="42"
+                          MaxWidth="42"
+                          Height="42"
+                          MinWidth="5"
+                          HorizontalAlignment="Right"
+                          Padding="0"
+                          ToolTip.Tip="Sign out">
+                    <Canvas Width="18" Height="18">
+                      <Path Data="M4,4 L14,14 M14,4 L4,14" Stroke="#27343B" StrokeThickness="2" StrokeLineCap="Round"/>
+                    </Canvas>
+                  </Button>
+                </Grid>
+              </StackPanel>
+            </Border>
+          </StackPanel>
+
+          <Border Height="1" Background="#D6D8D1"/>
+
+          <StackPanel Spacing="8">
+            <TextBlock Classes="settings-title" Text="View" FontSize="16" FontWeight="SemiBold"/>
+            <Border BorderBrush="#D6D8D1" BorderThickness="1" CornerRadius="6" Padding="12">
+              <StackPanel Spacing="8">
+                <Grid x:Name="ColumnsSettingsRow" ColumnDefinitions="150,*" MinHeight="42">
+                  <TextBlock Classes="settings-row-label" Text="Columns"/>
+                  <NumericUpDown Value="{Binding NumberOfPicturesPerRow}"
+                                 Classes="settings-control"
+                                 Grid.Column="1"
+                                 SizeChanged="SettingsNumericUpDown_SizeChanged"
+                                 Minimum="0"
+                                 Maximum="999999"
+                                 Increment="1"
+                                 Tag="1:8"/>
+                </Grid>
+                <Grid x:Name="ZoomPowerSettingsRow" ColumnDefinitions="150,*" MinHeight="42">
+                  <TextBlock Classes="settings-row-label" Text="Zoom power"/>
+                  <NumericUpDown Value="{Binding ZoomPower}"
+                                 Classes="settings-control"
+                                 Grid.Column="1"
+                                 SizeChanged="SettingsNumericUpDown_SizeChanged"
+                                 Minimum="0"
+                                 Maximum="999999"
+                                 Increment="1"
+                                 Tag="2:10000"/>
+                </Grid>
+                <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto">
+                  <CheckBox Classes="settings-control" IsChecked="{Binding FixedHeader}" Margin="0,0,12,8">
+                    <TextBlock x:Name="FixedHeaderSettingsLabel" Text="Fixed header" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" VerticalAlignment="Center"/>
+                  </CheckBox>
+                  <CheckBox Grid.Column="1" Classes="settings-control" IsChecked="{Binding FixedTabs}" Margin="0,0,0,8">
+                    <TextBlock x:Name="FixedTabsSettingsLabel" Text="Fixed tabs" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" VerticalAlignment="Center"/>
+                  </CheckBox>
+                  <CheckBox Grid.Row="1" Classes="settings-control" IsChecked="{Binding FixedActionPanel}" Margin="0,0,12,0">
+                    <TextBlock x:Name="FixedActionPanelSettingsLabel" Text="Fixed action panel" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" VerticalAlignment="Center"/>
+                  </CheckBox>
+                  <CheckBox Grid.Row="1" Grid.Column="1" Classes="settings-control" IsChecked="{Binding ShowPhotoViewerPreviousNextButtons}">
+                    <TextBlock x:Name="NavigationButtonsSettingsLabel" Text="Navigation buttons" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" VerticalAlignment="Center"/>
+                  </CheckBox>
+                </Grid>
+              </StackPanel>
+            </Border>
+          </StackPanel>
+
+          <Border Height="1" Background="#D6D8D1"/>
+
+          <StackPanel Spacing="8">
+            <TextBlock Classes="settings-title" Text="Default download directories" FontSize="16" FontWeight="SemiBold"/>
+            <StackPanel Spacing="8">
+              <Border BorderBrush="#D6D8D1" BorderThickness="1" CornerRadius="6" Padding="10">
+                <StackPanel Spacing="8">
+                  <TextBlock Classes="settings-title" Text="Picture" FontWeight="SemiBold"/>
+                  <Grid ColumnDefinitions="*,42,42" ColumnSpacing="8" SizeChanged="SettingsSquareButtonRow_SizeChanged">
+                    <TextBox Classes="settings-control" Text="{Binding PictureDefaultDownloadDirectoryPath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                    <Button Grid.Column="1" Classes="settings-control" Click="ChoosePictureDefaultDownloadDirectory_Click" MaxWidth="42" Height="42" MinWidth="5" Padding="0" ToolTip.Tip="Select">
+                      <Canvas Width="22" Height="22">
+                        <Path Data="M3,7 L8,7 L10,9 L19,9 L19,17 L3,17 Z" Stroke="#27343B" StrokeThickness="1.7" Fill="Transparent" StrokeJoin="Round"/>
+                        <Path Data="M3,8 L3,5 L8,5 L10,7 L15,7" Stroke="#27343B" StrokeThickness="1.7" Fill="Transparent" StrokeJoin="Round"/>
+                      </Canvas>
+                    </Button>
+                    <Button Grid.Column="2" Classes="settings-control" Command="{Binding SetPictureDefaultDownloadDirectoryToDefaultCommand}" MaxWidth="42" Height="42" MinWidth="5" Padding="0" ToolTip.Tip="Set to default">
+                      <Canvas Width="18" Height="18">
+                        <Path Data="M4,4 L14,14 M14,4 L4,14" Stroke="#27343B" StrokeThickness="2" StrokeLineCap="Round"/>
+                      </Canvas>
+                    </Button>
+                  </Grid>
+                </StackPanel>
+              </Border>
+              <Border BorderBrush="#D6D8D1" BorderThickness="1" CornerRadius="6" Padding="10">
+                <StackPanel Spacing="8">
+                  <TextBlock Classes="settings-title" Text="Todo" FontWeight="SemiBold"/>
+                  <Grid ColumnDefinitions="*,42,42" ColumnSpacing="8" SizeChanged="SettingsSquareButtonRow_SizeChanged">
+                    <TextBox Classes="settings-control" Text="{Binding UncategorizedDefaultDownloadDirectoryPath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                    <Button Grid.Column="1" Classes="settings-control" Click="ChooseUncategorizedDefaultDownloadDirectory_Click" MaxWidth="42" Height="42" MinWidth="5" Padding="0" ToolTip.Tip="Select">
+                      <Canvas Width="22" Height="22">
+                        <Path Data="M3,7 L8,7 L10,9 L19,9 L19,17 L3,17 Z" Stroke="#27343B" StrokeThickness="1.7" Fill="Transparent" StrokeJoin="Round"/>
+                        <Path Data="M3,8 L3,5 L8,5 L10,7 L15,7" Stroke="#27343B" StrokeThickness="1.7" Fill="Transparent" StrokeJoin="Round"/>
+                      </Canvas>
+                    </Button>
+                    <Button Grid.Column="2" Classes="settings-control" Command="{Binding SetUncategorizedDefaultDownloadDirectoryToDefaultCommand}" MaxWidth="42" Height="42" MinWidth="5" Padding="0" ToolTip.Tip="Set to default">
+                      <Canvas Width="18" Height="18">
+                        <Path Data="M4,4 L14,14 M14,4 L4,14" Stroke="#27343B" StrokeThickness="2" StrokeLineCap="Round"/>
+                      </Canvas>
+                    </Button>
+                  </Grid>
+                </StackPanel>
+              </Border>
+              <Border BorderBrush="#D6D8D1" BorderThickness="1" CornerRadius="6" Padding="10">
+                <StackPanel Spacing="8">
+                  <TextBlock Classes="settings-title" Text="Nice" FontWeight="SemiBold"/>
+                  <Grid ColumnDefinitions="*,42,42" ColumnSpacing="8" SizeChanged="SettingsSquareButtonRow_SizeChanged">
+                    <TextBox Classes="settings-control" Text="{Binding NiceDefaultDownloadDirectoryPath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                    <Button Grid.Column="1" Classes="settings-control" Click="ChooseNiceDefaultDownloadDirectory_Click" MaxWidth="42" Height="42" MinWidth="5" Padding="0" ToolTip.Tip="Select">
+                      <Canvas Width="22" Height="22">
+                        <Path Data="M3,7 L8,7 L10,9 L19,9 L19,17 L3,17 Z" Stroke="#27343B" StrokeThickness="1.7" Fill="Transparent" StrokeJoin="Round"/>
+                        <Path Data="M3,8 L3,5 L8,5 L10,7 L15,7" Stroke="#27343B" StrokeThickness="1.7" Fill="Transparent" StrokeJoin="Round"/>
+                      </Canvas>
+                    </Button>
+                    <Button Grid.Column="2" Classes="settings-control" Command="{Binding SetNiceDefaultDownloadDirectoryToDefaultCommand}" MaxWidth="42" Height="42" MinWidth="5" Padding="0" ToolTip.Tip="Set to default">
+                      <Canvas Width="18" Height="18">
+                        <Path Data="M4,4 L14,14 M14,4 L4,14" Stroke="#27343B" StrokeThickness="2" StrokeLineCap="Round"/>
+                      </Canvas>
+                    </Button>
+                  </Grid>
+                </StackPanel>
+              </Border>
+              <Border BorderBrush="#D6D8D1" BorderThickness="1" CornerRadius="6" Padding="10">
+                <StackPanel Spacing="8">
+                  <TextBlock Classes="settings-title" Text="Okay" FontWeight="SemiBold"/>
+                  <Grid ColumnDefinitions="*,42,42" ColumnSpacing="8" SizeChanged="SettingsSquareButtonRow_SizeChanged">
+                    <TextBox Classes="settings-control" Text="{Binding OkDefaultDownloadDirectoryPath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                    <Button Grid.Column="1" Classes="settings-control" Click="ChooseOkDefaultDownloadDirectory_Click" MaxWidth="42" Height="42" MinWidth="5" Padding="0" ToolTip.Tip="Select">
+                      <Canvas Width="22" Height="22">
+                        <Path Data="M3,7 L8,7 L10,9 L19,9 L19,17 L3,17 Z" Stroke="#27343B" StrokeThickness="1.7" Fill="Transparent" StrokeJoin="Round"/>
+                        <Path Data="M3,8 L3,5 L8,5 L10,7 L15,7" Stroke="#27343B" StrokeThickness="1.7" Fill="Transparent" StrokeJoin="Round"/>
+                      </Canvas>
+                    </Button>
+                    <Button Grid.Column="2" Classes="settings-control" Command="{Binding SetOkDefaultDownloadDirectoryToDefaultCommand}" MaxWidth="42" Height="42" MinWidth="5" Padding="0" ToolTip.Tip="Set to default">
+                      <Canvas Width="18" Height="18">
+                        <Path Data="M4,4 L14,14 M14,4 L4,14" Stroke="#27343B" StrokeThickness="2" StrokeLineCap="Round"/>
+                      </Canvas>
+                    </Button>
+                  </Grid>
+                </StackPanel>
+              </Border>
+              <Border BorderBrush="#D6D8D1" BorderThickness="1" CornerRadius="6" Padding="10">
+                <StackPanel Spacing="8">
+                  <TextBlock Classes="settings-title" Text="Trash" FontWeight="SemiBold"/>
+                  <Grid ColumnDefinitions="*,42,42" ColumnSpacing="8" SizeChanged="SettingsSquareButtonRow_SizeChanged">
+                    <TextBox Classes="settings-control" Text="{Binding TrashDefaultDownloadDirectoryPath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                    <Button Grid.Column="1" Classes="settings-control" Click="ChooseTrashDefaultDownloadDirectory_Click" MaxWidth="42" Height="42" MinWidth="5" Padding="0" ToolTip.Tip="Select">
+                      <Canvas Width="22" Height="22">
+                        <Path Data="M3,7 L8,7 L10,9 L19,9 L19,17 L3,17 Z" Stroke="#27343B" StrokeThickness="1.7" Fill="Transparent" StrokeJoin="Round"/>
+                        <Path Data="M3,8 L3,5 L8,5 L10,7 L15,7" Stroke="#27343B" StrokeThickness="1.7" Fill="Transparent" StrokeJoin="Round"/>
+                      </Canvas>
+                    </Button>
+                    <Button Grid.Column="2" Classes="settings-control" Command="{Binding SetTrashDefaultDownloadDirectoryToDefaultCommand}" MaxWidth="42" Height="42" MinWidth="5" Padding="0" ToolTip.Tip="Set to default">
+                      <Canvas Width="18" Height="18">
+                        <Path Data="M4,4 L14,14 M14,4 L4,14" Stroke="#27343B" StrokeThickness="2" StrokeLineCap="Round"/>
+                      </Canvas>
+                    </Button>
+                  </Grid>
+                </StackPanel>
+              </Border>
+            </StackPanel>
+          </StackPanel>
+
+          <Border Height="1" Background="#D6D8D1"/>
+
+          <StackPanel Spacing="8">
+            <TextBlock Classes="settings-title" Text="Performance" FontSize="16" FontWeight="SemiBold"/>
+            <Border BorderBrush="#D6D8D1" BorderThickness="1" CornerRadius="6" Padding="12">
+              <Grid x:Name="ParallelismSettingsRow" ColumnDefinitions="150,*" MinHeight="42">
+                <TextBlock Classes="settings-row-label" Text="Parallelism"/>
+                <NumericUpDown Value="{Binding MaximumParallelism}"
+                               Classes="settings-control"
+                               Grid.Column="1"
+                               SizeChanged="SettingsNumericUpDown_SizeChanged"
+                               Minimum="0"
+                               Maximum="999999"
+                               Increment="1"
+                               Tag="1:64"/>
+              </Grid>
+            </Border>
+          </StackPanel>
+
+          <Border Height="1" Background="#D6D8D1"/>
+
+          <StackPanel Spacing="8">
+            <TextBlock Classes="settings-title" Text="Cache" FontSize="16" FontWeight="SemiBold"/>
+            <Border BorderBrush="#D6D8D1" BorderThickness="1" CornerRadius="6" Padding="12">
+              <StackPanel Spacing="8">
+                <Grid x:Name="CacheLimitSettingsGrid" ColumnDefinitions="150,*" RowDefinitions="Auto,Auto,Auto,Auto">
+                  <Grid Grid.Column="1" ColumnDefinitions="*,*,*" ColumnSpacing="8" MinWidth="31" Margin="0,0,0,4">
+                    <TextBlock Text="Encoded MB" FontSize="12" Foreground="#6C756F" TextTrimming="CharacterEllipsis"/>
+                    <TextBlock Grid.Column="1" Text="Bitmap MB" FontSize="12" Foreground="#6C756F" TextTrimming="CharacterEllipsis"/>
+                    <TextBlock Grid.Column="2" Text="Disk MB" FontSize="12" Foreground="#6C756F" TextTrimming="CharacterEllipsis"/>
+                  </Grid>
+
+                  <TextBlock Grid.Row="1" Classes="settings-row-label" Text="Fast thumbnails" Margin="0,0,8,6"/>
+                  <Grid Grid.Row="1" Grid.Column="1" ColumnDefinitions="*,*,*" ColumnSpacing="8" MinWidth="31" Margin="0,0,0,6">
+                    <NumericUpDown Classes="settings-control" Value="{Binding AlbumFastThumbnailMemoryCacheSizeMb}" SizeChanged="SettingsNumericUpDown_SizeChanged" Minimum="0" Maximum="999999" Increment="64" Tag="20480"/>
+                    <NumericUpDown Grid.Column="1" Classes="settings-control" Value="{Binding AlbumFastThumbnailBitmapCacheSizeMb}" SizeChanged="SettingsNumericUpDown_SizeChanged" Minimum="0" Maximum="999999" Increment="64" Tag="20480"/>
+                    <NumericUpDown Grid.Column="2" Classes="settings-control" Value="{Binding AlbumFastThumbnailDiskCacheSizeMb}" SizeChanged="SettingsNumericUpDown_SizeChanged" Minimum="0" Maximum="999999" Increment="64" Tag="20480"/>
+                  </Grid>
+
+                  <TextBlock Grid.Row="2" Classes="settings-row-label" Text="Detailed thumbnails" Margin="0,0,8,6"/>
+                  <Grid Grid.Row="2" Grid.Column="1" ColumnDefinitions="*,*,*" ColumnSpacing="8" MinWidth="31" Margin="0,0,0,6">
+                    <NumericUpDown Classes="settings-control" Value="{Binding AlbumDetailedThumbnailMemoryCacheSizeMb}" SizeChanged="SettingsNumericUpDown_SizeChanged" Minimum="0" Maximum="999999" Increment="64" Tag="20480"/>
+                    <NumericUpDown Grid.Column="1" Classes="settings-control" Value="{Binding AlbumDetailedThumbnailBitmapCacheSizeMb}" SizeChanged="SettingsNumericUpDown_SizeChanged" Minimum="0" Maximum="999999" Increment="64" Tag="20480"/>
+                    <NumericUpDown Grid.Column="2" Classes="settings-control" Value="{Binding AlbumDetailedThumbnailDiskCacheSizeMb}" SizeChanged="SettingsNumericUpDown_SizeChanged" Minimum="0" Maximum="999999" Increment="64" Tag="20480"/>
+                  </Grid>
+
+                  <TextBlock Grid.Row="3" Classes="settings-row-label" Text="Original images" Margin="0,0,8,0"/>
+                  <Grid Grid.Row="3" Grid.Column="1" ColumnDefinitions="*,*,*" ColumnSpacing="8" MinWidth="31">
+                    <NumericUpDown Classes="settings-control" Value="{Binding AlbumOriginalImageMemoryCacheSizeMb}" SizeChanged="SettingsNumericUpDown_SizeChanged" Minimum="0" Maximum="999999" Increment="64" Tag="20480"/>
+                    <NumericUpDown Grid.Column="1" Classes="settings-control" Value="{Binding AlbumOriginalImageBitmapCacheSizeMb}" SizeChanged="SettingsNumericUpDown_SizeChanged" Minimum="0" Maximum="999999" Increment="64" Tag="20480"/>
+                    <NumericUpDown Grid.Column="2" Classes="settings-control" Value="{Binding AlbumOriginalImageDiskCacheSizeMb}" SizeChanged="SettingsNumericUpDown_SizeChanged" Minimum="0" Maximum="999999" Increment="64" Tag="20480"/>
+                  </Grid>
+                </Grid>
+                <Grid x:Name="CachedImagesSettingsRow" ColumnDefinitions="150,*" MinHeight="42">
+                  <TextBlock Classes="settings-row-label"
+                             Text="Cached images"/>
+                  <Button x:Name="ClearImageCacheButton"
+                          Grid.Column="1"
+                          Classes="settings-control"
+                          Command="{Binding ClearImageCacheCommand}"
+                          SizeChanged="SettingsCompactActionButton_SizeChanged">
+                    <Grid ColumnDefinitions="Auto,Auto" ColumnSpacing="6" HorizontalAlignment="Center">
+                      <Canvas Width="20" Height="20">
+                        <Path Data="M5,7 L15,7"
+                              Stroke="#27343B"
+                              StrokeThickness="1.7"
+                              StrokeLineCap="Round"/>
+                        <Path Data="M8,7 L8,5 L12,5 L12,7"
+                              Stroke="#27343B"
+                              StrokeThickness="1.7"
+                              Fill="Transparent"
+                              StrokeLineCap="Round"
+                              StrokeJoin="Round"/>
+                        <Path Data="M7,7 L8,17 L14,17 L15,7"
+                              Stroke="#27343B"
+                              StrokeThickness="1.7"
+                              Fill="Transparent"
+                              StrokeJoin="Round"/>
+                        <Path Data="M10,10 L10,15 M12,10 L12,15"
+                              Stroke="#27343B"
+                              StrokeThickness="1.4"
+                              StrokeLineCap="Round"/>
+                      </Canvas>
+                      <TextBlock Grid.Column="1"
+                                 Classes="footer-action-label"
+                                 Text="Clear"
+                                 FontWeight="SemiBold"
+                                 VerticalAlignment="Center"/>
+                    </Grid>
+                  </Button>
+                </Grid>
+              </StackPanel>
+            </Border>
+          </StackPanel>
+          <Border Height="1" Background="#D6D8D1"/>
+
+          <StackPanel Spacing="8">
+            <TextBlock Classes="settings-title" Text="Diagnostics" FontSize="16" FontWeight="SemiBold"/>
+            <Border x:Name="DiagnosticsSectionBorder" BorderBrush="#D6D8D1" BorderThickness="1" CornerRadius="6" Padding="12">
+              <StackPanel Spacing="8">
+                <Grid x:Name="DiagnosticsControls" ColumnDefinitions="142,Auto,*,Auto,Auto" ColumnSpacing="8"
+                      SizeChanged="DiagnosticsControls_SizeChanged" ClipToBounds="True">
+                  <Button x:Name="SendLogsButton" Classes="settings-control"
+                          Click="SendLogs_Click" HorizontalAlignment="Left" HorizontalContentAlignment="Stretch"
+                          ClipToBounds="True" ToolTip.Tip="Send logs" AutomationProperties.Name="Send diagnostic logs">
+                    <TextBlock Text="Send logs" TextTrimming="CharacterEllipsis" TextAlignment="Center"/>
+                  </Button>
+                  <TextBlock x:Name="DiagnosticsPeriodLabel" Grid.Column="1" Text="for the last"
+                             VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                  <NumericUpDown x:Name="DiagnosticsPeriod" Grid.Column="2" Classes="settings-control"
+                                 Value="1" Minimum="1" Maximum="36500" Increment="1"
+                                 FormatString="0" AllowSpin="True" ClipValueToMinMax="True"
+                                 ParsingNumberStyle="Integer" HorizontalAlignment="Stretch"
+                                 SizeChanged="SettingsNumericUpDown_SizeChanged"
+                                 AutomationProperties.Name="Log period amount"/>
+                  <ComboBox x:Name="DiagnosticsUnits" Grid.Column="3" SelectedIndex="2" Height="42" MinWidth="5"
+                            HorizontalAlignment="Stretch" ClipToBounds="True"
+                            AutomationProperties.Name="Log period units">
+                    <ComboBoxItem Content="Seconds"/>
+                    <ComboBoxItem Content="Minutes"/>
+                    <ComboBoxItem Content="Hours"/>
+                    <ComboBoxItem Content="Days"/>
+                  </ComboBox>
+                  <TextBlock x:Name="DiagnosticsEllipsis" Grid.Column="4" Text="..."
+                             VerticalAlignment="Center" HorizontalAlignment="Right"/>
+                </Grid>
+                <TextBlock x:Name="DiagnosticsStatus" IsVisible="False" TextWrapping="Wrap" Foreground="#6C756F"
+                           AutomationProperties.LiveSetting="Polite"/>
+              </StackPanel>
+            </Border>
+          </StackPanel>
+        </StackPanel>
+      </Border>
+    </ScrollViewer>
+  </Grid>
+</UserControl>

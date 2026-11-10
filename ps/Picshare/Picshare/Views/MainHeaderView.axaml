@@ -1,0 +1,124 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:Picshare.ViewModels"
+             x:Class="Picshare.Views.MainHeaderView"
+             x:DataType="vm:MainViewModel">
+  <UserControl.Styles>
+    <Style Selector="Button.footer-action">
+      <Setter Property="Background" Value="White"/>
+      <Setter Property="BorderBrush" Value="#D6D8D1"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="Foreground" Value="#27343B"/>
+      <Setter Property="CornerRadius" Value="6"/>
+    </Style>
+  </UserControl.Styles>
+
+  <Border Background="White"
+          BorderBrush="#D6D8D1"
+          BorderThickness="0,0,0,1">
+    <Grid ColumnDefinitions="Auto,*,Auto" Margin="12,0">
+      <Button Classes="footer-action"
+              Width="42"
+              Height="42"
+              Padding="0"
+              Command="{Binding ToggleSidebarCommand}"
+              ToolTip.Tip="Open menu"
+              HorizontalAlignment="Left"
+              VerticalAlignment="Center">
+        <Grid Width="22" Height="22">
+          <Path Data="M3,6 L19,6 M3,11 L19,11 M3,16 L19,16"
+                Stroke="#27343B"
+                StrokeThickness="2"
+                StrokeLineCap="Round"/>
+        </Grid>
+      </Button>
+      <TextBlock Grid.Column="1"
+                 Text="{Binding AlbumWorkflowStatus}"
+                 IsVisible="{Binding IsOpenAlbumWorkflowStatusVisible}"
+                 FontSize="15"
+                 FontWeight="SemiBold"
+                 Foreground="#27343B"
+                 HorizontalAlignment="Center"
+                 VerticalAlignment="Center"
+                 TextTrimming="CharacterEllipsis"/>
+      <TextBlock Grid.Column="1"
+                 Text="Settings"
+                 IsVisible="{Binding IsSettingsViewVisible}"
+                 FontSize="15"
+                 FontWeight="SemiBold"
+                 Foreground="#27343B"
+                 HorizontalAlignment="Center"
+                 VerticalAlignment="Center"
+                 TextTrimming="CharacterEllipsis"/>
+      <Button Grid.Column="2"
+              Classes="footer-action"
+              Width="42"
+              Height="42"
+              Padding="0"
+              IsVisible="{Binding IsOpenAlbumHeaderActionsVisible}"
+              IsEnabled="{Binding CanUseAlbumMoreMenu}"
+              ToolTip.Tip="Album actions"
+              HorizontalAlignment="Right"
+              VerticalAlignment="Center">
+        <Grid Width="22" Height="22">
+          <Ellipse Width="4" Height="4" Fill="#27343B" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,2,0,0"/>
+          <Ellipse Width="4" Height="4" Fill="#27343B" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+          <Ellipse Width="4" Height="4" Fill="#27343B" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,2"/>
+        </Grid>
+        <Button.Flyout>
+          <MenuFlyout>
+            <MenuItem IsHitTestVisible="False">
+              <MenuItem.Header>
+                <Border Background="#27343B" Padding="12,7" MinWidth="180">
+                  <TextBlock Text="Album actions" Foreground="White" FontWeight="Bold"/>
+                </Border>
+              </MenuItem.Header>
+            </MenuItem>
+            <MenuItem Command="{Binding CommitFeedbackCommand}"
+                      IsVisible="{Binding IsCommitFeedbackMenuItemVisible}"
+                      IsEnabled="{Binding CanCommitFeedback}">
+              <MenuItem.Header>
+                <StackPanel Spacing="1">
+                  <TextBlock Text="Commit feedback"/>
+                  <TextBlock Text="{Binding CommitFeedbackMenuComment}"
+                             FontSize="11"
+                             Foreground="#6C756F"
+                             IsVisible="{Binding HasCommitFeedbackMenuComment}"/>
+                </StackPanel>
+              </MenuItem.Header>
+            </MenuItem>
+            <MenuItem Header="Leave"
+                      Command="{Binding LeaveFeedbackCommand}"
+                      IsVisible="{Binding IsLeaveFeedbackVisible}"
+                      IsEnabled="{Binding CanLeaveFeedback}"/>
+            <MenuItem Header="Pass"
+                      Command="{Binding PassFeedbackCommand}"
+                      IsEnabled="{Binding CanPassFeedback}"/>
+            <MenuItem Header="Download the album..."
+                      Command="{Binding OpenAlbumDownloadDialogCommand}"
+                      IsEnabled="{Binding CanUseAlbumMoreMenu}"/>
+          </MenuFlyout>
+        </Button.Flyout>
+      </Button>
+      <Button Grid.Column="2"
+              Classes="footer-action"
+              Width="42"
+              Height="42"
+              Padding="0"
+              IsVisible="{Binding IsSettingsViewVisible}"
+              Command="{Binding CloseSettingsCommand}"
+              ToolTip.Tip="Close settings"
+              HorizontalAlignment="Right"
+              VerticalAlignment="Center"
+              HorizontalContentAlignment="Center"
+              VerticalContentAlignment="Center">
+        <Canvas Width="18" Height="18">
+          <Path Data="M4,4 L14,14 M14,4 L4,14"
+                Stroke="#27343B"
+                StrokeThickness="2"
+                StrokeLineCap="Round"/>
+        </Canvas>
+      </Button>
+    </Grid>
+  </Border>
+</UserControl>

@@ -17,6 +17,7 @@ public class MainActivity : AvaloniaMainActivity<App>
     protected override AppBuilder CustomizeAppBuilder(AppBuilder builder)
     {
         LongRunningOperationHost.Current = new AndroidLongRunningOperationHost(this);
+        DiagnosticExportHost.Current = new AndroidDiagnosticShareHost(this);
         return base.CustomizeAppBuilder(builder)
             .WithInterFont();
     }

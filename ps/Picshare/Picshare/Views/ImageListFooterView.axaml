@@ -1,0 +1,300 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:vm="clr-namespace:Picshare.ViewModels"
+             mc:Ignorable="d" d:DesignWidth="700" d:DesignHeight="56"
+             x:Class="Picshare.Views.ImageListFooterView"
+             x:DataType="vm:MainViewModel">
+  <UserControl.Styles>
+    <Style Selector="Button.footer-action">
+      <Setter Property="Background" Value="White"/>
+      <Setter Property="BorderBrush" Value="#D6D8D1"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="Foreground" Value="#27343B"/>
+      <Setter Property="CornerRadius" Value="6"/>
+    </Style>
+    <Style Selector="Button.compact-footer-action TextBlock.footer-action-label">
+      <Setter Property="IsVisible" Value="False"/>
+    </Style>
+  </UserControl.Styles>
+
+  <Border Background="White"
+          BorderBrush="#D6D8D1"
+          BorderThickness="0,1,0,0">
+    <Grid x:Name="FooterActionPanelHost"
+          Margin="8,0"
+          SizeChanged="FooterActionPanelHost_SizeChanged"
+          HorizontalAlignment="Stretch"
+          VerticalAlignment="Center">
+      <StackPanel x:Name="FooterActionPanel"
+                  Orientation="Horizontal"
+                  Spacing="8"
+                  HorizontalAlignment="Center"
+                  VerticalAlignment="Center">
+        <Button Classes="footer-action"
+                MaxWidth="92"
+                Height="42"
+                Padding="0"
+                SizeChanged="FooterActionButton_SizeChanged"
+                HorizontalAlignment="Stretch"
+                HorizontalContentAlignment="Center"
+                VerticalContentAlignment="Center">
+          <Grid ColumnDefinitions="Auto,Auto" ColumnSpacing="6" HorizontalAlignment="Center">
+            <Grid Width="18" Height="18" VerticalAlignment="Center">
+              <Path Data="M3,4 L15,4 L15,15 L3,15 Z"
+                    Stroke="#27343B"
+                    StrokeThickness="1.6"
+                    Fill="Transparent"/>
+              <Path Data="M6,9 L8,12 L13,6"
+                    Stroke="#27343B"
+                    StrokeThickness="1.8"
+                    StrokeLineCap="Round"
+                    StrokeJoin="Round"/>
+            </Grid>
+            <TextBlock Grid.Column="1"
+                       Classes="footer-action-label"
+                       Text="{Binding SelectedPhotoCountText}"
+                       FontWeight="SemiBold"
+                       VerticalAlignment="Center"/>
+          </Grid>
+          <Button.Flyout>
+            <MenuFlyout>
+              <MenuItem IsHitTestVisible="False">
+                <MenuItem.Header>
+                  <Border Background="#27343B"
+                          Padding="12,7"
+                          MinWidth="180">
+                    <TextBlock Text="{Binding BulkSelectionStatus}"
+                               Foreground="White"
+                               FontWeight="Bold"/>
+                  </Border>
+                </MenuItem.Header>
+              </MenuItem>
+              <MenuItem Header="Select all"
+                        Command="{Binding SelectAllPhotosInCurrentTabCommand}"/>
+              <MenuItem Header="Invert selection"
+                        Command="{Binding InvertSelectionInCurrentTabCommand}"/>
+              <MenuItem Header="Undo selection"
+                        Command="{Binding UndoSelectionCommand}"
+                        IsEnabled="{Binding CanUndoSelection}"/>
+              <MenuItem Header="Redo selection"
+                        Command="{Binding RedoSelectionCommand}"
+                        IsEnabled="{Binding CanRedoSelection}"/>
+              <MenuItem Header="Clear selection"
+                        Command="{Binding ClearSelectedPhotosCommand}"
+                        IsEnabled="{Binding CanClearSelection}"/>
+            </MenuFlyout>
+          </Button.Flyout>
+        </Button>
+
+        <Button Classes="footer-action"
+                MaxWidth="92"
+                Height="42"
+                Padding="0"
+                SizeChanged="FooterActionButton_SizeChanged"
+                HorizontalAlignment="Stretch"
+                HorizontalContentAlignment="Center"
+                VerticalContentAlignment="Center"
+                Command="{Binding MarkSelectedPhotosUncategorizedCommand}"
+                IsEnabled="{Binding CanMarkSelectedPhotosUncategorized}"
+                IsVisible="{Binding IsFooterTodoActionVisible}"
+                ToolTip.Tip="Todo">
+          <Grid ColumnDefinitions="Auto,Auto" ColumnSpacing="6" HorizontalAlignment="Center">
+            <Canvas Width="20" Height="20">
+              <Path Data="M5,7 L9,3 L15,3 L18,8 L15,16 L8,18 L3,14 Z"
+                    Stroke="#27343B"
+                    StrokeThickness="1.5"
+                    Fill="Transparent"/>
+              <Path Data="M10,8 Q10,5.8 12,5.8 Q14,5.8 14,7.8 Q14,9.2 12.2,10.2 Q11,10.9 11,12.1"
+                    Stroke="#27343B"
+                    StrokeThickness="1.5"
+                    StrokeLineCap="Round"
+                    StrokeJoin="Round"
+                    Fill="Transparent"/>
+              <Path Data="M11,15 L11,15.1"
+                    Stroke="#27343B"
+                    StrokeThickness="2"
+                    StrokeLineCap="Round"/>
+            </Canvas>
+            <TextBlock Grid.Column="1"
+                       Classes="footer-action-label"
+                       Text="Todo"
+                       FontWeight="SemiBold"
+                       VerticalAlignment="Center"/>
+          </Grid>
+        </Button>
+
+        <Button Classes="footer-action"
+                MaxWidth="92"
+                Height="42"
+                Padding="0"
+                SizeChanged="FooterActionButton_SizeChanged"
+                HorizontalAlignment="Stretch"
+                HorizontalContentAlignment="Center"
+                VerticalContentAlignment="Center"
+                Command="{Binding MarkSelectedPhotosNiceCommand}"
+                IsEnabled="{Binding CanMarkSelectedPhotosNice}"
+                IsVisible="{Binding IsFooterNiceActionVisible}"
+                ToolTip.Tip="Nice">
+          <Grid ColumnDefinitions="Auto,Auto" ColumnSpacing="6" HorizontalAlignment="Center">
+            <Canvas Width="20" Height="20">
+              <Path Data="M5,7 L9,3 L15,3 L18,8 L15,16 L8,18 L3,14 Z"
+                    Stroke="#27343B"
+                    StrokeThickness="1.5"
+                    Fill="Transparent"/>
+              <Path Data="M8,8 L8,9 M14,8 L14,9 M8,13 Q11,16 15,13"
+                    Stroke="#27343B"
+                    StrokeThickness="1.5"
+                    StrokeLineCap="Round"
+                    Fill="Transparent"/>
+            </Canvas>
+            <TextBlock Grid.Column="1"
+                       Classes="footer-action-label"
+                       Text="Nice"
+                       FontWeight="SemiBold"
+                       VerticalAlignment="Center"/>
+          </Grid>
+        </Button>
+
+        <Button Classes="footer-action"
+                MaxWidth="92"
+                Height="42"
+                Padding="0"
+                SizeChanged="FooterActionButton_SizeChanged"
+                HorizontalAlignment="Stretch"
+                HorizontalContentAlignment="Center"
+                VerticalContentAlignment="Center"
+                Command="{Binding MarkSelectedPhotosOkCommand}"
+                IsEnabled="{Binding CanMarkSelectedPhotosOk}"
+                IsVisible="{Binding IsFooterOkActionVisible}"
+                ToolTip.Tip="Okay">
+          <Grid ColumnDefinitions="Auto,Auto" ColumnSpacing="6" HorizontalAlignment="Center">
+            <Canvas Width="20" Height="20">
+              <Path Data="M5,7 L9,3 L15,3 L18,8 L15,16 L8,18 L3,14 Z"
+                    Stroke="#27343B"
+                    StrokeThickness="1.5"
+                    Fill="Transparent"/>
+              <Path Data="M8,8 L8,9 M14,8 L14,9 M8,14 L15,14"
+                    Stroke="#27343B"
+                    StrokeThickness="1.5"
+                    StrokeLineCap="Round"
+                    Fill="Transparent"/>
+            </Canvas>
+            <TextBlock Grid.Column="1"
+                       Classes="footer-action-label"
+                       Text="Okay"
+                       FontWeight="SemiBold"
+                       VerticalAlignment="Center"/>
+          </Grid>
+        </Button>
+
+        <Button Classes="footer-action"
+                MaxWidth="92"
+                Height="42"
+                Padding="0"
+                SizeChanged="FooterActionButton_SizeChanged"
+                HorizontalAlignment="Stretch"
+                HorizontalContentAlignment="Center"
+                VerticalContentAlignment="Center"
+                ToolTip.Tip="More">
+          <Grid ColumnDefinitions="Auto,Auto" ColumnSpacing="6" HorizontalAlignment="Center">
+            <Grid Width="20" Height="20">
+              <Ellipse Width="4" Height="4" Fill="#27343B" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,2,0,0"/>
+              <Ellipse Width="4" Height="4" Fill="#27343B" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+              <Ellipse Width="4" Height="4" Fill="#27343B" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,2"/>
+            </Grid>
+            <TextBlock Grid.Column="1"
+                       Classes="footer-action-label"
+                       Text="More"
+                       FontWeight="SemiBold"
+                       VerticalAlignment="Center"/>
+          </Grid>
+          <Button.Flyout>
+            <MenuFlyout>
+              <MenuItem IsHitTestVisible="False">
+                <MenuItem.Header>
+                  <Border Background="#27343B"
+                          Padding="12,7"
+                          MinWidth="180">
+                    <TextBlock Text="{Binding BulkSelectionStatus}"
+                               Foreground="White"
+                               FontWeight="Bold"/>
+                  </Border>
+                </MenuItem.Header>
+              </MenuItem>
+              <MenuItem Header="Trash"
+                        Command="{Binding MarkSelectedPhotosTrashCommand}"
+                        IsEnabled="{Binding CanMarkSelectedPhotosTrash}"/>
+              <MenuItem Header="Mark as duplicates"
+                        Command="{Binding MarkSelectedPhotosAsDuplicatesCommand}"
+                        IsEnabled="{Binding CanMarkSelectedPhotosAsDuplicates}"/>
+              <MenuItem Command="{Binding UndoFeedbackActionCommand}"
+                        IsEnabled="{Binding CanUndoFeedbackAction}">
+                <MenuItem.Header>
+                  <StackPanel Spacing="1">
+                    <TextBlock Text="Undo"/>
+                    <TextBlock Text="{Binding UndoFeedbackActionDescription}"
+                               FontSize="11"
+                               Foreground="#6C756F"/>
+                  </StackPanel>
+                </MenuItem.Header>
+              </MenuItem>
+              <MenuItem Command="{Binding RedoFeedbackActionCommand}"
+                        IsEnabled="{Binding CanRedoFeedbackAction}">
+                <MenuItem.Header>
+                  <StackPanel Spacing="1">
+                    <TextBlock Text="Redo"/>
+                    <TextBlock Text="{Binding RedoFeedbackActionDescription}"
+                               FontSize="11"
+                               Foreground="#6C756F"/>
+                  </StackPanel>
+                </MenuItem.Header>
+              </MenuItem>
+              <MenuItem Header="Rotate left"
+                        Command="{Binding RotateSelectedPhotosLeftCommand}"
+                        IsEnabled="{Binding CanRotateSelectedPhotos}"/>
+              <MenuItem Header="Rotate right"
+                        Command="{Binding RotateSelectedPhotosRightCommand}"
+                        IsEnabled="{Binding CanRotateSelectedPhotos}"/>
+              <MenuItem Header="Recent..."
+                        ItemsSource="{Binding RecentPhotos}"
+                        IsEnabled="{Binding HasRecentPhotos}"
+                        x:CompileBindings="False">
+                <MenuItem.Styles>
+                  <Style Selector="MenuItem">
+                    <Setter Property="Header" Value="{Binding DisplayName}"/>
+                    <Setter Property="Command" Value="{Binding OpenCommand}"/>
+                  </Style>
+                </MenuItem.Styles>
+              </MenuItem>
+              <MenuItem Header="Bookmark...">
+                <MenuItem Header="Set"
+                          Command="{Binding SetSelectedPhotoBookmarkCommand}"
+                          IsEnabled="{Binding CanSetSelectedPhotoBookmark}"/>
+                <MenuItem Command="{Binding OpenBookmarkedPhotoCommand}"
+                          IsEnabled="{Binding CanOpenBookmarkedPhoto}">
+                  <MenuItem.Header>
+                    <StackPanel Spacing="1">
+                      <TextBlock Text="Open"/>
+                      <TextBlock Text="{Binding BookmarkedPhotoName}"
+                                 FontSize="11"
+                                 Foreground="#6C756F"/>
+                    </StackPanel>
+                  </MenuItem.Header>
+                </MenuItem>
+              </MenuItem>
+              <MenuItem Header="Download..."
+                        Click="DownloadSelectedPhotos_Click"
+                        IsEnabled="{Binding CanDownloadSelectedPhotos}"/>
+              <MenuItem Header="Download as archive..."
+                        IsVisible="{Binding IsDesktopPlatform}"
+                        Click="DownloadSelectedPhotosArchive_Click"
+                        IsEnabled="{Binding CanDownloadSelectedPhotos}"/>
+            </MenuFlyout>
+          </Button.Flyout>
+        </Button>
+      </StackPanel>
+    </Grid>
+  </Border>
+</UserControl>

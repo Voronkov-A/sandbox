@@ -5,6 +5,13 @@
 	<uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 	<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 	<application android:label="Picshare" android:icon="@drawable/Icon">
+		<provider
+			android:name="androidx.core.content.FileProvider"
+			android:authorities="${applicationId}.diagnostics"
+			android:exported="false"
+			android:grantUriPermissions="true">
+			<meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/diagnostic_file_paths" />
+		</provider>
 		<service
 			android:name="com.CompanyName.Picshare.PicshareForegroundService"
 			android:exported="false"

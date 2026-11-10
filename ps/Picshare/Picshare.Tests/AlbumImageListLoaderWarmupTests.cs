@@ -6,6 +6,29 @@ namespace Picshare.Tests;
 
 public sealed class AlbumImageListLoaderWarmupTests
 {
+    [Fact]
+    public async Task InvalidDetailedThumbnailWarmup_IsNotSelectedAgainInTheSameGeneration()
+    {
+        using var tempDirectory = new TempDirectory();
+        var imageCache = new ImageCacheService(tempDirectory.Path);
+        using var httpClient = new HttpClient(new BytesHandler([1, 2, 3, 4]));
+        using var loader = new AlbumImageListLoader(imageCache, httpClient);
+        var photo = new AlbumPhotoViewModel("album", "photo-1", "photo.jpg", "https://example.invalid/photo.jpg", "https://example.invalid/thumb.jpg");
+        SetLoaderPhotos(loader, [photo], generation: 1);
+        SetPrivateField(loader, "_orderedViewportIndices", new List<int> { 0 });
+        Assert.True(photo.TryBeginDetailedThumbnailLoad(out var ownsOriginal, out var workToken));
+        await InvokeExecuteThumbnailWorkAsync(loader, photo, "DetailedThumbnail", isVisible: false, ownsOriginal,
+            fastThumbnailWasAlreadyLoaded: false, detailedThumbnailWasAlreadyLoaded: false, workToken, generation: 1);
+
+        var method = typeof(AlbumImageListLoader).GetMethod("TryTakeNearestWork", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+        var workType = typeof(AlbumImageListLoader).GetNestedType("AlbumImageWork", System.Reflection.BindingFlags.NonPublic)!;
+        foreach (var work in new[] { "DetailedThumbnail", "OriginalImage" })
+        {
+            object?[] arguments = [1L, Enum.Parse(workType, work), null, false, 0];
+            Assert.False((bool)method.Invoke(loader, arguments)!);
+        }
+    }
+
     private static readonly byte[] PngBytes = Convert.FromBase64String(
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==");
 

@@ -1,10 +1,10 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Media;
-using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Picshare.Services;
@@ -14,79 +14,30 @@ namespace Picshare.Views;
 
 public partial class MainView : UserControl
 {
-    private readonly HashSet<NumericUpDown> _settingsNumericUpDownsWithClamp = [];
-    private bool _isUpdatingSettingsNumericText;
-    private const double MinimumPhotoViewerZoom = 1;
     private const double AlbumReviewHeaderScrollStep = 180;
     private const double AlbumReviewHeaderDragThreshold = 6;
     private const double AlbumReviewSwipeThreshold = 72;
     private const double AlbumReviewSwipeDominance = 1.35;
     private const double ChromeSurfaceHeight = 56;
-    private const double FooterActionButtonMaxWidth = 92;
-    private const double FooterActionButtonMinWidth = 5;
-    private const double FooterActionButtonCompactThreshold = 70;
-    private const double FooterActionButtonSpacing = 8;
-    private const double PhotoViewerFooterHorizontalPadding = 16;
-    private const double AlbumDownloadDropdownMaxWidth = 182;
-    private const double AlbumDownloadActionButtonPreferredWidth = 128;
-    private const double AlbumDownloadControlMinWidth = 5;
-    private const double OverlayCornerRadius = 6;
-    private const double PhotoViewerZoomSliderDefaultHeight = 180;
-    private const double PhotoViewerOverlayVerticalGap = 8;
-    private const double PhotoViewerDuplicateStripScrollStep = 180;
-    private const double SettingsNumericSpinnerWidthThreshold = 130;
-    private const double SettingsPreferredLabelWidth = 150;
-    private const double SettingsMinimumLabelWidth = 60;
-    private const double SettingsInputWidthThreshold = 210;
-    private const double SettingsMinimumColumnWidth = 5;
-    private const double SettingsCacheInputSpacing = 8;
-    private const double SettingsCacheInputCount = 3;
-    private const double SettingsMinimumInputWidth =
-        SettingsMinimumColumnWidth * SettingsCacheInputCount + SettingsCacheInputSpacing * (SettingsCacheInputCount - 1);
-    private static readonly IReadOnlyList<FilePickerFileType> ZipFileTypeChoices =
-    [
-        new("Zip archive")
-        {
-            Patterns = ["*.zip"],
-            MimeTypes = ["application/zip"]
-        }
-    ];
 
-    private readonly Dictionary<object, Point> _photoViewerPointers = new();
-    private double _photoViewerBaseWidth;
-    private double _photoViewerBaseHeight;
-    private double _photoViewerZoom = MinimumPhotoViewerZoom;
-    private double _pinchStartDistance;
-    private double _pinchStartZoom = MinimumPhotoViewerZoom;
-    private Point _pinchStartCenter;
-    private bool _photoViewerPointerPressed;
-    private bool _photoViewerPointerMoved;
-    private bool _photoViewerPinchActive;
-    private Point _photoViewerPointerStart;
-    private Point _photoViewerPointerStartImageOrigin;
-    private Point _photoViewerImageOrigin;
-    private bool _isUpdatingPhotoViewerZoomSlider;
     private object? _albumReviewSwipePointer;
     private Point _albumReviewSwipeStart;
     private object? _albumReviewHeaderDragPointer;
     private Point _albumReviewHeaderDragStart;
     private Vector _albumReviewHeaderDragStartOffset;
     private bool _albumReviewHeaderDragMoved;
-    private object? _photoViewerDuplicateStripDragPointer;
-    private Point _photoViewerDuplicateStripDragStart;
-    private Vector _photoViewerDuplicateStripDragStartOffset;
-    private bool _photoViewerDuplicateStripDragMoved;
     private INotifyPropertyChanged? _viewModelPropertyChanged;
     private readonly Dictionary<ScrollViewer, double> _albumPhotoScrollOffsets = new();
     private readonly HashSet<ListBox> _albumPhotoLists = new();
+    private readonly HashSet<Control> _albumPhotoCards = new();
     private readonly HashSet<ScrollViewer> _albumPhotoScrollViewers = new();
     private readonly Dictionary<ListBox, List<ScrollViewer>> _albumPhotoScrollViewersByList = new();
     private double _mainHeaderHiddenHeight;
     private double _albumReviewTabHeaderHiddenHeight;
     private double _imageListFooterHiddenHeight;
-    private double _settingsScrollOffset;
     private bool _isVisibleAlbumPhotoPriorityUpdateQueued;
     private DateTime _lastBlankPhotoDiagnosticsUtc = DateTime.MinValue;
+    private DateTime _lastSlowViewportDiagnosticsUtc = DateTime.MinValue;
 
     public MainView()
     {
@@ -96,6 +47,7 @@ public partial class MainView : UserControl
             SettingsBack_KeyDown,
             RoutingStrategies.Tunnel,
             handledEventsToo: true);
+        SettingsViewHost.ControlCreated += SettingsViewHost_ControlCreated;
         AlbumReviewContentHost.AddHandler(
             InputElement.PointerPressedEvent,
             AlbumReviewContent_PointerPressed,
@@ -136,34 +88,6 @@ public partial class MainView : UserControl
             AlbumReviewTabHeader_PointerCaptureLost,
             RoutingStrategies.Tunnel,
             handledEventsToo: true);
-        PhotoViewerDuplicateStripScrollViewer.AddHandler(
-            InputElement.PointerPressedEvent,
-            PhotoViewerDuplicateStrip_PointerPressed,
-            RoutingStrategies.Tunnel,
-            handledEventsToo: true);
-        PhotoViewerDuplicateStripScrollViewer.AddHandler(
-            InputElement.PointerMovedEvent,
-            PhotoViewerDuplicateStrip_PointerMoved,
-            RoutingStrategies.Tunnel,
-            handledEventsToo: true);
-        PhotoViewerDuplicateStripScrollViewer.AddHandler(
-            InputElement.PointerReleasedEvent,
-            PhotoViewerDuplicateStrip_PointerReleased,
-            RoutingStrategies.Tunnel,
-            handledEventsToo: true);
-        PhotoViewerDuplicateStripScrollViewer.AddHandler(
-            InputElement.PointerCaptureLostEvent,
-            PhotoViewerDuplicateStrip_PointerCaptureLost,
-            RoutingStrategies.Tunnel,
-            handledEventsToo: true);
-        PhotoViewerScrollViewer.AddHandler(
-            InputElement.PointerWheelChangedEvent,
-            PhotoViewer_PointerWheelChanged,
-            RoutingStrategies.Tunnel,
-            handledEventsToo: true);
-        _ = Dispatcher.UIThread.InvokeAsync(UpdateAlbumReviewTabScrollButtonVisibility, DispatcherPriority.Loaded);
-        _ = Dispatcher.UIThread.InvokeAsync(UpdatePhotoViewerDuplicateStripScrollButtonVisibility, DispatcherPriority.Loaded);
-        _ = Dispatcher.UIThread.InvokeAsync(UpdateFooterActionButtonWidths, DispatcherPriority.Loaded);
     }
 
     protected override void OnDataContextChanged(EventArgs e)
@@ -207,6 +131,7 @@ public partial class MainView : UserControl
         }
 
         _albumPhotoScrollViewersByList.Clear();
+        _albumPhotoCards.Clear();
         if (DataContext is MainViewModel viewModel)
         {
             viewModel.ClearPhotoViewportLoads();
@@ -217,24 +142,7 @@ public partial class MainView : UserControl
 
     private void ViewModel_PropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName is nameof(MainViewModel.PhotoViewerImage) or nameof(MainViewModel.PhotoViewerRotationDegrees))
-        {
-            _ = Dispatcher.UIThread.InvokeAsync(ResetPhotoViewerZoom, DispatcherPriority.Render);
-        }
-        else if (e.PropertyName is nameof(MainViewModel.IsPhotoViewerVisible))
-        {
-            _ = Dispatcher.UIThread.InvokeAsync(FocusPhotoViewerOverlay, DispatcherPriority.Render);
-        }
-        else if (e.PropertyName is nameof(MainViewModel.IsAlbumDownloadDialogVisible))
-        {
-            _ = Dispatcher.UIThread.InvokeAsync(FocusAlbumDownloadDialogOverlay, DispatcherPriority.Render);
-        }
-        else if (e.PropertyName is nameof(MainViewModel.ZoomPower)
-            or nameof(MainViewModel.PhotoViewerAspectRatioMode))
-        {
-            _ = Dispatcher.UIThread.InvokeAsync(ResetPhotoViewerZoom, DispatcherPriority.Render);
-        }
-        else if (e.PropertyName is nameof(MainViewModel.ActiveReviewTabId)
+        if (e.PropertyName is nameof(MainViewModel.ActiveReviewTabId)
             or nameof(MainViewModel.UncategorizedTabHeader)
             or nameof(MainViewModel.NiceTabHeader)
             or nameof(MainViewModel.OkTabHeader)
@@ -244,261 +152,13 @@ public partial class MainView : UserControl
             or nameof(MainViewModel.IsFlowReviewTabVisible))
         {
             _ = Dispatcher.UIThread.InvokeAsync(UpdateAlbumReviewTabScrollButtonVisibility, DispatcherPriority.Render);
-            _ = Dispatcher.UIThread.InvokeAsync(UpdateFooterActionButtonWidths, DispatcherPriority.Render);
-            _ = Dispatcher.UIThread.InvokeAsync(UpdateStickyAlbumPhotoGroupHeader, DispatcherPriority.Render);
+            QueueVisibleAlbumPhotoPriorityUpdate();
         }
         else if (e.PropertyName is nameof(MainViewModel.FixedHeader)
             or nameof(MainViewModel.FixedTabs)
             or nameof(MainViewModel.FixedActionPanel))
         {
             ApplyFixedSurfaceSettings();
-        }
-        else if (e.PropertyName is nameof(MainViewModel.IsPhotoViewerDuplicateStripVisible))
-        {
-            _ = Dispatcher.UIThread.InvokeAsync(UpdatePhotoViewerDuplicateStripScrollButtonVisibility, DispatcherPriority.Render);
-            _ = Dispatcher.UIThread.InvokeAsync(UpdatePhotoViewerAdaptiveOverlayWidths, DispatcherPriority.Render);
-        }
-        else if (e.PropertyName is nameof(MainViewModel.IsCurrentPhotoScoreVisible)
-            or nameof(MainViewModel.IsPhotoViewerActionsVisible)
-            or nameof(MainViewModel.ShowPhotoViewerPreviousNextButtons)
-            or nameof(MainViewModel.ShouldShowCurrentPhotoUncategorizedAction)
-            or nameof(MainViewModel.ShouldShowCurrentPhotoNiceAction)
-            or nameof(MainViewModel.ShouldShowCurrentPhotoOkAction))
-        {
-            _ = Dispatcher.UIThread.InvokeAsync(UpdatePhotoViewerAdaptiveOverlayWidths, DispatcherPriority.Render);
-        }
-        else if (e.PropertyName is nameof(MainViewModel.IsGoogleSignedIn)
-            or nameof(MainViewModel.IsGoogleSignedOut))
-        {
-            _ = Dispatcher.UIThread.InvokeAsync(
-                () => UpdateSettingsGoogleAuthorizationRowWidths(SettingsGoogleAuthorizationRow),
-                DispatcherPriority.Render);
-        }
-    }
-
-    private async void ManualPhotoImport_Click(object? sender, RoutedEventArgs e)
-    {
-        if (DataContext is MainViewModel viewModel && TopLevel.GetTopLevel(this) is { } topLevel)
-        {
-            viewModel.CloseFolderDateImport();
-            await OpenManualPhotoPickerAsync(topLevel, viewModel);
-        }
-    }
-
-    private async void FolderDatePhotoImport_Click(object? sender, RoutedEventArgs e)
-    {
-        if (DataContext is MainViewModel viewModel && TopLevel.GetTopLevel(this) is { } topLevel)
-        {
-            await OpenFolderDatePickerAsync(topLevel, viewModel);
-        }
-    }
-
-    private async void ChooseFolderDateImportFolders_Click(object? sender, RoutedEventArgs e)
-    {
-        if (DataContext is MainViewModel viewModel && TopLevel.GetTopLevel(this) is { } topLevel)
-        {
-            await OpenFolderDatePickerAsync(topLevel, viewModel);
-        }
-    }
-
-    private async void ChooseLocalAlbumDestination_Click(object? sender, RoutedEventArgs e)
-    {
-        if (DataContext is MainViewModel viewModel && TopLevel.GetTopLevel(this) is { } topLevel)
-        {
-            var folders = await topLevel.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
-            {
-                Title = "Choose local album destination",
-                AllowMultiple = false
-            });
-
-            if (folders.Count > 0)
-            {
-                viewModel.SetLocalAlbumDestination(folders[0]);
-            }
-        }
-    }
-
-    private void AddGoogleContactSuggestion_Click(object? sender, RoutedEventArgs e)
-    {
-        if (DataContext is MainViewModel viewModel &&
-            sender is Control { DataContext: GoogleContactSuggestionViewModel suggestion })
-        {
-            viewModel.AddGoogleAlbumShareSuggestion(suggestion);
-        }
-    }
-
-    private void RemoveSharedGoogleAccount_Click(object? sender, RoutedEventArgs e)
-    {
-        if (DataContext is MainViewModel viewModel &&
-            sender is Control { DataContext: SharedGoogleAccountViewModel account })
-        {
-            viewModel.RemoveSharedGoogleAccount(account);
-        }
-    }
-
-    private async void ChoosePictureDefaultDownloadDirectory_Click(object? sender, RoutedEventArgs e)
-    {
-        await ChooseSettingsDownloadDirectoryAsync(
-            "Choose picture default download directory",
-            viewModel => viewModel.PictureDefaultDownloadDirectoryPath,
-            (viewModel, folder) => viewModel.SetPictureDefaultDownloadDirectory(folder));
-    }
-
-    private async void ChooseUncategorizedDefaultDownloadDirectory_Click(object? sender, RoutedEventArgs e)
-    {
-        await ChooseSettingsDownloadDirectoryAsync(
-            "Choose Todo default download directory",
-            viewModel => viewModel.UncategorizedDefaultDownloadDirectoryPath,
-            (viewModel, folder) => viewModel.SetUncategorizedDefaultDownloadDirectory(folder));
-    }
-
-    private async void ChooseNiceDefaultDownloadDirectory_Click(object? sender, RoutedEventArgs e)
-    {
-        await ChooseSettingsDownloadDirectoryAsync(
-            "Choose nice default download directory",
-            viewModel => viewModel.NiceDefaultDownloadDirectoryPath,
-            (viewModel, folder) => viewModel.SetNiceDefaultDownloadDirectory(folder));
-    }
-
-    private async void ChooseOkDefaultDownloadDirectory_Click(object? sender, RoutedEventArgs e)
-    {
-        await ChooseSettingsDownloadDirectoryAsync(
-            "Choose okay default download directory",
-            viewModel => viewModel.OkDefaultDownloadDirectoryPath,
-            (viewModel, folder) => viewModel.SetOkDefaultDownloadDirectory(folder));
-    }
-
-    private async void ChooseTrashDefaultDownloadDirectory_Click(object? sender, RoutedEventArgs e)
-    {
-        await ChooseSettingsDownloadDirectoryAsync(
-            "Choose trash default download directory",
-            viewModel => viewModel.TrashDefaultDownloadDirectoryPath,
-            (viewModel, folder) => viewModel.SetTrashDefaultDownloadDirectory(folder));
-    }
-
-    private async void DownloadCurrentPhoto_Click(object? sender, RoutedEventArgs e)
-    {
-        if (DataContext is MainViewModel viewModel && TopLevel.GetTopLevel(this) is { } topLevel)
-        {
-            var file = await OpenSaveFilePickerAsync(
-                topLevel,
-                "Save photo",
-                viewModel.PictureDefaultDownloadDirectoryPath,
-                viewModel.CurrentPhotoDownloadFileName,
-                GetImageFileTypeChoices(viewModel.CurrentPhotoDownloadFileName));
-
-            if (file?.TryGetLocalPath() is { } destinationPath)
-            {
-                await viewModel.DownloadCurrentPhotoAsync(destinationPath);
-            }
-        }
-    }
-
-    private async void PhotoViewerOverlay_KeyDown(object? sender, KeyEventArgs e)
-    {
-        if (DataContext is not MainViewModel { IsPhotoViewerVisible: true } viewModel)
-        {
-            return;
-        }
-
-        if (e.Key is Key.Escape or Key.BrowserBack or Key.Back)
-        {
-            viewModel.ClosePhotoViewerCommand.Execute(null);
-            e.Handled = true;
-        }
-        else if (e.Key is Key.Left or Key.Right)
-        {
-            var direction = e.Key == Key.Left ? -1 : 1;
-            if (_photoViewerZoom > MinimumPhotoViewerZoom + 0.001)
-            {
-                PanPhotoViewerHorizontally(direction);
-            }
-            else if (viewModel.CanNavigatePhotoViewerDuplicateStrip)
-            {
-                await viewModel.MovePhotoViewerInDuplicateStripAsync(direction);
-            }
-            else if (direction < 0)
-            {
-                viewModel.ShowPreviousPhotoInCategoryCommand.Execute(null);
-            }
-            else
-            {
-                viewModel.ShowNextPhotoInCategoryCommand.Execute(null);
-            }
-
-            e.Handled = true;
-        }
-    }
-
-    private void PanPhotoViewerHorizontally(int direction)
-    {
-        var viewport = GetPhotoViewerViewportSize();
-        var step = Math.Clamp(viewport.Width * 0.16, 48, 180);
-        SetPhotoViewerImageOrigin(new Point(
-            _photoViewerImageOrigin.X - direction * step,
-            _photoViewerImageOrigin.Y));
-    }
-
-    private void FocusPhotoViewerOverlay()
-    {
-        if (DataContext is MainViewModel { IsPhotoViewerVisible: true })
-        {
-            PhotoViewerOverlay.Focus();
-        }
-    }
-
-    private void FocusAlbumDownloadDialogOverlay()
-    {
-        if (DataContext is MainViewModel { IsAlbumDownloadDialogVisible: true })
-        {
-            AlbumDownloadDialogOverlay.Focus();
-        }
-    }
-
-    private void AlbumDownloadDialogOverlay_KeyDown(object? sender, KeyEventArgs e)
-    {
-        if (DataContext is not MainViewModel { IsAlbumDownloadDialogVisible: true } viewModel)
-        {
-            return;
-        }
-
-        if (e.Key is Key.Escape or Key.BrowserBack or Key.Back)
-        {
-            viewModel.CancelAlbumDownloadDialogCommand.Execute(null);
-            e.Handled = true;
-        }
-    }
-
-    private void AlbumDownloadDialogOverlay_PointerPressed(object? sender, PointerPressedEventArgs e)
-    {
-        if (DataContext is MainViewModel { IsAlbumDownloadDialogVisible: true } viewModel)
-        {
-            viewModel.CancelAlbumDownloadDialogCommand.Execute(null);
-            e.Handled = true;
-        }
-    }
-
-    private void AlbumDownloadDialog_PointerPressed(object? sender, PointerPressedEventArgs e)
-    {
-        e.Handled = true;
-    }
-
-    private async void CopyAlbumLink_Click(object? sender, RoutedEventArgs e)
-    {
-        if (sender is Control { DataContext: RecentAlbumViewModel album } &&
-            TopLevel.GetTopLevel(this)?.Clipboard is { } clipboard)
-        {
-            await clipboard.SetTextAsync(album.Link);
-            e.Handled = true;
-        }
-    }
-
-    private void SidebarScrim_PointerPressed(object? sender, PointerPressedEventArgs e)
-    {
-        if (DataContext is MainViewModel viewModel)
-        {
-            viewModel.CloseSidebarCommand.Execute(null);
-            e.Handled = true;
         }
     }
 
@@ -614,110 +274,6 @@ public partial class MainView : UserControl
         AlbumReviewTabsScrollRightButton.IsVisible = AlbumReviewTabHeaderScrollViewer.Offset.X < maxOffset - tolerance;
     }
 
-    private void ScrollPhotoViewerDuplicateStripLeft_Click(object? sender, RoutedEventArgs e)
-    {
-        ScrollPhotoViewerDuplicateStrip(-PhotoViewerDuplicateStripScrollStep);
-        e.Handled = true;
-    }
-
-    private void ScrollPhotoViewerDuplicateStripRight_Click(object? sender, RoutedEventArgs e)
-    {
-        ScrollPhotoViewerDuplicateStrip(PhotoViewerDuplicateStripScrollStep);
-        e.Handled = true;
-    }
-
-    private void PhotoViewerDuplicateStripScrollViewer_ScrollChanged(object? sender, ScrollChangedEventArgs e)
-    {
-        UpdatePhotoViewerDuplicateStripScrollButtonVisibility();
-    }
-
-    private void PhotoViewerDuplicateStripScrollViewer_SizeChanged(object? sender, SizeChangedEventArgs e)
-    {
-        _ = Dispatcher.UIThread.InvokeAsync(UpdatePhotoViewerDuplicateStripScrollButtonVisibility, DispatcherPriority.Render);
-        _ = Dispatcher.UIThread.InvokeAsync(UpdatePhotoViewerActionFooterShape, DispatcherPriority.Render);
-    }
-
-    private void PhotoViewerDuplicateStrip_PointerPressed(object? sender, PointerPressedEventArgs e)
-    {
-        if (_photoViewerDuplicateStripDragPointer is not null)
-        {
-            return;
-        }
-
-        _photoViewerDuplicateStripDragPointer = e.Pointer;
-        _photoViewerDuplicateStripDragStart = e.GetPosition(PhotoViewerDuplicateStripScrollViewer);
-        _photoViewerDuplicateStripDragStartOffset = PhotoViewerDuplicateStripScrollViewer.Offset;
-        _photoViewerDuplicateStripDragMoved = false;
-    }
-
-    private void PhotoViewerDuplicateStrip_PointerMoved(object? sender, PointerEventArgs e)
-    {
-        if (!ReferenceEquals(_photoViewerDuplicateStripDragPointer, e.Pointer))
-        {
-            return;
-        }
-
-        var delta = e.GetPosition(PhotoViewerDuplicateStripScrollViewer) - _photoViewerDuplicateStripDragStart;
-        if (!_photoViewerDuplicateStripDragMoved && Math.Abs(delta.X) < AlbumReviewHeaderDragThreshold)
-        {
-            return;
-        }
-
-        _photoViewerDuplicateStripDragMoved = true;
-        SetPhotoViewerDuplicateStripOffset(_photoViewerDuplicateStripDragStartOffset.X - delta.X);
-        e.Handled = true;
-    }
-
-    private void PhotoViewerDuplicateStrip_PointerReleased(object? sender, PointerReleasedEventArgs e)
-    {
-        if (!ReferenceEquals(_photoViewerDuplicateStripDragPointer, e.Pointer))
-        {
-            return;
-        }
-
-        var handled = _photoViewerDuplicateStripDragMoved;
-        _photoViewerDuplicateStripDragPointer = null;
-        _photoViewerDuplicateStripDragMoved = false;
-        e.Handled = handled;
-    }
-
-    private void PhotoViewerDuplicateStrip_PointerCaptureLost(object? sender, PointerCaptureLostEventArgs e)
-    {
-        if (ReferenceEquals(_photoViewerDuplicateStripDragPointer, e.Pointer))
-        {
-            _photoViewerDuplicateStripDragPointer = null;
-            _photoViewerDuplicateStripDragMoved = false;
-        }
-    }
-
-    private void ScrollPhotoViewerDuplicateStrip(double delta)
-    {
-        SetPhotoViewerDuplicateStripOffset(PhotoViewerDuplicateStripScrollViewer.Offset.X + delta);
-    }
-
-    private void SetPhotoViewerDuplicateStripOffset(double offset)
-    {
-        var maxOffset = Math.Max(0, PhotoViewerDuplicateStripScrollViewer.Extent.Width - PhotoViewerDuplicateStripScrollViewer.Viewport.Width);
-        var nextOffset = Math.Clamp(offset, 0, maxOffset);
-        PhotoViewerDuplicateStripScrollViewer.Offset = new Vector(nextOffset, PhotoViewerDuplicateStripScrollViewer.Offset.Y);
-        UpdatePhotoViewerDuplicateStripScrollButtonVisibility();
-    }
-
-    private void UpdatePhotoViewerDuplicateStripScrollButtonVisibility()
-    {
-        const double tolerance = 0.5;
-        var maxOffset = Math.Max(0, PhotoViewerDuplicateStripScrollViewer.Extent.Width - PhotoViewerDuplicateStripScrollViewer.Viewport.Width);
-        if (maxOffset <= tolerance)
-        {
-            PhotoViewerDuplicateStripScrollLeftButton.IsVisible = false;
-            PhotoViewerDuplicateStripScrollRightButton.IsVisible = false;
-            return;
-        }
-
-        PhotoViewerDuplicateStripScrollLeftButton.IsVisible = PhotoViewerDuplicateStripScrollViewer.Offset.X > tolerance;
-        PhotoViewerDuplicateStripScrollRightButton.IsVisible = PhotoViewerDuplicateStripScrollViewer.Offset.X < maxOffset - tolerance;
-    }
-
     private void SelectAlbumReviewTab(string tabId)
     {
         if (DataContext is not MainViewModel viewModel)
@@ -745,44 +301,6 @@ public partial class MainView : UserControl
         _ = Dispatcher.UIThread.InvokeAsync(UpdateAlbumReviewTabScrollButtonVisibility, DispatcherPriority.Render);
     }
 
-    private void FooterActionButton_SizeChanged(object? sender, SizeChangedEventArgs e)
-    {
-        if (sender is Button button)
-        {
-            button.Classes.Set("compact-footer-action", e.NewSize.Width < FooterActionButtonCompactThreshold);
-        }
-    }
-
-    private void SettingsCompactActionButton_SizeChanged(object? sender, SizeChangedEventArgs e)
-    {
-        if (sender is Button button)
-        {
-            button.Classes.Set("compact-footer-action", e.NewSize.Width < FooterActionButtonCompactThreshold);
-        }
-    }
-
-    private void FooterActionPanelHost_SizeChanged(object? sender, SizeChangedEventArgs e)
-    {
-        UpdateFooterActionButtonWidths();
-    }
-
-    private void PhotoViewerOverlaySurface_SizeChanged(object? sender, SizeChangedEventArgs e)
-    {
-        _ = Dispatcher.UIThread.InvokeAsync(UpdatePhotoViewerActionFooterShape, DispatcherPriority.Render);
-    }
-
-    private void PhotoViewerViewport_SizeChanged(object? sender, SizeChangedEventArgs e)
-    {
-        _ = Dispatcher.UIThread.InvokeAsync(UpdatePhotoViewerAdaptiveOverlayWidths, DispatcherPriority.Render);
-    }
-
-    private void UpdateFooterActionButtonWidths()
-    {
-        UpdateFooterActionButtonWidths(FooterActionPanelHost, FooterActionPanel);
-        UpdateFooterActionButtonWidths(PhotoViewerActionFooterHost, PhotoViewerActionFooter);
-        UpdatePhotoViewerAdaptiveOverlayWidths();
-    }
-
     private void SettingsBack_KeyDown(object? sender, KeyEventArgs e)
     {
         if (DataContext is not MainViewModel { IsSettingsViewVisible: true } viewModel)
@@ -797,132 +315,17 @@ public partial class MainView : UserControl
         }
     }
 
-    private void SettingsNumericUpDown_SizeChanged(object? sender, SizeChangedEventArgs e)
+    private void SettingsViewHost_ControlCreated(object? sender, Control control)
     {
-        if (sender is NumericUpDown numeric)
+        if (control is SettingsView settingsView)
         {
-            if (_settingsNumericUpDownsWithClamp.Add(numeric))
-            {
-                numeric.PropertyChanged += SettingsNumericUpDown_PropertyChanged;
-            }
-
-            numeric.ShowButtonSpinner = e.NewSize.Width >= SettingsNumericSpinnerWidthThreshold;
-            ResetSettingsNumericUpDownBlankText(numeric);
-            ClampSettingsNumericUpDownValue(numeric);
+            settingsView.ChromeScrollChanged += SettingsView_ChromeScrollChanged;
         }
     }
 
-    private void SettingsNumericUpDown_PropertyChanged(object? sender, AvaloniaPropertyChangedEventArgs e)
+    private void SettingsView_ChromeScrollChanged(object? sender, SettingsChromeScrollEventArgs e)
     {
-        if (sender is not NumericUpDown numeric)
-        {
-            return;
-        }
-
-        if (e.Property == NumericUpDown.TextProperty)
-        {
-            ResetSettingsNumericUpDownBlankText(numeric);
-        }
-        else if (e.Property == NumericUpDown.ValueProperty)
-        {
-            ClampSettingsNumericUpDownValue(numeric);
-        }
-    }
-
-    private void ResetSettingsNumericUpDownBlankText(NumericUpDown numeric)
-    {
-        if (_isUpdatingSettingsNumericText || !string.IsNullOrWhiteSpace(numeric.Text))
-        {
-            return;
-        }
-
-        _isUpdatingSettingsNumericText = true;
-        try
-        {
-            var minimum = GetSettingsNumericUpDownMinimum(numeric);
-            numeric.Value = minimum;
-            numeric.Text = minimum.ToString("0");
-        }
-        finally
-        {
-            _isUpdatingSettingsNumericText = false;
-        }
-    }
-
-    private static void ClampSettingsNumericUpDownValue(NumericUpDown numeric)
-    {
-        var minimum = GetSettingsNumericUpDownMinimum(numeric);
-        var maximum = GetSettingsNumericUpDownMaximum(numeric);
-        if (numeric.Value < minimum)
-        {
-            numeric.Value = minimum;
-        }
-        else if (numeric.Value > maximum)
-        {
-            numeric.Value = maximum;
-        }
-    }
-
-    private static decimal GetSettingsNumericUpDownMinimum(NumericUpDown numeric)
-    {
-        if (TryGetSettingsNumericUpDownRange(numeric, out var minimum, out _))
-        {
-            return minimum;
-        }
-
-        return numeric.Minimum;
-    }
-
-    private static decimal GetSettingsNumericUpDownMaximum(NumericUpDown numeric)
-    {
-        if (TryGetSettingsNumericUpDownRange(numeric, out _, out var maximum))
-        {
-            return maximum;
-        }
-
-        return numeric.Tag switch
-        {
-            decimal tagMaximum => tagMaximum,
-            double tagMaximum => (decimal)tagMaximum,
-            int tagMaximum => tagMaximum,
-            string text when decimal.TryParse(text, out var tagMaximum) => tagMaximum,
-            _ => numeric.Maximum
-        };
-    }
-
-    private static bool TryGetSettingsNumericUpDownRange(NumericUpDown numeric, out decimal minimum, out decimal maximum)
-    {
-        minimum = default;
-        maximum = default;
-        if (numeric.Tag is not string text)
-        {
-            return false;
-        }
-
-        var parts = text.Split(':', 2);
-        return parts.Length == 2 &&
-            decimal.TryParse(parts[0], out minimum) &&
-            decimal.TryParse(parts[1], out maximum);
-    }
-
-    private void SettingsContentPanel_SizeChanged(object? sender, SizeChangedEventArgs e)
-    {
-        UpdateSettingsRowWidths();
-    }
-
-    private void SettingsScrollViewer_ScrollChanged(object? sender, ScrollChangedEventArgs e)
-    {
-        if (sender is not ScrollViewer scrollViewer ||
-            DataContext is not MainViewModel { IsSettingsViewVisible: true } viewModel)
-        {
-            return;
-        }
-
-        var currentOffset = scrollViewer.Offset.Y;
-        var previousOffset = _settingsScrollOffset;
-        _settingsScrollOffset = currentOffset;
-        var delta = currentOffset - previousOffset;
-        if (Math.Abs(delta) < 0.5)
+        if (DataContext is not MainViewModel { IsSettingsViewVisible: true } viewModel)
         {
             return;
         }
@@ -930,15 +333,14 @@ public partial class MainView : UserControl
         var mainHeaderHeight = GetChromeSurfaceHeight(MainHeader, MainHeaderRow());
         if (!viewModel.FixedHeader)
         {
-            _mainHeaderHiddenHeight = Math.Clamp(_mainHeaderHiddenHeight + delta, 0, mainHeaderHeight);
+            _mainHeaderHiddenHeight = Math.Clamp(_mainHeaderHiddenHeight + e.Delta, 0, mainHeaderHeight);
         }
 
-        var maxOffset = Math.Max(0, scrollViewer.Extent.Height - scrollViewer.Viewport.Height);
-        if (currentOffset <= 0.5 && delta < 0)
+        if (e.CurrentOffset <= 0.5 && e.Delta < 0)
         {
             _mainHeaderHiddenHeight = 0;
         }
-        else if (currentOffset >= maxOffset - 0.5 && delta > 0)
+        else if (e.CurrentOffset >= e.MaximumOffset - 0.5 && e.Delta > 0)
         {
             _mainHeaderHiddenHeight = viewModel.FixedHeader ? 0 : mainHeaderHeight;
         }
@@ -946,732 +348,12 @@ public partial class MainView : UserControl
         ApplyChromeSurface(MainHeader, MainHeaderRow(), viewModel.FixedHeader ? 0 : _mainHeaderHiddenHeight, topSurface: true);
     }
 
-    private void UpdateSettingsRowWidths()
-    {
-        var rowWidth = new[]
-            {
-                AnonymousNameSettingsRow.Bounds.Width,
-                ColumnsSettingsRow.Bounds.Width,
-                ZoomPowerSettingsRow.Bounds.Width,
-                ParallelismSettingsRow.Bounds.Width,
-                CacheLimitSettingsGrid.Bounds.Width,
-                CachedImagesSettingsRow.Bounds.Width
-            }
-            .Where(width => width > 1)
-            .DefaultIfEmpty(SettingsContentPanel.Bounds.Width)
-            .Min();
-        if (rowWidth <= 1)
-        {
-            return;
-        }
-
-        var (labelWidth, inputWidth) = CalculateSettingsColumnWidths(rowWidth);
-        ApplySettingsRowWidths(AnonymousNameSettingsRow, labelWidth, inputWidth);
-        ApplySettingsRowWidths(ColumnsSettingsRow, labelWidth, inputWidth);
-        ApplySettingsRowWidths(ZoomPowerSettingsRow, labelWidth, inputWidth);
-        ApplySettingsRowWidths(ParallelismSettingsRow, labelWidth, inputWidth);
-        ApplySettingsRowWidths(CacheLimitSettingsGrid, labelWidth, inputWidth);
-        ApplySettingsRowWidths(CachedImagesSettingsRow, labelWidth, inputWidth);
-    }
-
-    private static void SettingsSquareButtonRow_SizeChanged(object? sender, SizeChangedEventArgs e)
-    {
-        if (sender is not Grid grid || grid.ColumnDefinitions.Count < 3)
-        {
-            return;
-        }
-
-        const double squareWidth = 42;
-        const double spacing = 8;
-        var controlWidth = Math.Max(SettingsMinimumColumnWidth * 3, grid.Bounds.Width - spacing * 2);
-
-        double textBoxWidth;
-        double buttonWidth;
-        if (controlWidth >= squareWidth * 3)
-        {
-            buttonWidth = squareWidth;
-            textBoxWidth = controlWidth - buttonWidth * 2;
-        }
-        else
-        {
-            textBoxWidth = buttonWidth = Math.Max(SettingsMinimumColumnWidth, controlWidth / 3);
-        }
-
-        grid.ColumnDefinitions[0].Width = new GridLength(textBoxWidth);
-        grid.ColumnDefinitions[1].Width = new GridLength(buttonWidth);
-        grid.ColumnDefinitions[2].Width = new GridLength(buttonWidth);
-    }
-
-    private static void SettingsGoogleAuthorizationRow_SizeChanged(object? sender, SizeChangedEventArgs e)
-    {
-        if (sender is not Grid grid || grid.ColumnDefinitions.Count < 2)
-        {
-            return;
-        }
-
-        UpdateSettingsGoogleAuthorizationRowWidths(grid);
-    }
-
-    private static void UpdateSettingsGoogleAuthorizationRowWidths(Grid grid)
-    {
-        var statusLabel = grid.Children
-            .OfType<TextBlock>()
-            .FirstOrDefault(textBlock => Grid.GetColumn(textBlock) == 0);
-        var visibleActionButton = grid.Children
-            .OfType<Button>()
-            .FirstOrDefault(button => Grid.GetColumn(button) == 1 && button.IsVisible);
-
-        const double squareWidth = 42;
-        const double spacing = 8;
-        var preferredButtonWidth = ReferenceEquals(visibleActionButton, grid.FindControl<Button>("SettingsGoogleSignInButton"))
-            ? FooterActionButtonMaxWidth
-            : squareWidth;
-        var availableWidth = Math.Max(SettingsMinimumColumnWidth * 2, grid.Bounds.Width - spacing);
-        var preferredLabelWidth = GetSettingsGoogleAuthorizationLabelPreferredWidth(statusLabel, availableWidth);
-
-        double labelWidth;
-        double buttonWidth;
-        if (availableWidth >= preferredLabelWidth + preferredButtonWidth)
-        {
-            buttonWidth = preferredButtonWidth;
-            labelWidth = availableWidth - buttonWidth;
-        }
-        else if (availableWidth >= preferredLabelWidth + squareWidth)
-        {
-            labelWidth = preferredLabelWidth;
-            buttonWidth = availableWidth - labelWidth;
-        }
-        else if (availableWidth >= squareWidth * 2)
-        {
-            buttonWidth = squareWidth;
-            labelWidth = availableWidth - buttonWidth;
-        }
-        else
-        {
-            labelWidth = buttonWidth = Math.Max(SettingsMinimumColumnWidth, availableWidth / 2);
-        }
-
-        grid.ColumnDefinitions[0].Width = new GridLength(labelWidth);
-        grid.ColumnDefinitions[1].Width = new GridLength(buttonWidth);
-
-        if (visibleActionButton is not null)
-        {
-            visibleActionButton.Width = buttonWidth;
-            visibleActionButton.Classes.Set("compact-footer-action", buttonWidth < FooterActionButtonCompactThreshold);
-        }
-    }
-
-    private static double GetSettingsGoogleAuthorizationLabelPreferredWidth(TextBlock? statusLabel, double fallbackWidth)
-    {
-        if (statusLabel is null)
-        {
-            return fallbackWidth;
-        }
-
-        statusLabel.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
-        return Math.Clamp(
-            statusLabel.DesiredSize.Width,
-            SettingsMinimumColumnWidth,
-            Math.Max(SettingsMinimumColumnWidth, fallbackWidth));
-    }
-
-    private static (double LabelWidth, double InputWidth) CalculateSettingsColumnWidths(double rowWidth)
-    {
-        if (rowWidth >= SettingsPreferredLabelWidth + SettingsInputWidthThreshold)
-        {
-            return (SettingsPreferredLabelWidth, rowWidth - SettingsPreferredLabelWidth);
-        }
-
-        if (rowWidth >= SettingsMinimumLabelWidth + SettingsInputWidthThreshold)
-        {
-            return (rowWidth - SettingsInputWidthThreshold, SettingsInputWidthThreshold);
-        }
-
-        if (rowWidth >= SettingsMinimumLabelWidth + SettingsMinimumInputWidth)
-        {
-            return (SettingsMinimumLabelWidth, rowWidth - SettingsMinimumLabelWidth);
-        }
-
-        var scale = rowWidth / (SettingsMinimumLabelWidth + SettingsMinimumInputWidth);
-        var labelWidth = Math.Max(SettingsMinimumColumnWidth, SettingsMinimumLabelWidth * scale);
-        var inputWidth = Math.Max(SettingsMinimumColumnWidth, rowWidth - labelWidth);
-        return (labelWidth, inputWidth);
-    }
-
-    private static void ApplySettingsRowWidths(Grid grid, double labelWidth, double inputWidth)
-    {
-        grid.ColumnDefinitions[0].Width = new GridLength(labelWidth);
-        grid.ColumnDefinitions[1].Width = new GridLength(inputWidth);
-    }
-
-    private void UpdatePhotoViewerAdaptiveOverlayWidths()
-    {
-        UpdatePhotoViewerHeaderWidths();
-        UpdatePhotoViewerZoomSliderHeight();
-        UpdatePhotoViewerCleanFooterActionButtonWidths();
-        UpdatePhotoViewerActionFooterShape();
-    }
-
-    private void UpdatePhotoViewerHeaderWidths()
-    {
-        var viewportWidth = Math.Max(0, PhotoViewerViewport.Bounds.Width);
-        var horizontalMargin = 16d;
-        var sideGap = 8d;
-        var edgeMargin = horizontalMargin / 2;
-        var squareWidth = 42d;
-        var closeWidth = squareWidth;
-        var titleContainerPadding = 16d;
-        var titleLabelNaturalWidth = PhotoViewerTitleLabel.Bounds.Width is > 0 and < 520
-            ? PhotoViewerTitleLabel.Bounds.Width
-            : 520;
-        var titleContainerNaturalWidth = titleLabelNaturalWidth + titleContainerPadding;
-        var scoreWidth = PhotoViewerScoreLabel.IsVisible ? FooterActionButtonMaxWidth : 0;
-
-        if (PhotoViewerScoreLabel.IsVisible)
-        {
-            var maxSideWidthForNaturalTitle = (viewportWidth - titleContainerNaturalWidth) / 2 - edgeMargin - sideGap;
-            scoreWidth = Math.Clamp(maxSideWidthForNaturalTitle, squareWidth, FooterActionButtonMaxWidth);
-        }
-
-        var sideWidth = Math.Max(scoreWidth, closeWidth);
-        var titleContainerMaxWidth = viewportWidth - 2 * (edgeMargin + sideGap + sideWidth);
-        if (titleContainerMaxWidth < FooterActionButtonMinWidth + titleContainerPadding)
-        {
-            titleContainerMaxWidth = FooterActionButtonMinWidth + titleContainerPadding;
-            var maxSideWidthForMinimumTitle = (viewportWidth - titleContainerMaxWidth) / 2 - edgeMargin - sideGap;
-            closeWidth = Math.Clamp(maxSideWidthForMinimumTitle, FooterActionButtonMinWidth, squareWidth);
-            scoreWidth = PhotoViewerScoreLabel.IsVisible
-                ? Math.Clamp(maxSideWidthForMinimumTitle, FooterActionButtonMinWidth, squareWidth)
-                : 0;
-        }
-
-        var titleLabelMaxWidth = Math.Max(FooterActionButtonMinWidth, titleContainerMaxWidth - titleContainerPadding);
-
-        PhotoViewerScoreLabel.Width = scoreWidth;
-        PhotoViewerScoreIcon.IsVisible = PhotoViewerScoreLabel.Width >= FooterActionButtonCompactThreshold;
-        PhotoViewerCloseButton.Width = closeWidth;
-        PhotoViewerTitleContainer.Width = double.NaN;
-        PhotoViewerTitleContainer.MaxWidth = Math.Min(536, titleContainerMaxWidth);
-        PhotoViewerTitleLabel.Width = double.NaN;
-        PhotoViewerTitleLabel.MaxWidth = Math.Min(520, titleLabelMaxWidth);
-        PhotoViewerBestInGroupLabel.MaxWidth = Math.Max(
-            FooterActionButtonMinWidth,
-            viewportWidth - horizontalMargin - titleContainerPadding);
-    }
-
-    private void UpdatePhotoViewerZoomSliderHeight()
-    {
-        var viewportHeight = Math.Max(0, PhotoViewerViewport.Bounds.Height);
-        var topReservedHeight = 56d;
-        if (PhotoViewerDuplicateStripContainer.IsVisible)
-        {
-            topReservedHeight += 56d;
-        }
-
-        var bottomReservedHeight = 56d;
-        if (PhotoViewerDuplicateStripContainer.IsVisible)
-        {
-            bottomReservedHeight += 68d;
-        }
-
-        var availableHeight = viewportHeight - topReservedHeight - bottomReservedHeight - PhotoViewerOverlayVerticalGap * 2;
-        PhotoViewerZoomSliderContainer.Height = Math.Clamp(availableHeight, FooterActionButtonMinWidth, PhotoViewerZoomSliderDefaultHeight);
-        UpdatePhotoViewerZoomSliderThumb(_photoViewerZoom);
-    }
-
-    private void UpdatePhotoViewerCleanFooterActionButtonWidths()
-    {
-        var variableButtons = PhotoViewerActionFooterClean.Children
-            .OfType<Button>()
-            .Where(button => button.IsVisible && double.IsFinite(button.MaxWidth))
-            .ToList();
-        if (variableButtons.Count == 0)
-        {
-            return;
-        }
-
-        var visibleButtons = PhotoViewerActionFooterClean.Children.OfType<Button>().Where(button => button.IsVisible).ToList();
-        var fixedButtons = visibleButtons
-            .Where(button => !double.IsFinite(button.MaxWidth))
-            .ToList();
-        var visibleButtonCount = visibleButtons.Count;
-        var maxContentWidth = Math.Max(0, PhotoViewerViewport.Bounds.Width - PhotoViewerFooterHorizontalPadding);
-        var availableButtonWidth = maxContentWidth - (visibleButtonCount - 1) * FooterActionButtonSpacing;
-        var variableButtonWidth = FooterActionButtonMaxWidth;
-        var fixedButtonWidth = 42d;
-        var availableVariableWidth = availableButtonWidth - fixedButtons.Count * fixedButtonWidth;
-        if (variableButtons.Count > 0)
-        {
-            variableButtonWidth = Math.Clamp(availableVariableWidth / variableButtons.Count, fixedButtonWidth, FooterActionButtonMaxWidth);
-        }
-
-        if (variableButtons.Count > 0 && availableVariableWidth / variableButtons.Count < fixedButtonWidth)
-        {
-            var commonWidth = Math.Clamp(availableButtonWidth / visibleButtonCount, FooterActionButtonMinWidth, fixedButtonWidth);
-            variableButtonWidth = commonWidth;
-            fixedButtonWidth = commonWidth;
-        }
-
-        foreach (var button in variableButtons)
-        {
-            button.Width = variableButtonWidth;
-            button.Classes.Set("compact-footer-action", variableButtonWidth < FooterActionButtonCompactThreshold);
-        }
-
-        foreach (var button in fixedButtons)
-        {
-            button.Width = fixedButtonWidth;
-        }
-    }
-
-    private void UpdatePhotoViewerActionFooterShape()
-    {
-        var footerNaturalWidth = GetPhotoViewerActionFooterNaturalWidth();
-        var stripWidth = PhotoViewerDuplicateStripContainer.IsVisible
-            ? PhotoViewerDuplicateStripContainer.Bounds.Width
-            : 0;
-
-        if (stripWidth > 0 && footerNaturalWidth <= stripWidth)
-        {
-            PhotoViewerActionFooterCleanContainer.MinWidth = stripWidth;
-            PhotoViewerActionFooterCleanContainer.CornerRadius = new CornerRadius(0);
-        }
-        else
-        {
-            PhotoViewerActionFooterCleanContainer.MinWidth = 0;
-            PhotoViewerActionFooterCleanContainer.CornerRadius = new CornerRadius(OverlayCornerRadius, OverlayCornerRadius, 0, 0);
-        }
-    }
-
-    private double GetPhotoViewerActionFooterNaturalWidth()
-    {
-        var visibleButtons = PhotoViewerActionFooterClean.Children
-            .OfType<Button>()
-            .Where(button => button.IsVisible)
-            .ToList();
-        if (visibleButtons.Count == 0)
-        {
-            return PhotoViewerFooterHorizontalPadding;
-        }
-
-        var buttonWidth = visibleButtons.Sum(button =>
-        {
-            if (double.IsFinite(button.Width) && button.Width > 0)
-            {
-                return button.Width;
-            }
-
-            if (double.IsFinite(button.MaxWidth))
-            {
-                return Math.Min(FooterActionButtonMaxWidth, button.MaxWidth);
-            }
-
-            return button.Bounds.Width;
-        });
-
-        return buttonWidth
-            + (visibleButtons.Count - 1) * FooterActionButtonSpacing
-            + PhotoViewerFooterHorizontalPadding;
-    }
-
-    private static void UpdateFooterActionButtonWidths(Control host, Panel panel)
-    {
-        var visibleButtons = panel.Children
-            .OfType<Button>()
-            .Where(button => button.IsVisible && double.IsFinite(button.MaxWidth))
-            .ToList();
-        if (visibleButtons.Count == 0)
-        {
-            return;
-        }
-
-        var fixedWidth = panel.Children
-            .OfType<Button>()
-            .Where(button => button.IsVisible && !double.IsFinite(button.MaxWidth) && double.IsFinite(button.Width))
-            .Sum(button => button.Width);
-        var visibleButtonCount = panel.Children.OfType<Button>().Count(button => button.IsVisible);
-        var availableWidth = Math.Max(0, host.Bounds.Width - fixedWidth);
-        var availableButtonWidth = (availableWidth - (visibleButtonCount - 1) * FooterActionButtonSpacing) / visibleButtons.Count;
-        var buttonWidth = Math.Max(0, Math.Min(FooterActionButtonMaxWidth, availableButtonWidth));
-        foreach (var button in visibleButtons)
-        {
-            button.Width = buttonWidth;
-        }
-    }
-
-    private async void DownloadSelectedPhotos_Click(object? sender, RoutedEventArgs e)
-    {
-        await DownloadSelectedPhotosAsync(asArchive: false);
-    }
-
-    private async void DownloadSelectedPhotosArchive_Click(object? sender, RoutedEventArgs e)
-    {
-        await DownloadSelectedPhotosAsync(asArchive: true);
-    }
-
-    private async Task DownloadSelectedPhotosAsync(bool asArchive)
-    {
-        if (DataContext is MainViewModel viewModel && TopLevel.GetTopLevel(this) is { } topLevel)
-        {
-            if (asArchive)
-            {
-                var file = await OpenSaveFilePickerAsync(
-                    topLevel,
-                    "Save selected photos archive",
-                    viewModel.PictureDefaultDownloadDirectoryPath,
-                    viewModel.SelectedPhotosArchiveFileName,
-                    ZipFileTypeChoices);
-
-                if (file?.TryGetLocalPath() is { } archivePath)
-                {
-                    await viewModel.DownloadSelectedPhotosAsync(archivePath, asArchive: true);
-                }
-            }
-            else
-            {
-                var folders = await OpenSingleFolderPickerAsync(
-                    topLevel,
-                    "Choose download folder",
-                    viewModel.PictureDefaultDownloadDirectoryPath);
-
-                if (folders.Count > 0)
-                {
-                    await viewModel.DownloadSelectedPhotosAsync(folders[0].TryGetLocalPath() ?? "", asArchive: false);
-                }
-            }
-        }
-    }
-
-    private async void ChooseAlbumDownloadCategoryDestination_Click(object? sender, RoutedEventArgs e)
-    {
-        if (DataContext is not MainViewModel viewModel ||
-            sender is not Control { DataContext: AlbumDownloadCategoryViewModel category } ||
-            TopLevel.GetTopLevel(this) is not { } topLevel)
-        {
-            return;
-        }
-
-        if (category.IsArchiveMode)
-        {
-            var startPath = GetPickerStartPath(category.DestinationDirectoryPath);
-            var file = await OpenSaveFilePickerAsync(
-                topLevel,
-                $"Save {category.CategoryName} archive",
-                startPath,
-                viewModel.GetAlbumCategoryArchiveFileName(category),
-                ZipFileTypeChoices);
-
-            if (file?.TryGetLocalPath() is { } destinationPath)
-            {
-                category.DestinationDirectoryPath = destinationPath;
-            }
-        }
-        else
-        {
-            var folders = await OpenSingleFolderPickerAsync(
-                topLevel,
-                $"Choose destination for {category.CategoryName}",
-                category.DestinationDirectoryPath);
-
-            if (folders.Count > 0 && folders[0].TryGetLocalPath() is { } destinationPath)
-            {
-                category.DestinationDirectoryPath = destinationPath;
-            }
-        }
-    }
-
-    private void AlbumDownloadRowGrid_SizeChanged(object? sender, SizeChangedEventArgs e)
-    {
-        if (sender is not Grid grid || grid.ColumnDefinitions.Count < 3)
-        {
-            return;
-        }
-
-        UpdateAlbumDownloadRowWidths(grid);
-    }
-
-    private void AlbumDownloadActionHost_SizeChanged(object? sender, SizeChangedEventArgs e)
-    {
-        if (sender is not Control host)
-        {
-            return;
-        }
-
-        var width = Math.Max(
-            AlbumDownloadControlMinWidth,
-            Math.Min(AlbumDownloadActionButtonPreferredWidth, (host.Bounds.Width - 8) / 2));
-        AlbumDownloadButton.Width = width;
-        CancelAlbumDownloadButton.Width = width;
-    }
-
-    private static void UpdateAlbumDownloadRowWidths(Grid grid)
-    {
-        const double squareWidth = 42;
-        const double spacing = 8;
-        var controlWidth = Math.Max(
-            AlbumDownloadControlMinWidth * 3,
-            grid.Bounds.Width - spacing * 2);
-
-        double dropdownWidth;
-        double textBoxWidth;
-        double selectWidth;
-        if (controlWidth >= AlbumDownloadDropdownMaxWidth * 2 + squareWidth)
-        {
-            dropdownWidth = AlbumDownloadDropdownMaxWidth;
-            selectWidth = squareWidth;
-            textBoxWidth = controlWidth - dropdownWidth - selectWidth;
-        }
-        else if (controlWidth >= squareWidth * 3)
-        {
-            selectWidth = squareWidth;
-            dropdownWidth = (controlWidth - selectWidth) / 2;
-            textBoxWidth = dropdownWidth;
-        }
-        else
-        {
-            dropdownWidth = textBoxWidth = selectWidth = Math.Max(
-                AlbumDownloadControlMinWidth,
-                controlWidth / 3);
-        }
-
-        grid.ColumnDefinitions[0].Width = new GridLength(dropdownWidth);
-        grid.ColumnDefinitions[1].Width = new GridLength(textBoxWidth);
-        grid.ColumnDefinitions[2].Width = new GridLength(selectWidth);
-    }
-
-    private async Task ChooseSettingsDownloadDirectoryAsync(
-        string title,
-        Func<MainViewModel, string> getCurrentPath,
-        Action<MainViewModel, IStorageFolder> setFolder)
-    {
-        if (DataContext is not MainViewModel viewModel || TopLevel.GetTopLevel(this) is not { } topLevel)
-        {
-            return;
-        }
-
-        var folders = await OpenSingleFolderPickerAsync(topLevel, title, getCurrentPath(viewModel));
-        if (folders.Count > 0)
-        {
-            setFolder(viewModel, folders[0]);
-        }
-    }
-
-    private static async Task<IReadOnlyList<IStorageFolder>> OpenSingleFolderPickerAsync(
-        TopLevel topLevel,
-        string title,
-        string? suggestedStartPath)
-    {
-        IStorageFolder? suggestedStartLocation = null;
-        if (!string.IsNullOrWhiteSpace(suggestedStartPath))
-        {
-            try
-            {
-                suggestedStartLocation = await topLevel.StorageProvider.TryGetFolderFromPathAsync(suggestedStartPath);
-            }
-            catch
-            {
-                suggestedStartLocation = null;
-            }
-        }
-
-        return await topLevel.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
-        {
-            Title = title,
-            AllowMultiple = false,
-            SuggestedStartLocation = suggestedStartLocation
-        });
-    }
-
-    private static async Task<IStorageFile?> OpenSaveFilePickerAsync(
-        TopLevel topLevel,
-        string title,
-        string? suggestedStartPath,
-        string suggestedFileName,
-        IReadOnlyList<FilePickerFileType>? fileTypeChoices)
-    {
-        IStorageFolder? suggestedStartLocation = null;
-        var startPath = GetPickerStartPath(suggestedStartPath);
-        if (!string.IsNullOrWhiteSpace(startPath))
-        {
-            try
-            {
-                suggestedStartLocation = await topLevel.StorageProvider.TryGetFolderFromPathAsync(startPath);
-            }
-            catch
-            {
-                suggestedStartLocation = null;
-            }
-        }
-
-        var extension = Path.GetExtension(suggestedFileName);
-        return await topLevel.StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
-        {
-            Title = title,
-            SuggestedStartLocation = suggestedStartLocation,
-            SuggestedFileName = suggestedFileName,
-            DefaultExtension = string.IsNullOrWhiteSpace(extension) ? null : extension,
-            FileTypeChoices = fileTypeChoices,
-            ShowOverwritePrompt = true
-        });
-    }
-
-    private static string GetPickerStartPath(string? path)
-    {
-        if (string.IsNullOrWhiteSpace(path))
-        {
-            return "";
-        }
-
-        return string.Equals(Path.GetExtension(path), ".zip", StringComparison.OrdinalIgnoreCase) ||
-            (!Directory.Exists(path) && !string.IsNullOrWhiteSpace(Path.GetFileName(path)))
-                ? Path.GetDirectoryName(path) ?? ""
-                : path;
-    }
-
-    private static IReadOnlyList<FilePickerFileType>? GetImageFileTypeChoices(string fileName)
-    {
-        var extension = Path.GetExtension(fileName);
-        if (string.IsNullOrWhiteSpace(extension))
-        {
-            return null;
-        }
-
-        return
-        [
-            new("Image")
-            {
-                Patterns = [$"*{extension}"]
-            }
-        ];
-    }
-
-    private static async Task OpenManualPhotoPickerAsync(TopLevel topLevel, MainViewModel viewModel)
-    {
-        var files = await topLevel.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
-        {
-            Title = "Choose photos",
-            AllowMultiple = true,
-            FileTypeFilter = new[]
-            {
-                new FilePickerFileType("Images")
-                {
-                    Patterns = new[] { "*.jpg", "*.jpeg", "*.png", "*.webp", "*.gif", "*.bmp" },
-                    MimeTypes = new[] { "image/jpeg", "image/png", "image/webp", "image/gif", "image/bmp" },
-                    AppleUniformTypeIdentifiers = new[] { "public.image" }
-                }
-            }
-        });
-
-        if (files.Count > 0)
-        {
-            viewModel.AddManualPhotoFiles(files);
-        }
-    }
-
-    private static async Task OpenFolderDatePickerAsync(TopLevel topLevel, MainViewModel viewModel)
-    {
-        var folders = await topLevel.StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
-        {
-            Title = "Choose photo folders",
-            AllowMultiple = true
-        });
-
-        if (folders.Count > 0)
-        {
-            viewModel.SetFolderDateImportFolders(folders);
-        }
-    }
-
-    private void AddSelectedImportCandidates_Click(object? sender, RoutedEventArgs e)
-    {
-        if (DataContext is not MainViewModel viewModel)
-        {
-            return;
-        }
-
-        var selectedPhotos = viewModel.ImportCandidates.Where(photo => photo.IsSelected).ToList();
-        viewModel.AddImportCandidates(selectedPhotos);
-    }
-
-    private void RemoveSelectedAlbumPhotos_Click(object? sender, RoutedEventArgs e)
-    {
-        if (DataContext is not MainViewModel viewModel)
-        {
-            return;
-        }
-
-        var selectedPhotos = viewModel.AlbumPhotos.Where(photo => photo.IsSelected).ToList();
-        viewModel.RemoveAlbumPhotos(selectedPhotos);
-    }
-
-    private void AlbumPhotoSourceSelection_Click(object? sender, RoutedEventArgs e)
-    {
-        if (DataContext is not MainViewModel viewModel ||
-            sender is not Control { DataContext: AlbumPhotoSourceViewModel photo })
-        {
-            return;
-        }
-
-        if (viewModel.ImportCandidates.Contains(photo))
-        {
-            viewModel.ToggleImportCandidateSelection(photo);
-            return;
-        }
-
-        viewModel.ToggleAlbumPhotoSourceSelection(photo);
-    }
-
-    private async void AlbumPhotoSource_Loaded(object? sender, RoutedEventArgs e)
-    {
-        if (sender is Control { DataContext: AlbumPhotoSourceViewModel photo })
-        {
-            await photo.LoadThumbnailAsync();
-        }
-    }
-
-    private async void SignInGoogle_Click(object? sender, RoutedEventArgs e)
-    {
-        await SignInGoogleAsync(loadDriveFoldersAfterSignIn: true);
-    }
-
-    private async void SettingsSignInGoogle_Click(object? sender, RoutedEventArgs e)
-    {
-        await SignInGoogleAsync(loadDriveFoldersAfterSignIn: false);
-    }
-
-    private async void OpenAlbumSignInGoogle_Click(object? sender, RoutedEventArgs e)
-    {
-        await SignInGoogleAsync(loadDriveFoldersAfterSignIn: false);
-    }
-
-    private async void DriveItem_Click(object? sender, RoutedEventArgs e)
-    {
-        if (DataContext is MainViewModel viewModel &&
-            sender is Control { DataContext: DriveItemViewModel item })
-        {
-            await viewModel.OpenDriveItemAsync(item);
-        }
-    }
-
-    private async void OpenGoogleSignIn_Click(object? sender, RoutedEventArgs e)
-    {
-        var topLevel = TopLevel.GetTopLevel(this);
-        if (topLevel is null || DataContext is not MainViewModel viewModel)
-        {
-            return;
-        }
-
-        if (Uri.TryCreate(viewModel.GoogleSignInUrl, UriKind.Absolute, out var uri))
-        {
-            await topLevel.Launcher.LaunchUriAsync(uri);
-        }
-    }
-
     private async void AlbumPhoto_Loaded(object? sender, RoutedEventArgs e)
     {
         if (DataContext is MainViewModel viewModel &&
             sender is Control { DataContext: AlbumPhotoViewModel photo } control)
         {
+            _albumPhotoCards.Add(control);
             if (IsInSelectedAlbumPhotoList(control))
             {
                 await viewModel.StartPhotoViewportLoadAsync(photo);
@@ -1683,12 +365,14 @@ public partial class MainView : UserControl
 
     private void AlbumPhoto_Unloaded(object? sender, RoutedEventArgs e)
     {
+        if (sender is not Control control) return;
+        _albumPhotoCards.Remove(control);
         if (DataContext is MainViewModel viewModel &&
-            sender is Control { DataContext: AlbumPhotoViewModel photo })
+            control.DataContext is AlbumPhotoViewModel photo)
         {
             viewModel.StopPhotoViewportLoad(photo);
-            QueueVisibleAlbumPhotoPriorityUpdate();
         }
+        QueueVisibleAlbumPhotoPriorityUpdate();
     }
 
     private void AlbumPhotoList_Loaded(object? sender, RoutedEventArgs e)
@@ -1830,7 +514,6 @@ public partial class MainView : UserControl
 
         _albumPhotoScrollOffsets.TryAdd(scrollViewer, scrollViewer.Offset.Y - e.OffsetDelta.Y);
         UpdateFixedSurfaceTransforms(scrollViewer);
-        UpdateStickyAlbumPhotoGroupHeader();
         QueueVisibleAlbumPhotoPriorityUpdate();
     }
 
@@ -1841,13 +524,11 @@ public partial class MainView : UserControl
             UpdateFixedSurfaceTransforms(scrollViewer);
         }
 
-        UpdateStickyAlbumPhotoGroupHeader();
         QueueVisibleAlbumPhotoPriorityUpdate();
     }
 
     private void AlbumPhotoScrollViewer_SizeChanged(object? sender, SizeChangedEventArgs e)
     {
-        UpdateStickyAlbumPhotoGroupHeader();
         QueueVisibleAlbumPhotoPriorityUpdate();
     }
 
@@ -1887,9 +568,18 @@ public partial class MainView : UserControl
                 return;
             }
 
+            var started = Stopwatch.GetTimestamp();
             UpdateVisibleAlbumPhotoPriorities();
             UpdateStickyAlbumPhotoGroupHeader();
-        }, DispatcherPriority.Render);
+            var elapsed = Stopwatch.GetElapsedTime(started);
+            var now = DateTime.UtcNow;
+            if (elapsed.TotalMilliseconds >= 32 && now - _lastSlowViewportDiagnosticsUtc >= TimeSpan.FromSeconds(5))
+            {
+                _lastSlowViewportDiagnosticsUtc = now;
+                DiagnosticLogging.Current.Write("Debug", "Performance",
+                    $"Slow album viewport update: {elapsed.TotalMilliseconds:F1}ms; realized cards={_albumPhotoCards.Count}; lists={_albumPhotoLists.Count}");
+            }
+        }, DispatcherPriority.Background);
     }
 
     private void AlbumPhotoList_SelectionChanged(object? sender, SelectionChangedEventArgs e)
@@ -1947,7 +637,7 @@ public partial class MainView : UserControl
 
         var mainHeaderHeight = GetChromeSurfaceHeight(MainHeader, MainHeaderRow());
         var tabHeaderHeight = GetChromeSurfaceHeight(AlbumReviewTabHeader, AlbumReviewTabHeaderRow());
-        var footerHeight = GetChromeSurfaceHeight(ImageListFooter, ImageListFooterRow());
+        var footerHeight = GetChromeSurfaceHeight(ImageListFooterHost, ImageListFooterRow());
 
         UpdateHeaderChromeState(delta, viewModel, mainHeaderHeight, tabHeaderHeight);
 
@@ -2027,7 +717,7 @@ public partial class MainView : UserControl
     {
         ApplyChromeSurface(MainHeader, MainHeaderRow(), viewModel.FixedHeader ? 0 : _mainHeaderHiddenHeight, topSurface: true);
         ApplyTabHeaderChromeSurface(viewModel);
-        ApplyChromeSurface(ImageListFooter, ImageListFooterRow(), viewModel.FixedActionPanel ? 0 : _imageListFooterHiddenHeight, topSurface: false);
+        ApplyChromeSurface(ImageListFooterHost, ImageListFooterRow(), viewModel.FixedActionPanel ? 0 : _imageListFooterHiddenHeight, topSurface: false);
     }
 
     private void ApplyTabHeaderChromeSurface(MainViewModel viewModel)
@@ -2082,8 +772,9 @@ public partial class MainView : UserControl
             return;
         }
 
-        var header = listBox.GetVisualDescendants()
-            .OfType<Control>()
+        // Only row/header containers are relevant; scanning their descendants repeats the
+        // same row once for every border, button, image and text in every realized card.
+        var header = listBox.GetRealizedContainers()
             .Where(control => control.DataContext is AlbumPhotoGroupHeaderViewModel or AlbumPhotoRowViewModel)
             .Select(control => new
             {
@@ -2102,9 +793,7 @@ public partial class MainView : UserControl
 
     private ListBox? GetActiveAlbumPhotoListBox()
     {
-        return this.GetVisualDescendants()
-            .OfType<ListBox>()
-            .FirstOrDefault(listBox => listBox.Classes.Contains("album-photo-list") && IsControlEffectivelyVisible(listBox));
+        return _albumPhotoLists.FirstOrDefault(IsControlEffectivelyVisible);
     }
 
     private static bool IsControlEffectivelyVisible(Control control)
@@ -2122,20 +811,29 @@ public partial class MainView : UserControl
             return;
         }
 
-        var albumPhotoControls = this.GetVisualDescendants()
-            .OfType<Control>()
-            .Where(control => string.Equals(control.Name, "AlbumPhotoCard", StringComparison.Ordinal) &&
-                control.IsVisible &&
-                IsInSelectedAlbumPhotoList(control) &&
-                control.DataContext is AlbumPhotoViewModel)
-            .Select(control => new AlbumPhotoControlSnapshot(
-                control,
-                (AlbumPhotoViewModel)control.DataContext!,
-                TransformBounds(control, this),
-                GetControlBoundsInNearestScrollViewer(control),
-                IsControlInViewport(control),
-                IsControlFullyInViewport(control)))
-            .ToList();
+        var albumPhotoControls = new List<AlbumPhotoControlSnapshot>(_albumPhotoCards.Count);
+        var activeList = GetActiveAlbumPhotoListBox();
+        foreach (var control in _albumPhotoCards)
+        {
+            if (!control.IsVisible || control.DataContext is not AlbumPhotoViewModel photo)
+                continue;
+            // Walk ancestors and calculate the viewport rectangle once per card, not four times.
+            ScrollViewer? scrollViewer = null;
+            ListBox? listBox = null;
+            foreach (var ancestor in control.GetVisualAncestors())
+            {
+                if (ancestor is ScrollViewer viewer) scrollViewer ??= viewer;
+                if (ancestor is ListBox list) { listBox = list; break; }
+            }
+            if (listBox != activeList || scrollViewer is null)
+                continue;
+            var transform = control.TransformToVisual(scrollViewer);
+            if (transform is null) continue;
+            var bounds = new Rect(control.Bounds.Size).TransformToAABB(transform.Value);
+            var viewport = new Rect(scrollViewer.Bounds.Size);
+            albumPhotoControls.Add(new AlbumPhotoControlSnapshot(control, photo, bounds, bounds,
+                bounds.Intersects(viewport), viewport.Contains(bounds)));
+        }
 
         var visiblePhotos = albumPhotoControls
             .Where(item => item.IsInViewport)
@@ -2195,48 +893,6 @@ public partial class MainView : UserControl
             Console.WriteLine(
                 $"PicshareImageLoader: blank {item.Photo.FileName} ({item.Photo.PhotoId}) inViewport={item.IsInViewport} fully={item.IsFullyInViewport} bounds={FormatRect(item.Bounds)} scrollBounds={FormatRect(item.ViewportBounds)} {viewModel.DescribePhotoImageLoadState(item.Photo)}");
         }
-    }
-
-    private static bool IsControlInViewport(Control control)
-    {
-        var scrollViewer = control.GetVisualAncestors().OfType<ScrollViewer>().FirstOrDefault();
-        if (scrollViewer is null)
-        {
-            return false;
-        }
-
-        var transform = control.TransformToVisual(scrollViewer);
-        if (transform is null)
-        {
-            return false;
-        }
-
-        var bounds = TransformBounds(control, scrollViewer);
-        return bounds.Right > 0 &&
-            bounds.Bottom > 0 &&
-            bounds.Left < scrollViewer.Bounds.Width &&
-            bounds.Top < scrollViewer.Bounds.Height;
-    }
-
-    private static bool IsControlFullyInViewport(Control control)
-    {
-        var scrollViewer = control.GetVisualAncestors().OfType<ScrollViewer>().FirstOrDefault();
-        if (scrollViewer is null || control.TransformToVisual(scrollViewer) is null)
-        {
-            return false;
-        }
-
-        var bounds = TransformBounds(control, scrollViewer);
-        return bounds.Left >= 0 &&
-            bounds.Top >= 0 &&
-            bounds.Right <= scrollViewer.Bounds.Width &&
-            bounds.Bottom <= scrollViewer.Bounds.Height;
-    }
-
-    private static Rect GetControlBoundsInNearestScrollViewer(Control control)
-    {
-        var scrollViewer = control.GetVisualAncestors().OfType<ScrollViewer>().FirstOrDefault();
-        return scrollViewer is null ? default : TransformBounds(control, scrollViewer);
     }
 
     private static Rect TransformBounds(Control control, Visual target)
@@ -2307,7 +963,6 @@ public partial class MainView : UserControl
     private async Task OpenAlbumPhotoInViewerAsync(MainViewModel viewModel, AlbumPhotoViewModel photo)
     {
         await viewModel.OpenPhotoViewerAsync(photo);
-        await Dispatcher.UIThread.InvokeAsync(ResetPhotoViewerZoom, DispatcherPriority.Render);
     }
 
     private static bool IsFromAlbumPhotoSelectionButton(Control source)
@@ -2316,29 +971,6 @@ public partial class MainView : UserControl
             source.GetVisualAncestors()
                 .OfType<Control>()
                 .Any(control => control.Name == "AlbumPhotoSelectionButton");
-    }
-
-    private async void DuplicatePhotoViewerItem_Click(object? sender, RoutedEventArgs e)
-    {
-        if (DataContext is MainViewModel viewModel &&
-            sender is Control { DataContext: AlbumPhotoViewModel photo })
-        {
-            await viewModel.ShowDuplicatePhotoInViewerAsync(photo);
-            await Dispatcher.UIThread.InvokeAsync(ResetPhotoViewerZoom, DispatcherPriority.Render);
-            e.Handled = true;
-        }
-    }
-
-    private void RecentAlbum_Click(object? sender, RoutedEventArgs e)
-    {
-        if (DataContext is MainViewModel viewModel &&
-            sender is Control { DataContext: RecentAlbumViewModel recentAlbum } &&
-            viewModel.OpenRecentAlbumCommand.CanExecute(recentAlbum))
-        {
-            viewModel.CloseSidebarCommand.Execute(null);
-            viewModel.OpenRecentAlbumCommand.Execute(recentAlbum);
-            e.Handled = true;
-        }
     }
 
     private void AlbumReviewTabs_SelectionChanged(object? sender, SelectionChangedEventArgs e)
@@ -2455,355 +1087,4 @@ public partial class MainView : UserControl
         return tabIds;
     }
 
-    private void PhotoViewer_PointerWheelChanged(object? sender, PointerWheelEventArgs e)
-    {
-        if (PhotoViewerImageControl.Source is null)
-        {
-            return;
-        }
-
-        var factor = e.Delta.Y > 0 ? 1.15 : 1 / 1.15;
-        SetPhotoViewerZoom(_photoViewerZoom * factor, e.GetPosition(PhotoViewerScrollViewer));
-        e.Handled = true;
-    }
-
-    private void PhotoViewer_PointerPressed(object? sender, PointerPressedEventArgs e)
-    {
-        _photoViewerPointers[e.Pointer] = e.GetPosition(PhotoViewerViewport);
-        _photoViewerPointerPressed = _photoViewerPointers.Count == 1;
-        _photoViewerPointerStart = e.GetPosition(PhotoViewerViewport);
-        _photoViewerPointerStartImageOrigin = _photoViewerImageOrigin;
-        _photoViewerPointerMoved = false;
-        e.Pointer.Capture(PhotoViewerViewport);
-
-        if (_photoViewerPointers.Count == 2)
-        {
-            _pinchStartDistance = GetActivePointerDistance();
-            _pinchStartZoom = _photoViewerZoom;
-            _pinchStartCenter = GetActivePointerCenter(PhotoViewerScrollViewer);
-            _photoViewerPinchActive = true;
-        }
-    }
-
-    private void PhotoViewer_PointerMoved(object? sender, PointerEventArgs e)
-    {
-        if (!_photoViewerPointers.ContainsKey(e.Pointer))
-        {
-            return;
-        }
-
-        _photoViewerPointers[e.Pointer] = e.GetPosition(PhotoViewerViewport);
-        _photoViewerPointerMoved = true;
-        if (_photoViewerPointers.Count >= 2 && _pinchStartDistance > 0)
-        {
-            SetPhotoViewerZoom(_pinchStartZoom * GetActivePointerDistance() / _pinchStartDistance, _pinchStartCenter);
-            _pinchStartCenter = GetActivePointerCenter(PhotoViewerScrollViewer);
-            _pinchStartZoom = _photoViewerZoom;
-            _pinchStartDistance = GetActivePointerDistance();
-            e.Handled = true;
-        }
-        else if (_photoViewerPointers.Count == 1 && _photoViewerZoom > MinimumPhotoViewerZoom)
-        {
-            var delta = e.GetPosition(PhotoViewerViewport) - _photoViewerPointerStart;
-            SetPhotoViewerImageOrigin(_photoViewerPointerStartImageOrigin + delta);
-            e.Handled = true;
-        }
-    }
-
-    private void PhotoViewer_PointerReleased(object? sender, PointerReleasedEventArgs e)
-    {
-        var endPosition = e.GetPosition(PhotoViewerViewport);
-        var delta = endPosition - _photoViewerPointerStart;
-        var shouldToggleActions = _photoViewerPointerPressed &&
-            !_photoViewerPointerMoved &&
-            !_photoViewerPinchActive &&
-            _photoViewerPointers.Count == 1 &&
-            DataContext is MainViewModel;
-        var swipeDirection = GetPhotoViewerSwipeDirection(delta);
-
-        _photoViewerPointers.Remove(e.Pointer);
-        e.Pointer.Capture(null);
-
-        if (_photoViewerPointers.Count == 2)
-        {
-            _pinchStartDistance = GetActivePointerDistance();
-            _pinchStartZoom = _photoViewerZoom;
-            _pinchStartCenter = GetActivePointerCenter(PhotoViewerScrollViewer);
-        }
-        else if (_photoViewerPointers.Count < 2)
-        {
-            _pinchStartDistance = 0;
-            _photoViewerPinchActive = false;
-        }
-
-        if (shouldToggleActions && DataContext is MainViewModel viewModel)
-        {
-            viewModel.TogglePhotoViewerActionsCommand.Execute(null);
-        }
-        else if (swipeDirection is not 0 && DataContext is MainViewModel swipeViewModel)
-        {
-            if (swipeDirection > 0)
-            {
-                swipeViewModel.ShowPreviousPhotoInCategoryCommand.Execute(null);
-            }
-            else
-            {
-                swipeViewModel.ShowNextPhotoInCategoryCommand.Execute(null);
-            }
-        }
-    }
-
-    private void PhotoViewer_PointerCaptureLost(object? sender, PointerCaptureLostEventArgs e)
-    {
-        if (_photoViewerPointers.Remove(e.Pointer) && _photoViewerPointers.Count < 2)
-        {
-            _pinchStartDistance = 0;
-            _photoViewerPinchActive = false;
-        }
-    }
-
-    private void ResetPhotoViewerZoom()
-    {
-        _photoViewerPointers.Clear();
-        if (DataContext is not MainViewModel { PhotoViewerImage: { } image } viewModel)
-        {
-            return;
-        }
-
-        _photoViewerZoom = MinimumPhotoViewerZoom;
-        var viewportWidth = Math.Max(1, PhotoViewerScrollViewer.Bounds.Width > 1 ? PhotoViewerScrollViewer.Bounds.Width : Bounds.Width);
-        var viewportHeight = Math.Max(1, PhotoViewerScrollViewer.Bounds.Height > 1 ? PhotoViewerScrollViewer.Bounds.Height : Bounds.Height);
-        var pixelWidth = Math.Max(1, image.PixelSize.Width);
-        var pixelHeight = Math.Max(1, image.PixelSize.Height);
-        var isQuarterTurn = viewModel.PhotoViewerRotationDegrees is 90 or 270;
-        var effectiveWidth = isQuarterTurn ? pixelHeight : pixelWidth;
-        var effectiveHeight = isQuarterTurn ? pixelWidth : pixelHeight;
-        var fitScale = Math.Min(viewportWidth / effectiveWidth, viewportHeight / effectiveHeight);
-        var maximumZoom = GetMaximumPhotoViewerZoom(image);
-
-        if (viewModel.IsPhotoViewerStretchToFitAspectRatioMode)
-        {
-            _photoViewerBaseWidth = isQuarterTurn ? viewportHeight : viewportWidth;
-            _photoViewerBaseHeight = isQuarterTurn ? viewportWidth : viewportHeight;
-            PhotoViewerImageControl.Stretch = Stretch.Fill;
-        }
-        else
-        {
-            _photoViewerBaseWidth = pixelWidth * fitScale;
-            _photoViewerBaseHeight = pixelHeight * fitScale;
-            PhotoViewerImageControl.Stretch = Stretch.Uniform;
-        }
-        PhotoViewerZoomSlider.Maximum = 1;
-        SetPhotoViewerSliderValue(_photoViewerZoom);
-        var imageWidth = _photoViewerBaseWidth * _photoViewerZoom;
-        var imageHeight = _photoViewerBaseHeight * _photoViewerZoom;
-        var viewport = GetPhotoViewerViewportSize();
-        _photoViewerImageOrigin = new Point(
-            (viewport.Width - imageWidth) / 2,
-            (viewport.Height - imageHeight) / 2);
-        ApplyPhotoViewerZoom();
-    }
-
-    private void SetPhotoViewerZoom(double zoom)
-    {
-        SetPhotoViewerZoom(zoom, new Point(PhotoViewerScrollViewer.Bounds.Width / 2, PhotoViewerScrollViewer.Bounds.Height / 2));
-    }
-
-    private void SetPhotoViewerZoom(double zoom, Point anchor)
-    {
-        var maximumZoom = GetMaximumPhotoViewerZoom();
-        var oldWidth = Math.Max(1, PhotoViewerImageControl.Bounds.Width > 1 ? PhotoViewerImageControl.Bounds.Width : _photoViewerBaseWidth * _photoViewerZoom);
-        var oldHeight = Math.Max(1, PhotoViewerImageControl.Bounds.Height > 1 ? PhotoViewerImageControl.Bounds.Height : _photoViewerBaseHeight * _photoViewerZoom);
-        var relativeX = (anchor.X - _photoViewerImageOrigin.X) / oldWidth;
-        var relativeY = (anchor.Y - _photoViewerImageOrigin.Y) / oldHeight;
-
-        _photoViewerZoom = Math.Clamp(zoom, MinimumPhotoViewerZoom, maximumZoom);
-        SetPhotoViewerSliderValue(_photoViewerZoom);
-
-        var newWidth = Math.Max(1, _photoViewerBaseWidth * _photoViewerZoom);
-        var newHeight = Math.Max(1, _photoViewerBaseHeight * _photoViewerZoom);
-        _photoViewerImageOrigin = ClampPhotoViewerImageOrigin(new Point(
-            anchor.X - relativeX * newWidth,
-            anchor.Y - relativeY * newHeight));
-        ApplyPhotoViewerZoom();
-    }
-
-    private void ApplyPhotoViewerZoom()
-    {
-        if (_photoViewerBaseWidth <= 0 || _photoViewerBaseHeight <= 0)
-        {
-            return;
-        }
-
-        PhotoViewerImageControl.Width = _photoViewerBaseWidth * _photoViewerZoom;
-        PhotoViewerImageControl.Height = _photoViewerBaseHeight * _photoViewerZoom;
-        var viewport = GetPhotoViewerViewportSize();
-        PhotoViewerImageHost.Width = viewport.Width;
-        PhotoViewerImageHost.Height = viewport.Height;
-        _photoViewerImageOrigin = ClampPhotoViewerImageOrigin(_photoViewerImageOrigin);
-        Canvas.SetLeft(PhotoViewerImageControl, _photoViewerImageOrigin.X);
-        Canvas.SetTop(PhotoViewerImageControl, _photoViewerImageOrigin.Y);
-    }
-
-    private void SetPhotoViewerImageOrigin(Point origin)
-    {
-        _photoViewerImageOrigin = ClampPhotoViewerImageOrigin(origin);
-        Canvas.SetLeft(PhotoViewerImageControl, _photoViewerImageOrigin.X);
-        Canvas.SetTop(PhotoViewerImageControl, _photoViewerImageOrigin.Y);
-    }
-
-    private Point ClampPhotoViewerImageOrigin(Point origin)
-    {
-        var viewport = GetPhotoViewerViewportSize();
-        var imageWidth = Math.Max(1, _photoViewerBaseWidth * _photoViewerZoom);
-        var imageHeight = Math.Max(1, _photoViewerBaseHeight * _photoViewerZoom);
-        return new Point(
-            ClampPhotoViewerAxisOrigin(origin.X, viewport.Width, imageWidth),
-            ClampPhotoViewerAxisOrigin(origin.Y, viewport.Height, imageHeight));
-    }
-
-    private static double ClampPhotoViewerAxisOrigin(double value, double viewportSize, double imageSize)
-    {
-        if (imageSize <= viewportSize)
-        {
-            return (viewportSize - imageSize) / 2;
-        }
-
-        return Math.Clamp(value, viewportSize - imageSize, 0);
-    }
-
-    private Size GetPhotoViewerViewportSize()
-    {
-        return new Size(
-            Math.Max(1, PhotoViewerScrollViewer.Bounds.Width > 1 ? PhotoViewerScrollViewer.Bounds.Width : Bounds.Width),
-            Math.Max(1, PhotoViewerScrollViewer.Bounds.Height > 1 ? PhotoViewerScrollViewer.Bounds.Height : Bounds.Height));
-    }
-
-    private double GetMaximumPhotoViewerZoom()
-    {
-        return DataContext is MainViewModel { PhotoViewerImage: { } image }
-            ? GetMaximumPhotoViewerZoom(image)
-            : MinimumPhotoViewerZoom;
-    }
-
-    private double GetMaximumPhotoViewerZoom(Avalonia.Media.Imaging.Bitmap image)
-    {
-        var configuredZoomPower = DataContext is MainViewModel viewModel
-            ? Math.Clamp(viewModel.ZoomPower, 2, 10000)
-            : LocalUserSettings.DefaultZoomPower;
-        var imageLimit = Math.Max(1, Math.Max(image.PixelSize.Width, image.PixelSize.Height));
-        return Math.Max(MinimumPhotoViewerZoom, Math.Min(configuredZoomPower, imageLimit));
-    }
-
-    private void SetPhotoViewerSliderValue(double value)
-    {
-        _isUpdatingPhotoViewerZoomSlider = true;
-        PhotoViewerZoomSlider.Value = GetPhotoViewerZoomSliderPosition(value);
-        UpdatePhotoViewerZoomSliderThumb(value);
-        _isUpdatingPhotoViewerZoomSlider = false;
-    }
-
-    private void UpdatePhotoViewerZoomSliderThumb(double value)
-    {
-        const double trackInset = 14;
-        const double thumbHeight = 24;
-        var availableHeight = Math.Max(1, PhotoViewerZoomSliderThumb.Parent is Control parent && parent.Bounds.Height > 1
-            ? parent.Bounds.Height
-            : 180);
-        var trackHeight = Math.Max(1, availableHeight - trackInset * 2);
-        var normalized = GetPhotoViewerZoomSliderPosition(value);
-        var thumbCenterY = trackInset + trackHeight * (1 - normalized);
-        PhotoViewerZoomSliderThumb.RenderTransform = new TranslateTransform(0, thumbCenterY - thumbHeight / 2);
-    }
-
-    private double GetPhotoViewerZoomSliderPosition(double zoom)
-    {
-        var maximumZoom = Math.Max(MinimumPhotoViewerZoom + 0.001, GetMaximumPhotoViewerZoom());
-        var clampedZoom = Math.Clamp(zoom, MinimumPhotoViewerZoom, maximumZoom);
-        return Math.Log(clampedZoom / MinimumPhotoViewerZoom) /
-            Math.Log(maximumZoom / MinimumPhotoViewerZoom);
-    }
-
-    private double GetPhotoViewerZoomFromSliderPosition(double position)
-    {
-        var maximumZoom = Math.Max(MinimumPhotoViewerZoom + 0.001, GetMaximumPhotoViewerZoom());
-        var normalized = Math.Clamp(position, 0, 1);
-        return MinimumPhotoViewerZoom * Math.Pow(maximumZoom / MinimumPhotoViewerZoom, normalized);
-    }
-
-    private void PhotoViewerZoomSlider_ValueChanged(object? sender, Avalonia.Controls.Primitives.RangeBaseValueChangedEventArgs e)
-    {
-        if (_isUpdatingPhotoViewerZoomSlider || PhotoViewerImageControl.Source is null)
-        {
-            return;
-        }
-
-        SetPhotoViewerZoom(GetPhotoViewerZoomFromSliderPosition(e.NewValue));
-    }
-
-    private void PhotoViewerScrollViewer_SizeChanged(object? sender, SizeChangedEventArgs e)
-    {
-        ResetPhotoViewerZoom();
-    }
-
-    private double GetActivePointerDistance()
-    {
-        var points = _photoViewerPointers.Values.Take(2).ToArray();
-        if (points.Length < 2)
-        {
-            return 0;
-        }
-
-        var x = points[0].X - points[1].X;
-        var y = points[0].Y - points[1].Y;
-        return Math.Sqrt(x * x + y * y);
-    }
-
-    private Point GetActivePointerCenter(Visual relativeTo)
-    {
-        if (_photoViewerPointers.Count < 2)
-        {
-            return new Point(PhotoViewerScrollViewer.Bounds.Width / 2, PhotoViewerScrollViewer.Bounds.Height / 2);
-        }
-
-        var viewportPoint = new Point(
-            _photoViewerPointers.Values.Take(2).Average(point => point.X),
-            _photoViewerPointers.Values.Take(2).Average(point => point.Y));
-        var transform = PhotoViewerViewport.TransformToVisual(relativeTo);
-        return transform?.Transform(viewportPoint) ?? viewportPoint;
-    }
-
-    private int GetPhotoViewerSwipeDirection(Vector delta)
-    {
-        if (_photoViewerZoom > MinimumPhotoViewerZoom || _photoViewerPinchActive)
-        {
-            return 0;
-        }
-
-        var horizontal = Math.Abs(delta.X);
-        var vertical = Math.Abs(delta.Y);
-        if (horizontal < 80 || horizontal < vertical * 1.8)
-        {
-            return 0;
-        }
-
-        return delta.X > 0 ? 1 : -1;
-    }
-
-    private async Task SignInGoogleAsync(bool loadDriveFoldersAfterSignIn)
-    {
-        var topLevel = TopLevel.GetTopLevel(this);
-        if (topLevel is null || DataContext is not MainViewModel viewModel)
-        {
-            return;
-        }
-
-        await viewModel.SignInGoogleAsync(async uri =>
-        {
-            if (!await topLevel.Launcher.LaunchUriAsync(uri))
-            {
-                throw new InvalidOperationException("Could not open the Google sign-in page in the browser.");
-            }
-        }, loadDriveFoldersAfterSignIn);
-    }
 }

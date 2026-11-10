@@ -248,18 +248,21 @@ public partial class MainViewModel : ViewModelBase
     private bool _isPhotoViewerActionsVisible = true;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsAlbumModalDialogsVisible))]
     private bool _isGoogleAuthorizationRequired;
 
     [ObservableProperty]
     private string _googleAuthorizationMessage = "";
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsAlbumModalDialogsVisible))]
     private bool _isFeedbackConflictNoticeVisible;
 
     [ObservableProperty]
     private string _feedbackConflictMessage = "";
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsAlbumModalDialogsVisible))]
     private bool _isCommitConfirmationVisible;
 
     [ObservableProperty]
@@ -269,6 +272,7 @@ public partial class MainViewModel : ViewModelBase
     private bool _isFeedbackCommitted;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsAlbumModalDialogsVisible))]
     private bool _isPassConfirmationVisible;
 
     [ObservableProperty]
@@ -278,6 +282,7 @@ public partial class MainViewModel : ViewModelBase
     private bool _isFeedbackPassed;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsAlbumModalDialogsVisible))]
     private bool _isLeaveConfirmationVisible;
 
     [ObservableProperty]
@@ -287,24 +292,28 @@ public partial class MainViewModel : ViewModelBase
     private bool _isFeedbackLeft;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsAlbumModalDialogsVisible))]
     private bool _isCollectFeedbackConfirmationVisible;
 
     [ObservableProperty]
     private string _collectFeedbackConfirmationMessage = "";
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsAlbumModalDialogsVisible))]
     private bool _isFinalizeConfirmationVisible;
 
     [ObservableProperty]
     private string _finalizeConfirmationMessage = "";
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsAlbumModalDialogsVisible))]
     private bool _isRandomVerdictConfirmationVisible;
 
     [ObservableProperty]
     private string _randomVerdictConfirmationMessage = "";
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsAlbumModalDialogsVisible))]
     private bool _isDeleteAlbumConfirmationVisible;
 
     [ObservableProperty]
@@ -359,9 +368,11 @@ public partial class MainViewModel : ViewModelBase
     private bool _canUseAlbumMoreMenu;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsAlbumModalDialogsVisible))]
     private bool _isAlbumDownloadDialogVisible;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsAlbumModalDialogsVisible))]
     private bool _isAlbumDownloadProgressVisible;
 
     [ObservableProperty]
@@ -377,6 +388,7 @@ public partial class MainViewModel : ViewModelBase
     private int _albumDownloadProgressMaximum = 1;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsAlbumModalDialogsVisible))]
     private bool _isAlbumCreationProgressVisible;
 
     [ObservableProperty]
@@ -392,6 +404,7 @@ public partial class MainViewModel : ViewModelBase
     private int _albumCreationProgressMaximum = 1;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsAlbumModalDialogsVisible))]
     private bool _isAlbumDeletionProgressVisible;
 
     [ObservableProperty]
@@ -407,6 +420,7 @@ public partial class MainViewModel : ViewModelBase
     private int _albumDeletionProgressMaximum = 1;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsAlbumModalDialogsVisible))]
     private bool _isAlbumOpenProgressVisible;
 
     [ObservableProperty]
@@ -419,24 +433,28 @@ public partial class MainViewModel : ViewModelBase
     private int _albumOpenProgressMaximum = 1;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsAlbumModalDialogsVisible))]
     private bool _isCancelAlbumDeletionConfirmationVisible;
 
     [ObservableProperty]
     private string _cancelAlbumDeletionConfirmationMessage = "";
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsAlbumModalDialogsVisible))]
     private bool _isClearAlbumDestinationConfirmationVisible;
 
     [ObservableProperty]
     private string _clearAlbumDestinationConfirmationMessage = "";
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsAlbumModalDialogsVisible))]
     private bool _isPublicGoogleAlbumConfirmationVisible;
 
     [ObservableProperty]
     private string _publicGoogleAlbumConfirmationMessage = "";
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsAlbumModalDialogsVisible))]
     private bool _isInfrastructureErrorVisible;
 
     [ObservableProperty]
@@ -639,6 +657,27 @@ public partial class MainViewModel : ViewModelBase
 
     public bool HasCommitFeedbackMenuComment => !string.IsNullOrWhiteSpace(CommitFeedbackMenuComment);
 
+    public bool IsAlbumProgressDialogsVisible =>
+        IsAlbumOpenProgressVisible || IsAlbumDownloadProgressVisible || IsAlbumCreationProgressVisible;
+
+    public bool IsAlbumModalDialogsVisible =>
+        IsGoogleAuthorizationRequired ||
+        IsAlbumDownloadDialogVisible ||
+        IsAlbumProgressDialogsVisible ||
+        IsClearAlbumDestinationConfirmationVisible ||
+        IsInfrastructureErrorVisible ||
+        IsPublicGoogleAlbumConfirmationVisible ||
+        IsAlbumDeletionProgressVisible ||
+        IsCancelAlbumDeletionConfirmationVisible ||
+        IsFeedbackConflictNoticeVisible ||
+        IsCommitConfirmationVisible ||
+        IsPassConfirmationVisible ||
+        IsCollectFeedbackConfirmationVisible ||
+        IsFinalizeConfirmationVisible ||
+        IsRandomVerdictConfirmationVisible ||
+        IsDeleteAlbumConfirmationVisible ||
+        IsLeaveConfirmationVisible;
+
     public bool IsAlbumDownloadProgressWarningVisible => !string.IsNullOrWhiteSpace(AlbumDownloadProgressWarning);
 
     public bool IsAlbumCreationProgressWarningVisible => !string.IsNullOrWhiteSpace(AlbumCreationProgressWarning);
@@ -757,7 +796,7 @@ public partial class MainViewModel : ViewModelBase
 
     private readonly GoogleDriveAlbumPublisher _publisher = new();
     private readonly LocalFileSystemAlbumPublisher _localPublisher = new();
-    private readonly AlbumLoader _albumLoader = new();
+    private readonly AlbumLoader _albumLoader;
     private readonly LocalPhotoScanner _photoScanner = new();
     private readonly GoogleOAuthClient _oauthClient = new();
     private readonly GoogleUserInfoClient _googleUserInfoClient = new();
@@ -770,7 +809,7 @@ public partial class MainViewModel : ViewModelBase
     private readonly ImageCacheService _imageCache;
     private readonly AlbumImageListLoader _albumImageListLoader;
     private readonly AlbumDeletionService _albumDeletionService;
-    private readonly HttpClient _imageHttpClient = new();
+    private readonly HttpClient _imageHttpClient;
     private readonly List<IStorageFolder> _folderDateImportFolders = new();
     private readonly List<DriveFolderLocation> _driveFolderPath = new();
     private readonly List<SelectionHistoryEntry> _selectionUndoHistory = new();
@@ -791,6 +830,8 @@ public partial class MainViewModel : ViewModelBase
     private AlbumManifest? _failedDeletingAlbumManifest;
     private AlbumManifest? _currentManifest;
     private AlbumManifest? _pendingGoogleAuthorizationManifest;
+    private string? _pendingGoogleAuthorizationLink;
+    private readonly SemaphoreSlim _googleMediaTokenGate = new(1, 1);
     private AlbumPhotoViewModel? _selectedViewedPhoto;
     private string _selectedViewedPhotoSourceCategory = "";
     private string _selectedViewedPhotoSourceReviewTabId = UncategorizedReviewTabId;
@@ -817,7 +858,7 @@ public partial class MainViewModel : ViewModelBase
     private double _lastAlbumPhotoListWidth;
     private readonly HashSet<AlbumPhotoViewModel> _visibleAlbumPhotoViewport = new();
     private bool _isLoadingLocalUserSettings;
-    private bool _googleContactSearchWarmedUp;
+    private bool _googleOtherContactSearchWarmedUp;
     private Guid? _albumCreationLongRunningOperationId;
     private Guid? _albumDeletionLongRunningOperationId;
     private Guid? _albumDownloadLongRunningOperationId;
@@ -897,6 +938,8 @@ public partial class MainViewModel : ViewModelBase
         _albumOpenHistoryStore = new AlbumOpenHistoryStore(_settingsProvider.LocalStorageRootPath);
         _albumCreationService = new PersistentAlbumCreationService(_settingsProvider.LocalStorageRootPath);
         _tokenStore = new GoogleOAuthTokenStore(_settingsProvider.LocalStorageRootPath);
+        _imageHttpClient = DiagnosticLogging.CreateHttpClient(new GoogleDriveMediaHandler(GetGoogleMediaAccessTokenAsync));
+        _albumLoader = new AlbumLoader(_imageHttpClient);
         _reviewerFeedbackService = new ReviewerFeedbackService(_settingsProvider.LocalStorageRootPath);
         _imageCache = new ImageCacheService(_settingsProvider.LocalStorageRootPath);
         _albumImageListLoader = new AlbumImageListLoader(_imageCache, _imageHttpClient);
@@ -1244,6 +1287,7 @@ public partial class MainViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
+            DiagnosticLogging.LogException(ex);
             Status = ex.Message;
         }
     }
@@ -1300,6 +1344,7 @@ public partial class MainViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
+            DiagnosticLogging.LogException(ex);
             Status = ex.Message;
         }
     }
@@ -1408,6 +1453,7 @@ public partial class MainViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
+            DiagnosticLogging.LogException(ex);
             if (ReferenceEquals(_albumDownloadCancellation, cancellation))
             {
                 AlbumDownloadProgressMessage = ex.Message;
@@ -1494,6 +1540,7 @@ public partial class MainViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
+            DiagnosticLogging.LogException(ex);
             Status = ex.Message;
         }
     }
@@ -1547,6 +1594,7 @@ public partial class MainViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
+            DiagnosticLogging.LogException(ex);
             Status = ex.Message;
         }
         finally
@@ -1582,6 +1630,7 @@ public partial class MainViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
+            DiagnosticLogging.LogException(ex);
             Status = ex.Message;
         }
         finally
@@ -1643,6 +1692,7 @@ public partial class MainViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
+            DiagnosticLogging.LogException(ex);
             Status = ex.Message;
         }
         finally
@@ -1702,6 +1752,7 @@ public partial class MainViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
+            DiagnosticLogging.LogException(ex);
             Status = ex.Message;
         }
         finally
@@ -1753,12 +1804,14 @@ public partial class MainViewModel : ViewModelBase
         }
         catch (Exception ex) when (IsInfrastructureException(ex))
         {
+            DiagnosticLogging.LogException(ex);
             Status = ex.Message;
             _failedDeletingAlbumManifest = manifest;
             ShowInfrastructureError("Album deletion failed", ex);
         }
         catch (Exception ex)
         {
+            DiagnosticLogging.LogException(ex);
             Status = ex.Message;
         }
         finally
@@ -1956,6 +2009,7 @@ public partial class MainViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
+            DiagnosticLogging.LogException(ex);
             if (ReferenceEquals(_photoViewerCancellation, cancellation))
             {
                 PhotoViewerStatus = ex.Message;
@@ -1981,6 +2035,7 @@ public partial class MainViewModel : ViewModelBase
         }
         catch (Exception ex) when (ex is FileNotFoundException or AlbumImageCacheEntryInvalidException)
         {
+            DiagnosticLogging.LogException(ex);
             await TryShowPhotoViewerDetailedThumbnailFallbackAsync(photo, cacheFileName, cancellation);
         }
 
@@ -2024,6 +2079,7 @@ public partial class MainViewModel : ViewModelBase
         }
         catch (Exception ex) when (ex is FileNotFoundException or AlbumImageCacheEntryInvalidException)
         {
+            DiagnosticLogging.LogException(ex);
         }
         finally
         {
@@ -2056,6 +2112,7 @@ public partial class MainViewModel : ViewModelBase
         }
         catch (Exception ex) when (ex is FileNotFoundException or AlbumImageCacheEntryInvalidException)
         {
+            DiagnosticLogging.LogException(ex);
         }
         finally
         {
@@ -2169,6 +2226,7 @@ public partial class MainViewModel : ViewModelBase
     private void CancelGoogleAuthorization()
     {
         _pendingGoogleAuthorizationManifest = null;
+        _pendingGoogleAuthorizationLink = null;
         IsGoogleAuthorizationRequired = false;
         GoogleAuthorizationMessage = "";
         Status = "Google authorization cancelled.";
@@ -2180,7 +2238,7 @@ public partial class MainViewModel : ViewModelBase
         _googleSignInCancellation?.Cancel();
         _tokenStore.Clear();
         _googleTokenSet = null;
-        _googleContactSearchWarmedUp = false;
+        _googleOtherContactSearchWarmedUp = false;
         IsGoogleSignedIn = false;
         Status = "Google authorization cleared.";
     }
@@ -2221,6 +2279,7 @@ public partial class MainViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
+            DiagnosticLogging.LogException(ex);
             Status = ex.Message;
         }
         finally
@@ -2273,28 +2332,30 @@ public partial class MainViewModel : ViewModelBase
 
         if (_googleTokenSet is null)
         {
-            GoogleContactSearchStatus = "Sign in with Google before searching contacts.";
+            GoogleContactSearchStatus = "Sign in with Google before searching previously used email addresses.";
             return;
         }
 
-        if (!HasGoogleScope(_googleTokenSet, "https://www.googleapis.com/auth/contacts.readonly"))
+        if (!HasGoogleScope(_googleTokenSet, GooglePeopleRestClient.OtherContactsReadOnlyScope))
         {
-            GoogleContactSearchStatus = "Contact search needs Google contacts permission. Sign in again and allow contacts access.";
+            GoogleContactSearchStatus = "Searching previously used email addresses needs Google Other Contacts access. Sign out and sign in again to grant this permission.";
             return;
         }
 
         try
         {
-            GoogleContactSearchStatus = "Searching contacts...";
+            GoogleContactSearchStatus = "Searching previously used email addresses...";
             var accessToken = await GetGoogleAccessTokenAsync(CancellationToken.None);
             var client = new GooglePeopleRestClient(accessToken);
-            if (!_googleContactSearchWarmedUp)
+            if (!_googleOtherContactSearchWarmedUp)
             {
-                await client.WarmupContactSearchAsync(CancellationToken.None);
-                _googleContactSearchWarmedUp = true;
+                GoogleContactSearchStatus = "Preparing email address search...";
+                await client.WarmupOtherContactSearchAsync(CancellationToken.None);
+                _googleOtherContactSearchWarmedUp = true;
             }
 
-            var results = await client.SearchContactsAsync(GoogleContactSearchText, 10, CancellationToken.None);
+            GoogleContactSearchStatus = "Searching previously used email addresses...";
+            var results = await client.SearchOtherContactsAsync(GoogleContactSearchText, 10, CancellationToken.None);
             foreach (var result in results)
             {
                 GoogleContactSuggestions.Add(new GoogleContactSuggestionViewModel(result.DisplayName, result.EmailAddress));
@@ -2302,11 +2363,12 @@ public partial class MainViewModel : ViewModelBase
 
             OnPropertyChanged(nameof(HasGoogleContactSuggestions));
             GoogleContactSearchStatus = GoogleContactSuggestions.Count == 0
-                ? "No matching contacts found."
+                ? "No matching previously used email addresses found in Google Other Contacts."
                 : "";
         }
         catch (Exception ex)
         {
+            DiagnosticLogging.LogException(ex);
             GoogleContactSearchStatus = ex.Message;
         }
     }
@@ -2498,12 +2560,14 @@ public partial class MainViewModel : ViewModelBase
         }
         catch (Exception ex) when (IsInfrastructureException(ex))
         {
+            DiagnosticLogging.LogException(ex);
             Status = ex.Message;
             _failedPendingAlbumCreation = _activePendingAlbumCreation;
             ShowInfrastructureError("Album creation failed", ex);
         }
         catch (Exception ex)
         {
+            DiagnosticLogging.LogException(ex);
             Status = ex.Message;
         }
         finally
@@ -2575,12 +2639,14 @@ public partial class MainViewModel : ViewModelBase
         }
         catch (Exception ex) when (IsInfrastructureException(ex))
         {
+            DiagnosticLogging.LogException(ex);
             Status = ex.Message;
             _failedPendingAlbumCreation = _activePendingAlbumCreation;
             ShowInfrastructureError("Album creation failed", ex);
         }
         catch (Exception ex)
         {
+            DiagnosticLogging.LogException(ex);
             Status = ex.Message;
         }
         finally
@@ -2651,12 +2717,14 @@ public partial class MainViewModel : ViewModelBase
         }
         catch (Exception ex) when (IsInfrastructureException(ex))
         {
+            DiagnosticLogging.LogException(ex);
             Status = ex.Message;
             _failedDeletingAlbumManifest = manifest;
             ShowInfrastructureError("Album deletion failed", ex);
         }
         catch (Exception ex)
         {
+            DiagnosticLogging.LogException(ex);
             Status = $"Album creation was cancelled. Deletion will continue later: {ex.Message}";
         }
     }
@@ -2706,7 +2774,12 @@ public partial class MainViewModel : ViewModelBase
             IsGoogleAuthorizationRequired = false;
             GoogleAuthorizationMessage = "";
 
-            if (_pendingGoogleAuthorizationManifest is not null)
+            if (_pendingGoogleAuthorizationLink is { } pendingLink)
+            {
+                _pendingGoogleAuthorizationLink = null;
+                await OpenAlbumFromLinkAsync(pendingLink, saveHistory: true, showBusy: true);
+            }
+            else if (_pendingGoogleAuthorizationManifest is not null)
             {
                 await CompletePendingGoogleAuthorizedAlbumOpenAsync();
             }
@@ -2728,6 +2801,7 @@ public partial class MainViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
+            DiagnosticLogging.LogException(ex);
             _googleTokenSet = previousTokenSet;
             IsGoogleSignedIn = wasGoogleSignedIn && previousTokenSet is not null;
             Status = ex.Message;
@@ -2765,6 +2839,7 @@ public partial class MainViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
+            DiagnosticLogging.LogException(ex);
             Status = ex.Message;
         }
     }
@@ -2867,6 +2942,7 @@ public partial class MainViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
+            DiagnosticLogging.LogException(ex);
             Status = ex.Message;
         }
         finally
@@ -3015,6 +3091,7 @@ public partial class MainViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
+            DiagnosticLogging.LogException(ex);
             Status = ex.Message;
         }
         finally
@@ -3091,6 +3168,7 @@ public partial class MainViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
+            DiagnosticLogging.LogException(ex);
             Status = ex.Message;
         }
         finally
@@ -3316,6 +3394,13 @@ public partial class MainViewModel : ViewModelBase
         }
 
         var previousManifest = _currentManifest;
+        if (manifestFileId is not null && _googleTokenSet is null)
+        {
+            _pendingGoogleAuthorizationLink = link;
+            GoogleAuthorizationMessage = "Sign in with Google to open this Google Drive album.";
+            IsGoogleAuthorizationRequired = true;
+            return;
+        }
         CancellationTokenSource? cancellation = null;
         try
         {
@@ -3343,7 +3428,7 @@ public partial class MainViewModel : ViewModelBase
 
             var manifest = localManifestPath is not null
                 ? await _albumLoader.LoadFromLocalFileAsync(localManifestPath, cancellation.Token)
-                : await _albumLoader.LoadFromPublicDriveFileAsync(manifestFileId!, cancellation.Token);
+                : await _albumLoader.LoadFromDriveFileAsync(manifestFileId!, cancellation.Token);
             AlbumOpenProgressValue = 1;
             AlbumOpenProgressMessage = "Checking album access...";
             DriveFolderLink = manifest.GoogleDrive?.AlbumFolderUrl ?? manifest.LocalFileSystem?.RootPath ?? "";
@@ -3406,6 +3491,13 @@ public partial class MainViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
+            DiagnosticLogging.LogException(ex);
+            if (manifestFileId is not null && !IsGoogleSignedIn)
+            {
+                _pendingGoogleAuthorizationLink = link;
+                GoogleAuthorizationMessage = "Sign in with Google to open this Google Drive album.";
+                IsGoogleAuthorizationRequired = true;
+            }
             Status = ex.Message;
         }
         finally
@@ -3778,6 +3870,7 @@ public partial class MainViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
+            DiagnosticLogging.LogException(ex);
             if (ReferenceEquals(_photoViewerCancellation, cancellation))
             {
                 PhotoViewerStatus = ex.Message;
@@ -3948,6 +4041,7 @@ public partial class MainViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
+            DiagnosticLogging.LogException(ex);
             if (ReferenceEquals(_albumDownloadCancellation, cancellation))
             {
                 AlbumDownloadProgressMessage = ex.Message;
@@ -4873,6 +4967,7 @@ public partial class MainViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
+            DiagnosticLogging.LogException(ex);
             if (ReferenceEquals(_albumDownloadCancellation, cancellation))
             {
                 AlbumDownloadProgressWarning = "";
@@ -5891,6 +5986,7 @@ public partial class MainViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
+            DiagnosticLogging.LogException(ex);
             if (!TransientRetryPolicy.IsTransient(ex, cancellationToken))
             {
                 await Dispatcher.UIThread.InvokeAsync(() => Status = $"Feedback sync failed: {ex.Message}");
@@ -6045,6 +6141,7 @@ public partial class MainViewModel : ViewModelBase
         }
         catch (Exception ex)
         {
+            DiagnosticLogging.LogException(ex);
             if (!TransientRetryPolicy.IsTransient(ex, cancellationToken))
             {
                 await Dispatcher.UIThread.InvokeAsync(() => FlowStatus = $"Flow refresh failed: {ex.Message}");
@@ -7437,6 +7534,11 @@ public partial class MainViewModel : ViewModelBase
         OnPropertyChanged(nameof(IsAlbumDownloadProgressWarningVisible));
     }
 
+    partial void OnIsAlbumDownloadProgressVisibleChanged(bool value)
+    {
+        OnPropertyChanged(nameof(IsAlbumProgressDialogsVisible));
+    }
+
     partial void OnAlbumDownloadProgressMessageChanged(string value)
     {
         UpdateLongRunningOperation(
@@ -7473,6 +7575,11 @@ public partial class MainViewModel : ViewModelBase
     partial void OnAlbumCreationProgressWarningChanged(string value)
     {
         OnPropertyChanged(nameof(IsAlbumCreationProgressWarningVisible));
+    }
+
+    partial void OnIsAlbumCreationProgressVisibleChanged(bool value)
+    {
+        OnPropertyChanged(nameof(IsAlbumProgressDialogsVisible));
     }
 
     partial void OnAlbumCreationProgressMessageChanged(string value)
@@ -7555,6 +7662,11 @@ public partial class MainViewModel : ViewModelBase
             value,
             AlbumOpenProgressValue,
             AlbumOpenProgressMaximum);
+    }
+
+    partial void OnIsAlbumOpenProgressVisibleChanged(bool value)
+    {
+        OnPropertyChanged(nameof(IsAlbumProgressDialogsVisible));
     }
 
     partial void OnAlbumOpenProgressValueChanged(int value)
@@ -7713,6 +7825,24 @@ public partial class MainViewModel : ViewModelBase
         AlbumPhotoSourceSelectionStatus = selectedCount == 0
             ? ""
             : $"{selectedCount} selected";
+    }
+
+    private async Task<string> GetGoogleMediaAccessTokenAsync(CancellationToken cancellationToken)
+    {
+        // Image workers run in parallel. Refresh once on the UI thread, and avoid rewriting
+        // the token store or raising UI notifications for every image when the token is valid.
+        await _googleMediaTokenGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            return await Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (_googleTokenSet is { } tokenSet && tokenSet.ExpiresAt > DateTimeOffset.UtcNow.AddMinutes(2))
+                    return Task.FromResult(tokenSet.AccessToken);
+                return GetGoogleAccessTokenAsync(cancellationToken);
+            });
+        }
+        finally { _googleMediaTokenGate.Release(); }
     }
 
     private async Task<string> GetGoogleAccessTokenAsync(CancellationToken cancellationToken)

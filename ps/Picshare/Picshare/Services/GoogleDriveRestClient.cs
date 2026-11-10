@@ -11,7 +11,7 @@ public sealed class GoogleDriveRestClient
 
     public GoogleDriveRestClient(string accessToken, HttpClient? httpClient = null)
     {
-        _httpClient = httpClient ?? new HttpClient();
+        _httpClient = httpClient ?? DiagnosticLogging.CreateHttpClient();
         _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
     }
 
@@ -241,10 +241,8 @@ public sealed class GoogleDriveRestClient
         await EnsureSuccessAsync(response, cancellationToken);
     }
 
-    public static string CreatePublicDownloadUrl(string fileId)
-    {
-        return $"https://drive.google.com/uc?export=download&id={Uri.EscapeDataString(fileId)}";
-    }
+    public static string CreateMediaDownloadUrl(string fileId) =>
+        $"https://www.googleapis.com/drive/v3/files/{Uri.EscapeDataString(fileId)}?alt=media&supportsAllDrives=true";
 
     private static HttpRequestMessage CreateJsonRequest(HttpMethod method, string requestUri, object body)
     {

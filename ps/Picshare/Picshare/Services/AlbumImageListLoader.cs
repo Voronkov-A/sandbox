@@ -1473,7 +1473,7 @@ public sealed class AlbumImageListLoader : IDisposable
                     {
                         photo.IsImageLoading = true;
                     }
-                });
+                }, DispatcherPriority.Background);
             }
 
             if (work == AlbumImageWork.FastThumbnail)
@@ -1624,6 +1624,13 @@ public sealed class AlbumImageListLoader : IDisposable
                     MarkVisibleFailureSkippedIfCurrentVisible(photo, work, workToken);
                 }
 
+                if (!isVisible)
+                {
+                    MarkWarmupSkipped(photo, work);
+                    if (work == AlbumImageWork.DetailedThumbnail && ownsOriginalLoad)
+                        MarkWarmupSkipped(photo, AlbumImageWork.OriginalImage);
+                }
+
                 ResetWorkStatus(
                     photo,
                     work,
@@ -1645,7 +1652,7 @@ public sealed class AlbumImageListLoader : IDisposable
                     {
                         photo.Status = ex.InnerException?.Message ?? ex.Message;
                     }
-                });
+                }, DispatcherPriority.Background);
             }
         }
         catch (Exception ex)
@@ -1677,7 +1684,7 @@ public sealed class AlbumImageListLoader : IDisposable
                     {
                         photo.Status = ex.Message;
                     }
-                });
+                }, DispatcherPriority.Background);
             }
         }
         finally
@@ -1691,7 +1698,7 @@ public sealed class AlbumImageListLoader : IDisposable
                     {
                         photo.IsImageLoading = false;
                     }
-                });
+                }, DispatcherPriority.Background);
             }
 
             SignalWorkers();
@@ -1923,7 +1930,7 @@ public sealed class AlbumImageListLoader : IDisposable
 
                 photo.SetLoadedImage(bitmap, isDetailedThumbnail, status);
                 wasBound = true;
-            });
+            }, DispatcherPriority.Background);
         }
         finally
         {

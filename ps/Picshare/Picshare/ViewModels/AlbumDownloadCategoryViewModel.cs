@@ -36,7 +36,9 @@ public sealed partial class AlbumDownloadCategoryViewModel : ObservableObject
     private string DefaultArchiveFileName { get; }
 
     public IReadOnlyList<AlbumDownloadModeViewModel> ModeOptions { get; } =
-    [
+    OperatingSystem.IsAndroid() || OperatingSystem.IsIOS()
+    ? [new("include", "Include"), new("exclude", "Exclude")]
+    : [
         new("include", "Include"),
         new("archive", "Include as archive"),
         new("exclude", "Exclude")
@@ -53,6 +55,7 @@ public sealed partial class AlbumDownloadCategoryViewModel : ObservableObject
     private string _destinationDirectoryPath = "";
 
     public bool IsDestinationDirectoryEnabled => SelectedMode.Id != "exclude";
+    public bool UsesLocalDownloadPaths => !(OperatingSystem.IsAndroid() || OperatingSystem.IsIOS());
 
     public bool IsArchiveMode => SelectedMode.Id == "archive";
 

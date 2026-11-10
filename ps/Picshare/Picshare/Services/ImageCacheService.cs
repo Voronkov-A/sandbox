@@ -2303,7 +2303,25 @@ public sealed class ImageCacheService
             return File.OpenRead(downloadUrl);
         }
 
-        return await httpClient.GetStreamAsync(downloadUrl, cancellationToken);
+        using var response = await httpClient.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        response.EnsureSuccessStatusCode();
+        if (response.Content.Headers.ContentType?.MediaType?.Contains("html", StringComparison.OrdinalIgnoreCase) == true)
+            throw new InvalidOperationException("The image server returned an HTML page instead of an image. Check your sign-in and album access.");
+        await using var input = await response.Content.ReadAsStreamAsync(cancellationToken);
+        var memory = PooledMemoryStreamFactory.GetStream("ImageCacheService.DownloadImage");
+        try
+        {
+            await input.CopyToAsync(memory, cancellationToken);
+            memory.Position = 0;
+            // Some download/interstitial pages are mislabeled as octet-stream.
+            int first;
+            do { first = memory.ReadByte(); } while (first is 9 or 10 or 13 or 32);
+            memory.Position = 0;
+            if (first == '<')
+                throw new InvalidOperationException("The image server returned a text page instead of an image. Check your sign-in and album access.");
+            return memory;
+        }
+        catch { memory.Dispose(); throw; }
     }
 
     private static async Task<Stream> OpenSeekableSourceStreamAsync(

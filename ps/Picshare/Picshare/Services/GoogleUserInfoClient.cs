@@ -10,7 +10,7 @@ public sealed class GoogleUserInfoClient
 
     public GoogleUserInfoClient(HttpClient? httpClient = null)
     {
-        _httpClient = httpClient ?? new HttpClient();
+        _httpClient = httpClient ?? DiagnosticLogging.CreateHttpClient();
     }
 
     public async Task<GoogleUserInfo> GetUserInfoAsync(string accessToken, CancellationToken cancellationToken)

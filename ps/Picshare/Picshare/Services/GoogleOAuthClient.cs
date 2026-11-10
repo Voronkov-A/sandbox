@@ -19,7 +19,7 @@ public sealed class GoogleOAuthClient
         "email",
         "profile",
         "https://www.googleapis.com/auth/drive",
-        "https://www.googleapis.com/auth/contacts.readonly"
+        GooglePeopleRestClient.OtherContactsReadOnlyScope
     };
 
     private readonly HttpClient _httpClient;
@@ -29,7 +29,7 @@ public sealed class GoogleOAuthClient
         HttpClient? httpClient = null,
         Func<TimeSpan, CancellationToken, Task>? delayAsync = null)
     {
-        _httpClient = httpClient ?? new HttpClient();
+        _httpClient = httpClient ?? DiagnosticLogging.CreateHttpClient();
         _delayAsync = delayAsync ?? Task.Delay;
     }
 

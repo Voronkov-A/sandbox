@@ -1,0 +1,36 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:vm="clr-namespace:Picshare.ViewModels"
+             xmlns:views="clr-namespace:Picshare.Views"
+             mc:Ignorable="d" d:DesignWidth="520" d:DesignHeight="220"
+             x:Class="Picshare.Views.AlbumProgressDialogsView"
+             x:DataType="vm:MainViewModel">
+  <Grid>
+    <views:ProgressDialogView IsVisible="{Binding IsAlbumOpenProgressVisible}"
+                              Title="Opening album"
+                              Message="{Binding AlbumOpenProgressMessage}"
+                              Maximum="{Binding AlbumOpenProgressMaximum}"
+                              Value="{Binding AlbumOpenProgressValue}"
+                              CancelCommand="{Binding CancelAlbumOpenProgressCommand}"/>
+
+    <views:ProgressDialogView IsVisible="{Binding IsAlbumDownloadProgressVisible}"
+                              Title="Downloading album"
+                              Message="{Binding AlbumDownloadProgressMessage}"
+                              IsWarningVisible="{Binding IsAlbumDownloadProgressWarningVisible}"
+                              Warning="{Binding AlbumDownloadProgressWarning}"
+                              Maximum="{Binding AlbumDownloadProgressMaximum}"
+                              Value="{Binding AlbumDownloadProgressValue}"
+                              CancelCommand="{Binding CancelAlbumDownloadProgressCommand}"/>
+
+    <views:ProgressDialogView IsVisible="{Binding IsAlbumCreationProgressVisible}"
+                              Title="Creating album"
+                              Message="{Binding AlbumCreationProgressMessage}"
+                              IsWarningVisible="{Binding IsAlbumCreationProgressWarningVisible}"
+                              Warning="{Binding AlbumCreationProgressWarning}"
+                              Maximum="{Binding AlbumCreationProgressMaximum}"
+                              Value="{Binding AlbumCreationProgressValue}"
+                              CancelCommand="{Binding CancelAlbumCreationProgressCommand}"/>
+  </Grid>
+</UserControl>

@@ -10,12 +10,12 @@ public sealed class AlbumLoader
 
     public AlbumLoader(HttpClient? httpClient = null)
     {
-        _httpClient = httpClient ?? new HttpClient();
+        _httpClient = httpClient ?? DiagnosticLogging.CreateHttpClient();
     }
 
-    public async Task<AlbumManifest> LoadFromPublicDriveFileAsync(string manifestFileId, CancellationToken cancellationToken)
+    public async Task<AlbumManifest> LoadFromDriveFileAsync(string manifestFileId, CancellationToken cancellationToken)
     {
-        var url = GoogleDriveRestClient.CreatePublicDownloadUrl(manifestFileId);
+        var url = GoogleDriveRestClient.CreateMediaDownloadUrl(manifestFileId);
         await using var stream = await _httpClient.GetStreamAsync(url, cancellationToken);
         var manifest = await JsonSerializer.DeserializeAsync<AlbumManifest>(stream, JsonOptions, cancellationToken);
         return manifest ?? throw new InvalidOperationException("The album manifest is empty or invalid.");

@@ -61,8 +61,8 @@ public sealed class GoogleDriveAlbumPublisher
 
                 return new StoredAlbumPhoto(
                     "google-drive-file",
-                    GoogleDriveRestClient.CreatePublicDownloadUrl(driveFile.Id),
-                    GoogleDriveRestClient.CreatePublicDownloadUrl(thumbnailFile.Id),
+                    GoogleDriveRestClient.CreateMediaDownloadUrl(driveFile.Id),
+                    GoogleDriveRestClient.CreateMediaDownloadUrl(thumbnailFile.Id),
                     driveFile.Id,
                     thumbnailFile.Id);
             },

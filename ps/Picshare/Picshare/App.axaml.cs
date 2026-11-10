@@ -5,6 +5,7 @@ using Avalonia.Data.Core.Plugins;
 using Avalonia.Markup.Xaml;
 using Picshare.ViewModels;
 using Picshare.Views;
+using Picshare.Services;
 
 namespace Picshare;
 
@@ -12,6 +13,7 @@ public partial class App : Application
 {
     public override void Initialize()
     {
+        DiagnosticLogging.Initialize();
         AvaloniaXamlLoader.Load(this);
     }
 

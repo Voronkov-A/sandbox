@@ -1,0 +1,523 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:vm="clr-namespace:Picshare.ViewModels"
+             xmlns:views="clr-namespace:Picshare.Views"
+             mc:Ignorable="d" d:DesignWidth="1000" d:DesignHeight="700"
+             x:Class="Picshare.Views.AlbumModalDialogsView"
+             x:DataType="vm:MainViewModel">
+  <Grid>
+    <Grid Background="#80000000"
+          IsVisible="{Binding IsGoogleAuthorizationRequired}">
+      <Border Background="White"
+              BorderBrush="#D6D8D1"
+              BorderThickness="1"
+              CornerRadius="6"
+              Padding="18"
+              Margin="20"
+              MaxWidth="460"
+              HorizontalAlignment="Stretch"
+              VerticalAlignment="Center">
+        <StackPanel Spacing="12">
+          <TextBlock Text="Google authorization required" FontSize="18" FontWeight="SemiBold"/>
+          <TextBlock Text="{Binding GoogleAuthorizationMessage}" TextWrapping="Wrap"/>
+          <Grid ColumnDefinitions="*,Auto,Auto">
+            <Button Grid.Column="1"
+                    Command="{Binding CancelGoogleAuthorizationCommand}"
+                    Padding="12,8"
+                    Margin="0,0,8,0">
+              Cancel
+            </Button>
+            <Button Grid.Column="2"
+                    Click="OpenAlbumSignInGoogle_Click"
+                    Padding="12,8">
+              Sign in with Google
+            </Button>
+          </Grid>
+        </StackPanel>
+      </Border>
+    </Grid>
+
+    <views:LazyControlHost IsActive="{Binding IsAlbumDownloadDialogVisible}"
+                           ControlType="{x:Type views:AlbumDownloadDialogView}"/>
+
+    <views:LazyControlHost IsActive="{Binding IsAlbumProgressDialogsVisible}"
+                           ControlType="{x:Type views:AlbumProgressDialogsView}"/>
+
+    <Grid Background="#99000000"
+          IsVisible="{Binding IsClearAlbumDestinationConfirmationVisible}">
+      <Border Background="White"
+              BorderBrush="#B42318"
+              BorderThickness="2"
+              CornerRadius="6"
+              Padding="18"
+              Margin="20"
+              MaxWidth="520"
+              HorizontalAlignment="Stretch"
+              VerticalAlignment="Center">
+        <Grid ColumnDefinitions="64,*" RowDefinitions="Auto,Auto,Auto">
+          <Border Grid.RowSpan="3"
+                  Width="48"
+                  Height="48"
+                  CornerRadius="24"
+                  Background="#FEE4E2"
+                  BorderBrush="#B42318"
+                  BorderThickness="2"
+                  VerticalAlignment="Top">
+            <TextBlock Text="X"
+                       Foreground="#B42318"
+                       FontSize="24"
+                       FontWeight="Bold"
+                       HorizontalAlignment="Center"
+                       VerticalAlignment="Center"/>
+          </Border>
+          <TextBlock Grid.Column="1"
+                     Text="Replace destination"
+                     FontSize="18"
+                     FontWeight="SemiBold"
+                     Foreground="#7A271A"/>
+          <TextBlock Grid.Row="1"
+                     Grid.Column="1"
+                     Text="{Binding ClearAlbumDestinationConfirmationMessage}"
+                     TextWrapping="Wrap"
+                     Margin="0,8,0,14"/>
+          <Grid Grid.Row="2" Grid.Column="1" ColumnDefinitions="*,Auto,Auto">
+            <Button Grid.Column="1"
+                    Command="{Binding CancelClearAlbumDestinationCommand}"
+                    Padding="12,8"
+                    Margin="0,0,8,0">
+              No
+            </Button>
+            <Button Grid.Column="2"
+                    Command="{Binding ConfirmClearAlbumDestinationCommand}"
+                    Background="#B42318"
+                    Foreground="White"
+                    BorderBrush="#7A271A"
+                    Padding="12,8">
+              Yes, delete and upload
+            </Button>
+          </Grid>
+        </Grid>
+      </Border>
+    </Grid>
+
+    <Grid Background="#99000000"
+          IsVisible="{Binding IsInfrastructureErrorVisible}">
+      <Border Background="White"
+              BorderBrush="#B42318"
+              BorderThickness="2"
+              CornerRadius="6"
+              Padding="18"
+              Margin="20"
+              MaxWidth="520"
+              HorizontalAlignment="Stretch"
+              VerticalAlignment="Center">
+        <Grid ColumnDefinitions="64,*" RowDefinitions="Auto,Auto,Auto">
+          <Border Grid.RowSpan="3"
+                  Width="48"
+                  Height="48"
+                  CornerRadius="24"
+                  Background="#FEE4E2"
+                  BorderBrush="#B42318"
+                  BorderThickness="2"
+                  VerticalAlignment="Top">
+            <TextBlock Text="!"
+                       Foreground="#B42318"
+                       FontSize="30"
+                       FontWeight="Bold"
+                       HorizontalAlignment="Center"
+                       VerticalAlignment="Center"/>
+          </Border>
+          <TextBlock Grid.Column="1"
+                     Text="Operation failed"
+                     FontSize="18"
+                     FontWeight="SemiBold"
+                     Foreground="#7A271A"/>
+          <TextBlock Grid.Row="1"
+                     Grid.Column="1"
+                     Text="{Binding InfrastructureErrorMessage}"
+                     TextWrapping="Wrap"
+                     Margin="0,8,0,14"/>
+          <Grid Grid.Row="2" Grid.Column="1" ColumnDefinitions="*,Auto">
+            <Button Grid.Column="1"
+                    Command="{Binding AcknowledgeInfrastructureErrorCommand}"
+                    Background="#B42318"
+                    Foreground="White"
+                    BorderBrush="#7A271A"
+                    Padding="12,8">
+              OK
+            </Button>
+          </Grid>
+        </Grid>
+      </Border>
+    </Grid>
+
+    <Grid Background="#99000000"
+          IsVisible="{Binding IsPublicGoogleAlbumConfirmationVisible}">
+      <Border Background="White"
+              BorderBrush="#B42318"
+              BorderThickness="2"
+              CornerRadius="6"
+              Padding="18"
+              Margin="20"
+              MaxWidth="520"
+              HorizontalAlignment="Center"
+              VerticalAlignment="Center">
+        <Grid ColumnDefinitions="44,*" RowDefinitions="Auto,Auto,Auto">
+          <Border Width="34"
+                  Height="34"
+                  Background="#FEE4E2"
+                  BorderBrush="#B42318"
+                  BorderThickness="1"
+                  CornerRadius="17"
+                  VerticalAlignment="Top">
+            <TextBlock Text="!"
+                       Foreground="#B42318"
+                       FontSize="22"
+                       FontWeight="Bold"
+                       HorizontalAlignment="Center"
+                       VerticalAlignment="Center"/>
+          </Border>
+          <TextBlock Grid.Column="1"
+                     Text="Public album access"
+                     FontSize="18"
+                     FontWeight="SemiBold"
+                     Foreground="#7A271A"/>
+          <TextBlock Grid.Row="1"
+                     Grid.Column="1"
+                     Text="{Binding PublicGoogleAlbumConfirmationMessage}"
+                     TextWrapping="Wrap"
+                     Margin="0,8,0,14"/>
+          <Grid Grid.Row="2" Grid.Column="1" ColumnDefinitions="*,Auto,Auto">
+            <Button Grid.Column="1"
+                    Command="{Binding CancelPublicGoogleAlbumCommand}"
+                    Padding="12,8"
+                    Margin="0,0,8,0">
+              No
+            </Button>
+            <Button Grid.Column="2"
+                    Command="{Binding ConfirmPublicGoogleAlbumCommand}"
+                    Background="#B42318"
+                    Foreground="White"
+                    BorderBrush="#7A271A"
+                    Padding="12,8">
+              Yes, create public album
+            </Button>
+          </Grid>
+        </Grid>
+      </Border>
+    </Grid>
+
+    <views:ProgressDialogView IsVisible="{Binding IsAlbumDeletionProgressVisible}"
+                              Title="Deleting album"
+                              Message="{Binding AlbumDeletionProgressMessage}"
+                              IsWarningVisible="{Binding IsAlbumDeletionProgressWarningVisible}"
+                              Warning="{Binding AlbumDeletionProgressWarning}"
+                              Maximum="{Binding AlbumDeletionProgressMaximum}"
+                              Value="{Binding AlbumDeletionProgressValue}"
+                              CancelCommand="{Binding CancelAlbumDeletionProgressCommand}"/>
+
+    <Grid Background="#99000000"
+          IsVisible="{Binding IsCancelAlbumDeletionConfirmationVisible}">
+      <Border Background="White"
+              BorderBrush="#B42318"
+              BorderThickness="2"
+              CornerRadius="6"
+              Padding="18"
+              Margin="20"
+              MaxWidth="520"
+              HorizontalAlignment="Stretch"
+              VerticalAlignment="Center">
+        <StackPanel Spacing="12">
+          <TextBlock Text="Stop deletion" FontSize="18" FontWeight="SemiBold" Foreground="#7A271A"/>
+          <TextBlock Text="{Binding CancelAlbumDeletionConfirmationMessage}" TextWrapping="Wrap"/>
+          <Grid ColumnDefinitions="*,Auto,Auto">
+            <Button Grid.Column="1"
+                    Command="{Binding KeepAlbumDeletionRunningCommand}"
+                    Padding="12,8"
+                    Margin="0,0,8,0">
+              No
+            </Button>
+            <Button Grid.Column="2"
+                    Command="{Binding ForceCancelAlbumDeletionCommand}"
+                    Background="#B42318"
+                    Foreground="White"
+                    BorderBrush="#7A271A"
+                    Padding="12,8">
+              Yes, stop
+            </Button>
+          </Grid>
+        </StackPanel>
+      </Border>
+    </Grid>
+
+    <Grid Background="#80000000"
+          IsVisible="{Binding IsFeedbackConflictNoticeVisible}">
+      <Border Background="White"
+              BorderBrush="#D6D8D1"
+              BorderThickness="1"
+              CornerRadius="6"
+              Padding="18"
+              Margin="20"
+              MaxWidth="460"
+              HorizontalAlignment="Stretch"
+              VerticalAlignment="Center">
+        <StackPanel Spacing="12">
+          <TextBlock Text="Feedback updated" FontSize="18" FontWeight="SemiBold"/>
+          <TextBlock Text="{Binding FeedbackConflictMessage}" TextWrapping="Wrap"/>
+          <Grid ColumnDefinitions="*,Auto">
+            <Button Grid.Column="1"
+                    Command="{Binding DismissFeedbackConflictNoticeCommand}"
+                    Padding="12,8">
+              OK
+            </Button>
+          </Grid>
+        </StackPanel>
+      </Border>
+    </Grid>
+
+    <Grid Background="#80000000"
+          IsVisible="{Binding IsCommitConfirmationVisible}">
+      <Border Background="White"
+              BorderBrush="#D6D8D1"
+              BorderThickness="1"
+              CornerRadius="6"
+              Padding="18"
+              Margin="20"
+              MaxWidth="460"
+              HorizontalAlignment="Stretch"
+              VerticalAlignment="Center">
+        <StackPanel Spacing="12">
+          <TextBlock Text="Commit feedback" FontSize="18" FontWeight="SemiBold"/>
+          <TextBlock Text="{Binding CommitConfirmationMessage}" TextWrapping="Wrap"/>
+          <Grid ColumnDefinitions="*,Auto,Auto">
+            <Button Grid.Column="1"
+                    Command="{Binding CancelCommitFeedbackCommand}"
+                    Padding="12,8"
+                    Margin="0,0,8,0">
+              No
+            </Button>
+            <Button Grid.Column="2"
+                    Command="{Binding ConfirmCommitFeedbackCommand}"
+                    Padding="12,8">
+              Yes
+            </Button>
+          </Grid>
+        </StackPanel>
+      </Border>
+    </Grid>
+
+    <Grid Background="#80000000"
+          IsVisible="{Binding IsPassConfirmationVisible}">
+      <Border Background="White"
+              BorderBrush="#D6D8D1"
+              BorderThickness="1"
+              CornerRadius="6"
+              Padding="18"
+              Margin="20"
+              MaxWidth="460"
+              HorizontalAlignment="Stretch"
+              VerticalAlignment="Center">
+        <StackPanel Spacing="12">
+          <TextBlock Text="Pass on feedback" FontSize="18" FontWeight="SemiBold"/>
+          <TextBlock Text="{Binding PassConfirmationMessage}" TextWrapping="Wrap"/>
+          <Grid ColumnDefinitions="*,Auto,Auto">
+            <Button Grid.Column="1"
+                    Command="{Binding CancelPassFeedbackCommand}"
+                    Padding="12,8"
+                    Margin="0,0,8,0">
+              No
+            </Button>
+            <Button Grid.Column="2"
+                    Command="{Binding ConfirmPassFeedbackCommand}"
+                    Padding="12,8">
+              Yes
+            </Button>
+          </Grid>
+        </StackPanel>
+      </Border>
+    </Grid>
+
+    <Grid Background="#80000000"
+          IsVisible="{Binding IsCollectFeedbackConfirmationVisible}">
+      <Border Background="White"
+              BorderBrush="#D6D8D1"
+              BorderThickness="1"
+              CornerRadius="6"
+              Padding="18"
+              Margin="20"
+              MaxWidth="460"
+              HorizontalAlignment="Stretch"
+              VerticalAlignment="Center">
+        <StackPanel Spacing="12">
+          <TextBlock Text="Collect feedback" FontSize="18" FontWeight="SemiBold"/>
+          <TextBlock Text="{Binding CollectFeedbackConfirmationMessage}" TextWrapping="Wrap"/>
+          <Grid ColumnDefinitions="*,Auto,Auto">
+            <Button Grid.Column="1"
+                    Command="{Binding CancelCollectFeedbackCommand}"
+                    Padding="12,8"
+                    Margin="0,0,8,0">
+              No
+            </Button>
+            <Button Grid.Column="2"
+                    Command="{Binding ConfirmCollectFeedbackCommand}"
+                    Padding="12,8">
+              Yes
+            </Button>
+          </Grid>
+        </StackPanel>
+      </Border>
+    </Grid>
+
+    <Grid Background="#80000000"
+          IsVisible="{Binding IsFinalizeConfirmationVisible}">
+      <Border Background="White"
+              BorderBrush="#D6D8D1"
+              BorderThickness="1"
+              CornerRadius="6"
+              Padding="18"
+              Margin="20"
+              MaxWidth="460"
+              HorizontalAlignment="Stretch"
+              VerticalAlignment="Center">
+        <StackPanel Spacing="12">
+          <TextBlock Text="Finalize album" FontSize="18" FontWeight="SemiBold"/>
+          <TextBlock Text="{Binding FinalizeConfirmationMessage}" TextWrapping="Wrap"/>
+          <Grid ColumnDefinitions="*,Auto,Auto">
+            <Button Grid.Column="1"
+                    Command="{Binding CancelFinalizeFeedbackCommand}"
+                    Padding="12,8"
+                    Margin="0,0,8,0">
+              No
+            </Button>
+            <Button Grid.Column="2"
+                    Command="{Binding ConfirmFinalizeFeedbackCommand}"
+                    Padding="12,8">
+              Yes
+            </Button>
+          </Grid>
+        </StackPanel>
+      </Border>
+    </Grid>
+
+    <Grid Background="#80000000"
+          IsVisible="{Binding IsRandomVerdictConfirmationVisible}">
+      <Border Background="White"
+              BorderBrush="#D6D8D1"
+              BorderThickness="1"
+              CornerRadius="6"
+              Padding="18"
+              Margin="20"
+              MaxWidth="460"
+              HorizontalAlignment="Stretch"
+              VerticalAlignment="Center">
+        <StackPanel Spacing="12">
+          <TextBlock Text="Random verdict" FontSize="18" FontWeight="SemiBold"/>
+          <TextBlock Text="{Binding RandomVerdictConfirmationMessage}" TextWrapping="Wrap"/>
+          <Grid ColumnDefinitions="*,Auto,Auto">
+            <Button Grid.Column="1"
+                    Command="{Binding CancelRandomVerdictCommand}"
+                    Padding="12,8"
+                    Margin="0,0,8,0">
+              No
+            </Button>
+            <Button Grid.Column="2"
+                    Command="{Binding ConfirmRandomVerdictCommand}"
+                    Padding="12,8">
+              Yes
+            </Button>
+          </Grid>
+        </StackPanel>
+      </Border>
+    </Grid>
+
+    <Grid Background="#99000000"
+          IsVisible="{Binding IsDeleteAlbumConfirmationVisible}">
+      <Border Background="White"
+              BorderBrush="#B42318"
+              BorderThickness="2"
+              CornerRadius="6"
+              Padding="18"
+              Margin="20"
+              MaxWidth="520"
+              HorizontalAlignment="Stretch"
+              VerticalAlignment="Center">
+        <Grid ColumnDefinitions="64,*" RowDefinitions="Auto,Auto,Auto">
+          <Border Grid.RowSpan="3"
+                  Width="48"
+                  Height="48"
+                  CornerRadius="24"
+                  Background="#FEE4E2"
+                  BorderBrush="#B42318"
+                  BorderThickness="2"
+                  VerticalAlignment="Top">
+            <TextBlock Text="X"
+                       Foreground="#B42318"
+                       FontSize="30"
+                       FontWeight="Bold"
+                       HorizontalAlignment="Center"
+                       VerticalAlignment="Center"/>
+          </Border>
+          <TextBlock Grid.Column="1"
+                     Text="Delete album"
+                     FontSize="18"
+                     FontWeight="SemiBold"
+                     Foreground="#7A271A"/>
+          <TextBlock Grid.Row="1"
+                     Grid.Column="1"
+                     Text="{Binding DeleteAlbumConfirmationMessage}"
+                     TextWrapping="Wrap"
+                     Margin="0,8,0,14"/>
+          <Grid Grid.Row="2" Grid.Column="1" ColumnDefinitions="*,Auto,Auto">
+            <Button Grid.Column="1"
+                    Command="{Binding CancelDeleteAlbumCommand}"
+                    Padding="12,8"
+                    Margin="0,0,8,0">
+              No
+            </Button>
+            <Button Grid.Column="2"
+                    Command="{Binding ConfirmDeleteAlbumCommand}"
+                    Background="#B42318"
+                    Foreground="White"
+                    BorderBrush="#7A271A"
+                    Padding="12,8">
+              Yes, delete
+            </Button>
+          </Grid>
+        </Grid>
+      </Border>
+    </Grid>
+
+    <Grid Background="#80000000"
+          IsVisible="{Binding IsLeaveConfirmationVisible}">
+      <Border Background="White"
+              BorderBrush="#D6D8D1"
+              BorderThickness="1"
+              CornerRadius="6"
+              Padding="18"
+              Margin="20"
+              MaxWidth="460"
+              HorizontalAlignment="Stretch"
+              VerticalAlignment="Center">
+        <StackPanel Spacing="12">
+          <TextBlock Text="Leave album" FontSize="18" FontWeight="SemiBold"/>
+          <TextBlock Text="{Binding LeaveConfirmationMessage}" TextWrapping="Wrap"/>
+          <Grid ColumnDefinitions="*,Auto,Auto">
+            <Button Grid.Column="1"
+                    Command="{Binding CancelLeaveFeedbackCommand}"
+                    Padding="12,8"
+                    Margin="0,0,8,0">
+              No
+            </Button>
+            <Button Grid.Column="2"
+                    Command="{Binding ConfirmLeaveFeedbackCommand}"
+                    Padding="12,8">
+              Yes
+            </Button>
+          </Grid>
+        </StackPanel>
+      </Border>
+    </Grid>
+  </Grid>
+</UserControl>

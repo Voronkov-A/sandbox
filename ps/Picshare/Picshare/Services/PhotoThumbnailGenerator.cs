@@ -9,7 +9,9 @@ public static class PhotoThumbnailGenerator
 
     public static MemoryStream CreateJpegThumbnail(Stream source)
     {
-        using var codec = SKCodec.Create(source)
+        // SKCodec owns its input wrapper; the caller retains ownership of the photo stream.
+        using var input = new SKManagedStream(source, disposeManagedStream: false);
+        using var codec = SKCodec.Create(input)
             ?? throw new InvalidOperationException("The selected photo could not be decoded.");
 
         var info = codec.Info;
@@ -48,7 +50,8 @@ public static class PhotoThumbnailGenerator
 
     public static (int Width, int Height) GetImageSize(Stream source)
     {
-        using var codec = SKCodec.Create(source)
+        using var input = new SKManagedStream(source, disposeManagedStream: false);
+        using var codec = SKCodec.Create(input)
             ?? throw new InvalidOperationException("The selected photo could not be decoded.");
 
         var info = codec.Info;

@@ -6,6 +6,23 @@ namespace Picshare.Tests;
 public sealed class GoogleOAuthClientTests
 {
     [Fact]
+    public void SignIn_RequestsOtherContactsPermissionAndConsentAlongsideDriveAndIdentity()
+    {
+        var buildUrl = typeof(GoogleOAuthClient).GetMethod("BuildAuthorizationUrl",
+            System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!;
+        var url = (Uri)buildUrl.Invoke(null, ["client-id", "http://localhost:1234/", "state", "challenge"])!;
+        var query = url.Query.TrimStart('?').Split('&').Select(part => part.Split('=', 2))
+            .ToDictionary(parts => parts[0], parts => Uri.UnescapeDataString(parts[1]));
+        var scopes = query["scope"].Split(' ');
+        Assert.Contains("https://www.googleapis.com/auth/contacts.other.readonly", scopes);
+        Assert.DoesNotContain("https://www.googleapis.com/auth/contacts.readonly", scopes);
+        Assert.Contains("https://www.googleapis.com/auth/drive", scopes);
+        Assert.Contains("openid", scopes);
+        Assert.Equal("consent", query["prompt"]);
+        Assert.Equal("true", query["include_granted_scopes"]);
+    }
+
+    [Fact]
     public async Task RefreshAsync_RetriesTransientConnectionFailure()
     {
         var handler = new FailThenTokenHandler(failuresBeforeSuccess: 2);

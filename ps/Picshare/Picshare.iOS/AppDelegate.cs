@@ -19,6 +19,7 @@ public partial class AppDelegate : AvaloniaAppDelegate<App>
     protected override AppBuilder CustomizeAppBuilder(AppBuilder builder)
     {
         LongRunningOperationHost.Current = new IosLongRunningOperationHost();
+        DiagnosticExportHost.Current = new IosDiagnosticShareHost();
         return base.CustomizeAppBuilder(builder)
             .WithInterFont();
     }

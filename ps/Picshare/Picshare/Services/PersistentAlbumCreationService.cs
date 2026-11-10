@@ -419,9 +419,9 @@ public sealed class PersistentAlbumCreationService
                     ContentType = contentType,
                     BackendType = "google-drive-file",
                     DriveFileId = photo.DriveFileId,
-                    DownloadUrl = GoogleDriveRestClient.CreatePublicDownloadUrl(photo.DriveFileId!),
+                    DownloadUrl = GoogleDriveRestClient.CreateMediaDownloadUrl(photo.DriveFileId!),
                     ThumbnailDriveFileId = photo.ThumbnailDriveFileId,
-                    ThumbnailDownloadUrl = GoogleDriveRestClient.CreatePublicDownloadUrl(photo.ThumbnailDriveFileId!),
+                    ThumbnailDownloadUrl = GoogleDriveRestClient.CreateMediaDownloadUrl(photo.ThumbnailDriveFileId!),
                     ThumbnailContentType = PhotoThumbnailGenerator.ContentType,
                     Width = photo.Width,
                     Height = photo.Height
