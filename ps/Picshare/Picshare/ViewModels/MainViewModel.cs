@@ -174,6 +174,15 @@ public partial class MainViewModel : ViewModelBase
     private bool _showPhotoViewerPreviousNextButtons = true;
 
     [ObservableProperty]
+    private bool _categoryButtons = true;
+
+    [ObservableProperty]
+    private bool _rotationButtons = true;
+
+    [ObservableProperty]
+    private bool _preloadImagesWhileScrolling;
+
+    [ObservableProperty]
     private int _zoomPower = LocalUserSettings.DefaultZoomPower;
 
     [ObservableProperty]
@@ -962,6 +971,10 @@ public partial class MainViewModel : ViewModelBase
                 localSettings.ShowPhotoViewerPreviousNextButtons ??
                 _settingsProvider.DefaultSettings.ShowPhotoViewerPreviousNextButtons ??
                 true;
+            CategoryButtons = localSettings.CategoryButtons ?? _settingsProvider.DefaultSettings.CategoryButtons ?? !IsMobilePlatform;
+            RotationButtons = localSettings.RotationButtons ?? _settingsProvider.DefaultSettings.RotationButtons ?? true;
+            PreloadImagesWhileScrolling = localSettings.PreloadImagesWhileScrolling ??
+                _settingsProvider.DefaultSettings.PreloadImagesWhileScrolling ?? false;
             ZoomPower = NormalizeZoomPower(localSettings.ZoomPower);
             PhotoViewerAspectRatioMode = NormalizePhotoViewerAspectRatioMode(localSettings.PhotoViewerAspectRatioMode);
             AlbumFastThumbnailMemoryCacheSizeMb = NormalizeCacheSizeMb(localSettings.AlbumFastThumbnailMemoryCacheSizeMb, 256);
@@ -1928,6 +1941,7 @@ public partial class MainViewModel : ViewModelBase
     [RelayCommand]
     private void ClosePhotoViewer()
     {
+        ClosePhotoProperties();
         CancelPhotoViewerLoad();
         _albumImageListLoader.ClearPriorityPhotos();
         _albumImageListLoader.ClearFullImageWarmup();
@@ -3682,6 +3696,11 @@ public partial class MainViewModel : ViewModelBase
         await Task.CompletedTask;
         photo.ResetImageLoadStatusesIfImageMissing();
         _albumImageListLoader.AddViewportPhoto(photo);
+    }
+
+    public void SetPhotoListLoadingPaused(bool paused)
+    {
+        _albumImageListLoader.SetListLoadingPaused(paused && !PreloadImagesWhileScrolling);
     }
 
     public void UpdateAlbumPhotoCardSize(double availableWidth)
@@ -6157,6 +6176,7 @@ public partial class MainViewModel : ViewModelBase
 
     private void SelectViewedPhoto(AlbumPhotoViewModel? photo)
     {
+        if (!ReferenceEquals(_selectedViewedPhoto, photo)) ClosePhotoProperties();
         var oldPriorityPhotos = IsPhotoViewerVisible
             ? GetPhotoViewerPriorityPhotos()
             : [];
@@ -7200,6 +7220,9 @@ public partial class MainViewModel : ViewModelBase
             FixedTabs = FixedTabs,
             FixedActionPanel = FixedActionPanel,
             ShowPhotoViewerPreviousNextButtons = ShowPhotoViewerPreviousNextButtons,
+            CategoryButtons = CategoryButtons,
+            RotationButtons = RotationButtons,
+            PreloadImagesWhileScrolling = PreloadImagesWhileScrolling,
             ZoomPower = NormalizeZoomPower(ZoomPower),
             PhotoViewerAspectRatioMode = NormalizePhotoViewerAspectRatioMode(PhotoViewerAspectRatioMode),
             AlbumFastThumbnailMemoryCacheSizeMb = GetCacheSizeMb(AlbumFastThumbnailMemoryCacheSizeMb, 256),
@@ -7399,6 +7422,22 @@ public partial class MainViewModel : ViewModelBase
 
     partial void OnShowPhotoViewerPreviousNextButtonsChanged(bool value)
     {
+        PersistLocalUserSettingsIfReady();
+    }
+
+    partial void OnCategoryButtonsChanged(bool value)
+    {
+        PersistLocalUserSettingsIfReady();
+    }
+
+    partial void OnRotationButtonsChanged(bool value)
+    {
+        PersistLocalUserSettingsIfReady();
+    }
+
+    partial void OnPreloadImagesWhileScrollingChanged(bool value)
+    {
+        if (value) _albumImageListLoader.SetListLoadingPaused(false);
         PersistLocalUserSettingsIfReady();
     }
 

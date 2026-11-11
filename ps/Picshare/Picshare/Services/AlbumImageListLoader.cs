@@ -9,6 +9,7 @@ public sealed class AlbumImageListLoader : IDisposable
     private readonly HttpClient _httpClient;
     private readonly object _sync = new();
     private readonly SemaphoreSlim _updates = new(0);
+    private bool _isListLoadingPaused;
     private IReadOnlyList<AlbumPhotoViewModel> _photos = [];
     private Dictionary<AlbumPhotoViewModel, int> _indexByPhoto = new();
     private HashSet<int> _viewportIndices = new();
@@ -205,6 +206,26 @@ public sealed class AlbumImageListLoader : IDisposable
         foreach (var photo in priorityPhotos)
         {
             AddPriorityPhoto(photo);
+        }
+    }
+
+    public void SetListLoadingPaused(bool paused)
+    {
+        lock (_sync)
+        {
+            if (_isListLoadingPaused == paused) return;
+            _isListLoadingPaused = paused;
+        }
+        if (!paused) SignalWorkers();
+    }
+
+    private bool CanLoadPhotoControl(AlbumPhotoViewModel photo)
+    {
+        lock (_sync)
+        {
+            // Explicit viewer priorities remain responsive while the list is moving.
+            return !_isListLoadingPaused ||
+                (_indexByPhoto.TryGetValue(photo, out var index) && _priorityIndices.Contains(index));
         }
     }
 
@@ -554,6 +575,11 @@ public sealed class AlbumImageListLoader : IDisposable
         if (_disposed)
         {
             return;
+        }
+
+        lock (_sync)
+        {
+            if (_isListLoadingPaused && _priorityIndices.Count == 0 && !_isFullImageWarmupActive) return;
         }
 
         var wakeCount = Math.Max(1, Volatile.Read(ref _workerCount));
@@ -1199,6 +1225,7 @@ public sealed class AlbumImageListLoader : IDisposable
         foreach (var candidate in photos)
         {
             if (IsCurrentGeneration(generation) &&
+                CanLoadPhotoControl(candidate) &&
                 candidate.Image is null &&
                 !IsVisibleFailureSkipped(candidate, AlbumImageWork.FastThumbnail) &&
                 candidate.TryBeginFastThumbnailControlLoad(out fastThumbnailWasAlreadyLoaded, out workToken))
@@ -1212,7 +1239,7 @@ public sealed class AlbumImageListLoader : IDisposable
                 var isStillEligible = requireListViewport
                     ? IsPhotoInListViewport(candidate)
                     : IsPhotoInViewport(candidate);
-                if (!isStillEligible)
+                if (!isStillEligible || !CanLoadPhotoControl(candidate))
                 {
                     candidate.CompleteFastThumbnailLoad(fastThumbnailWasAlreadyLoaded, workToken);
                     continue;
@@ -1241,6 +1268,7 @@ public sealed class AlbumImageListLoader : IDisposable
     {
         foreach (var candidate in GetViewportPhotos())
         {
+            if (!CanLoadPhotoControl(candidate)) continue;
             var allowFastThumbnail = !IsVisibleFailureSkipped(candidate, AlbumImageWork.FastThumbnail);
             if (IsCurrentGeneration(generation) && candidate.TryBeginVisibleThumbnailLoad(
                 candidate.Image is null,
@@ -1290,7 +1318,7 @@ public sealed class AlbumImageListLoader : IDisposable
                     continue;
                 }
 
-                if (!IsPhotoInViewport(candidate))
+                if (!IsPhotoInViewport(candidate) || !CanLoadPhotoControl(candidate))
                 {
                     if (loadDetailed)
                     {
@@ -1329,6 +1357,11 @@ public sealed class AlbumImageListLoader : IDisposable
         workToken = 0;
         lock (_sync)
         {
+            if (_isListLoadingPaused)
+            {
+                photo = null!;
+                return false;
+            }
             var seedIndices = _orderedViewportIndices.Count > 0
                 ? _orderedViewportIndices
                 : _orderedPriorityIndices;
@@ -1465,11 +1498,16 @@ public sealed class AlbumImageListLoader : IDisposable
         MarkActiveWork(photo, work, isVisible);
         try
         {
+            if (!CanLoadPhotoControl(photo))
+            {
+                ResetWorkStatus(photo, work, ownsOriginalLoad, fastThumbnailWasAlreadyLoaded, detailedThumbnailWasAlreadyLoaded, workToken);
+                return;
+            }
             if (isVisible)
             {
                 await Dispatcher.UIThread.InvokeAsync(() =>
                 {
-                    if (IsCurrentGeneration(generation) && IsPhotoInViewport(photo))
+                    if (IsCurrentGeneration(generation) && IsPhotoInViewport(photo) && CanLoadPhotoControl(photo))
                     {
                         photo.IsImageLoading = true;
                     }
@@ -1511,6 +1549,11 @@ public sealed class AlbumImageListLoader : IDisposable
                     return;
                 }
 
+                if (!CanLoadPhotoControl(photo))
+                {
+                    photo.CompleteFastThumbnailLoad(fastThumbnailWasAlreadyLoaded, workToken);
+                    return;
+                }
                 var fastResult = await _imageCache.LoadFastThumbnailBitmapAsync(
                     photo.AlbumId,
                     photo.PhotoId,
@@ -1923,7 +1966,8 @@ public sealed class AlbumImageListLoader : IDisposable
         {
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
-                if (!IsCurrentGeneration(generation) || !photo.IsImageWorkCurrent(workToken) || !IsPhotoInViewport(photo))
+                if (!IsCurrentGeneration(generation) || !photo.IsImageWorkCurrent(workToken) ||
+                    !IsPhotoInViewport(photo) || !CanLoadPhotoControl(photo))
                 {
                     return;
                 }

@@ -13,7 +13,7 @@ public partial class PhotoViewerView
     private double _mobilePinchStartZoom;
     private Point _mobilePinchStartOrigin;
     private Point _mobilePinchAnchor;
-    private Vector _mobileSwipeDelta;
+    private Point _mobileSwipeStart;
     private ScrollGestureRecognizer? _mobileScrollRecognizer;
 
     private void ConfigureMobileGestures()
@@ -21,12 +21,35 @@ public partial class PhotoViewerView
         // Let the framework own touch contacts/capture rather than mixing them with the
         // desktop mouse drag and wheel anchoring code. The host covers the full viewport.
         PhotoViewerImageHost.Background = Brushes.Transparent;
-        PhotoViewerImageHost.GestureRecognizers.Add(new TapFriendlyPinchGestureRecognizer());
-        _mobileScrollRecognizer = new ScrollGestureRecognizer
+        var pinchRecognizer = new TapFriendlyPinchGestureRecognizer
+        {
+            MultipleContactsPressed = CancelPhotoViewerSwipe
+        };
+        PhotoViewerImageHost.GestureRecognizers.Add(pinchRecognizer);
+        _mobileScrollRecognizer = new SwipeAwareScrollGestureRecognizer
         {
             CanHorizontallyScroll = true,
             CanVerticallyScroll = true,
-            IsScrollInertiaEnabled = false
+            IsScrollInertiaEnabled = false,
+            Starting = e =>
+            {
+                if (pinchRecognizer.HadMultipleContacts) return;
+                _mobileSwipeStart = e.GetPosition(null);
+                BeginPhotoViewerSwipe(e.GetPosition(PhotoViewerViewport));
+            },
+            // Use the full contact displacement, including the framework's scroll-start tolerance.
+            Moving = e => UpdatePhotoViewerSwipe(e.GetPosition(null) - _mobileSwipeStart),
+            Canceled = CancelPhotoViewerSwipe,
+            Released = e =>
+            {
+                // A short diagonal can select an action before the scroll recognizer starts.
+                if (_photoViewerSwipeActive && PhotoViewerSwipeWheel.SelectedDirection != PhotoViewerSwipeDirection.None)
+                {
+                    e.PreventGestureRecognition();
+                    e.Handled = true;
+                }
+                CompletePhotoViewerSwipe();
+            }
         };
         PhotoViewerImageHost.GestureRecognizers.Add(_mobileScrollRecognizer);
         PhotoViewerImageHost.AddHandler(Gestures.PinchEvent, MobilePhoto_Pinch);
@@ -46,6 +69,8 @@ public partial class PhotoViewerView
     {
         private readonly HashSet<IPointer> _contacts = [];
         private bool _hadMultipleContacts;
+        public bool HadMultipleContacts => _hadMultipleContacts;
+        public Action? MultipleContactsPressed { get; init; }
 
         protected override void PointerPressed(PointerPressedEventArgs e)
         {
@@ -53,6 +78,7 @@ public partial class PhotoViewerView
             {
                 _contacts.Add(e.Pointer);
                 _hadMultipleContacts |= _contacts.Count > 1;
+                if (_hadMultipleContacts) MultipleContactsPressed?.Invoke();
             }
             base.PointerPressed(e);
         }
@@ -83,16 +109,68 @@ public partial class PhotoViewerView
         }
     }
 
+    private sealed class SwipeAwareScrollGestureRecognizer : ScrollGestureRecognizer
+    {
+        private readonly HashSet<IPointer> _contacts = [];
+        private bool _hadMultipleContacts;
+        public Action<PointerPressedEventArgs>? Starting { get; init; }
+        public Action<PointerEventArgs>? Moving { get; init; }
+        public Action? Canceled { get; init; }
+        public Action<PointerReleasedEventArgs>? Released { get; init; }
+
+        protected override void PointerPressed(PointerPressedEventArgs e)
+        {
+            // End any previous scroll without treating its interruption as a swipe.
+            Canceled?.Invoke();
+            if (e.Pointer.Type is PointerType.Touch or PointerType.Pen)
+            {
+                _contacts.Add(e.Pointer);
+                _hadMultipleContacts |= _contacts.Count > 1;
+            }
+            base.PointerPressed(e);
+            if (!_hadMultipleContacts && e.Pointer.Type is PointerType.Touch or PointerType.Pen)
+                Starting?.Invoke(e);
+        }
+
+        protected override void PointerMoved(PointerEventArgs e)
+        {
+            base.PointerMoved(e);
+            if (_contacts.Contains(e.Pointer)) Moving?.Invoke(e);
+        }
+
+        protected override void PointerCaptureLost(IPointer pointer)
+        {
+            // The base class raises ScrollGestureEnded for cancellation as well as release.
+            Canceled?.Invoke();
+            base.PointerCaptureLost(pointer);
+            RemoveContact(pointer);
+        }
+
+        protected override void PointerReleased(PointerReleasedEventArgs e)
+        {
+            if (_contacts.Contains(e.Pointer)) Moving?.Invoke(e);
+            base.PointerReleased(e);
+            Released?.Invoke(e);
+            RemoveContact(e.Pointer);
+        }
+
+        private void RemoveContact(IPointer pointer)
+        {
+            _contacts.Remove(pointer);
+            if (_contacts.Count == 0) _hadMultipleContacts = false;
+        }
+    }
+
     private void MobilePhoto_Pinch(object? sender, PinchEventArgs e)
     {
         if (PhotoViewerImageControl.Source is null) return;
         if (!_mobilePinching)
         {
             _mobilePinching = true;
+            CancelPhotoViewerSwipe();
             _mobilePinchStartZoom = _photoViewerZoom;
             _mobilePinchStartOrigin = _photoViewerImageOrigin;
             _mobilePinchAnchor = e.ScaleOrigin;
-            _mobileSwipeDelta = default;
         }
         var result = CalculateMobilePinch(_mobilePinchStartZoom, _mobilePinchStartOrigin, _mobilePinchAnchor,
             e.ScaleOrigin, e.Scale, Math.Min(8, GetMaximumPhotoViewerZoom()));
@@ -109,21 +187,13 @@ public partial class PhotoViewerView
         {
             if (_photoViewerZoom > MinimumPhotoViewerZoom)
                 SetPhotoViewerImageOrigin(_photoViewerImageOrigin - e.Delta);
-            else
-                _mobileSwipeDelta -= e.Delta;
         }
         e.Handled = true;
     }
 
     private void MobilePhoto_ScrollEnded(object? sender, ScrollGestureEndedEventArgs e)
     {
-        if (!_mobilePinching && DataContext is MainViewModel viewModel)
-        {
-            var direction = GetPhotoViewerSwipeDirection(_mobileSwipeDelta);
-            if (direction > 0) viewModel.ShowPreviousPhotoInCategoryCommand.Execute(null);
-            else if (direction < 0) viewModel.ShowNextPhotoInCategoryCommand.Execute(null);
-        }
-        _mobileSwipeDelta = default;
+        CompletePhotoViewerSwipe();
         e.Handled = true;
     }
 

@@ -35,6 +35,7 @@ public partial class AlbumPhotoViewModel : ObservableObject
         AlbumId = albumId;
         PhotoId = photoId;
         FileName = fileName;
+        ListDisplayName = GetListDisplayName(fileName);
         DownloadUrl = downloadUrl;
         ThumbnailDownloadUrl = thumbnailDownloadUrl;
         OriginalWidth = width;
@@ -46,6 +47,21 @@ public partial class AlbumPhotoViewModel : ObservableObject
     public string PhotoId { get; }
 
     public string FileName { get; }
+
+    public string ListDisplayName { get; }
+
+    private static string GetListDisplayName(string fileName)
+    {
+        static string? NumberSuffix(string name)
+        {
+            var start = name.Length;
+            while (start > 0 && name[start - 1] is >= '0' and <= '9') start--;
+            return start < name.Length ? name[start..] : null;
+        }
+
+        // Keep the filename intact everywhere else, including legacy names without a number.
+        return NumberSuffix(Path.GetFileNameWithoutExtension(fileName)) ?? NumberSuffix(fileName) ?? fileName;
+    }
 
     public string DownloadUrl { get; }
 

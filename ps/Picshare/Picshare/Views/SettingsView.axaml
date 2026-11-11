@@ -169,18 +169,24 @@
                                  Increment="1"
                                  Tag="2:10000"/>
                 </Grid>
-                <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto">
+                <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto,Auto">
                   <CheckBox Classes="settings-control" IsChecked="{Binding FixedHeader}" Margin="0,0,12,8">
                     <TextBlock x:Name="FixedHeaderSettingsLabel" Text="Fixed header" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" VerticalAlignment="Center"/>
                   </CheckBox>
                   <CheckBox Grid.Column="1" Classes="settings-control" IsChecked="{Binding FixedTabs}" Margin="0,0,0,8">
                     <TextBlock x:Name="FixedTabsSettingsLabel" Text="Fixed tabs" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" VerticalAlignment="Center"/>
                   </CheckBox>
-                  <CheckBox Grid.Row="1" Classes="settings-control" IsChecked="{Binding FixedActionPanel}" Margin="0,0,12,0">
+                  <CheckBox Grid.Row="1" Classes="settings-control" IsChecked="{Binding FixedActionPanel}" Margin="0,0,12,8">
                     <TextBlock x:Name="FixedActionPanelSettingsLabel" Text="Fixed action panel" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" VerticalAlignment="Center"/>
                   </CheckBox>
-                  <CheckBox Grid.Row="1" Grid.Column="1" Classes="settings-control" IsChecked="{Binding ShowPhotoViewerPreviousNextButtons}">
+                  <CheckBox Grid.Row="1" Grid.Column="1" Classes="settings-control" IsChecked="{Binding ShowPhotoViewerPreviousNextButtons}" Margin="0,0,0,8">
                     <TextBlock x:Name="NavigationButtonsSettingsLabel" Text="Navigation buttons" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" VerticalAlignment="Center"/>
+                  </CheckBox>
+                  <CheckBox Grid.Row="2" Classes="settings-control" IsChecked="{Binding CategoryButtons}" Margin="0,0,12,0">
+                    <TextBlock Text="Category buttons" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" VerticalAlignment="Center"/>
+                  </CheckBox>
+                  <CheckBox Grid.Row="2" Grid.Column="1" Classes="settings-control" IsChecked="{Binding RotationButtons}">
+                    <TextBlock Text="Rotation buttons" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" VerticalAlignment="Center"/>
                   </CheckBox>
                 </Grid>
               </StackPanel>
@@ -387,9 +393,14 @@
           <Border Height="1" Background="#D6D8D1"/>
 
           <StackPanel Spacing="8">
-            <TextBlock Classes="settings-title" Text="Diagnostics" FontSize="16" FontWeight="SemiBold"/>
+            <TextBlock Classes="settings-title" Text="Advanced" FontSize="16" FontWeight="SemiBold"/>
             <Border x:Name="DiagnosticsSectionBorder" BorderBrush="#D6D8D1" BorderThickness="1" CornerRadius="6" Padding="12">
               <StackPanel Spacing="8">
+                <CheckBox Classes="settings-control" IsChecked="{Binding PreloadImagesWhileScrolling}">
+                  <TextBlock Text="Preload images while scrolling" TextWrapping="Wrap"/>
+                </CheckBox>
+                <TextBlock Text="Experimental: leave unchecked to defer image loading until scrolling slows or stops."
+                           TextWrapping="Wrap" Foreground="#6C756F"/>
                 <Grid x:Name="DiagnosticsControls" ColumnDefinitions="142,Auto,*,Auto,Auto" ColumnSpacing="8"
                       SizeChanged="DiagnosticsControls_SizeChanged" ClipToBounds="True">
                   <Button x:Name="SendLogsButton" Classes="settings-control"

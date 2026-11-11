@@ -4,7 +4,7 @@ using Picshare.ViewModels;
 
 namespace Picshare.Tests;
 
-public sealed class AlbumImageListLoaderWarmupTests
+public sealed partial class AlbumImageListLoaderWarmupTests
 {
     [Fact]
     public async Task InvalidDetailedThumbnailWarmup_IsNotSelectedAgainInTheSameGeneration()

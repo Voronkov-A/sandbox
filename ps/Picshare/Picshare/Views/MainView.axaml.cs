@@ -92,11 +92,13 @@ public partial class MainView : UserControl
 
     protected override void OnDataContextChanged(EventArgs e)
     {
+        ResetAlbumPhotoScrollLoading();
         if (_viewModelPropertyChanged is not null)
         {
             _viewModelPropertyChanged.PropertyChanged -= ViewModel_PropertyChanged;
             if (_viewModelPropertyChanged is MainViewModel oldViewModel)
             {
+                oldViewModel.SetPhotoListLoadingPaused(false);
                 oldViewModel.ClearPhotoViewportLoads();
             }
         }
@@ -114,6 +116,7 @@ public partial class MainView : UserControl
 
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
+        ResetAlbumPhotoScrollLoading();
         if (_viewModelPropertyChanged is not null)
         {
             _viewModelPropertyChanged.PropertyChanged -= ViewModel_PropertyChanged;
@@ -142,6 +145,12 @@ public partial class MainView : UserControl
 
     private void ViewModel_PropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
+        if (e.PropertyName is nameof(MainViewModel.ActiveReviewTabId)
+            or nameof(MainViewModel.IsPhotoViewerVisible)
+            or nameof(MainViewModel.IsSettingsPanelVisible))
+            ResetAlbumPhotoScrollLoading();
+        else if (e.PropertyName == nameof(MainViewModel.PreloadImagesWhileScrolling))
+            ApplyAlbumPhotoScrollLoading();
         if (e.PropertyName is nameof(MainViewModel.ActiveReviewTabId)
             or nameof(MainViewModel.UncategorizedTabHeader)
             or nameof(MainViewModel.NiceTabHeader)
@@ -490,6 +499,7 @@ public partial class MainView : UserControl
 
     private void DetachAlbumPhotoScrollViewer(ScrollViewer scrollViewer)
     {
+        if (_albumScrollingSource == scrollViewer) ResetAlbumPhotoScrollLoading();
         if (!_albumPhotoScrollViewers.Remove(scrollViewer))
         {
             return;
@@ -513,6 +523,7 @@ public partial class MainView : UserControl
         }
 
         _albumPhotoScrollOffsets.TryAdd(scrollViewer, scrollViewer.Offset.Y - e.OffsetDelta.Y);
+        RecordAlbumPhotoScroll(scrollViewer, e.OffsetDelta);
         UpdateFixedSurfaceTransforms(scrollViewer);
         QueueVisibleAlbumPhotoPriorityUpdate();
     }
@@ -521,6 +532,7 @@ public partial class MainView : UserControl
     {
         if (sender is ScrollViewer scrollViewer)
         {
+            RecordAlbumPhotoScroll(scrollViewer, e.OffsetDelta);
             UpdateFixedSurfaceTransforms(scrollViewer);
         }
 
@@ -549,6 +561,7 @@ public partial class MainView : UserControl
             return;
         }
 
+        ResetAlbumPhotoScrollLoading();
         QueueVisibleAlbumPhotoPriorityUpdate();
     }
 

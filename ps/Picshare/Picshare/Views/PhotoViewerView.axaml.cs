@@ -49,6 +49,7 @@ public partial class PhotoViewerView : UserControl, ILazyActivated
     public PhotoViewerView()
     {
         InitializeComponent();
+        PhotoViewerImageHost.Background = Brushes.Transparent;
         PhotoViewerDuplicateStripScrollViewer.AddHandler(
             InputElement.PointerPressedEvent,
             PhotoViewerDuplicateStrip_PointerPressed,
@@ -93,6 +94,7 @@ public partial class PhotoViewerView : UserControl, ILazyActivated
 
     protected override void OnDataContextChanged(EventArgs e)
     {
+        CancelPhotoViewerSwipe();
         if (_viewModelPropertyChanged is not null)
         {
             _viewModelPropertyChanged.PropertyChanged -= ViewModel_PropertyChanged;
@@ -109,6 +111,7 @@ public partial class PhotoViewerView : UserControl, ILazyActivated
 
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
+        CancelPhotoViewerSwipe();
         if (_viewModelPropertyChanged is not null)
         {
             _viewModelPropertyChanged.PropertyChanged -= ViewModel_PropertyChanged;
@@ -120,6 +123,14 @@ public partial class PhotoViewerView : UserControl, ILazyActivated
 
     private void ViewModel_PropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
+        if (e.PropertyName == nameof(MainViewModel.IsPhotoPropertiesVisible))
+        {
+            CancelPhotoViewerSwipe();
+            if (DataContext is MainViewModel { IsPhotoPropertiesVisible: false })
+                _ = Dispatcher.UIThread.InvokeAsync(FocusPhotoViewerOverlay, DispatcherPriority.Loaded);
+        }
+        if (e.PropertyName == nameof(MainViewModel.IsPhotoViewerVisible))
+            CancelPhotoViewerSwipe();
         if (e.PropertyName is nameof(MainViewModel.PhotoViewerImage)
             or nameof(MainViewModel.PhotoViewerRotationDegrees)
             or nameof(MainViewModel.ZoomPower)
@@ -135,6 +146,8 @@ public partial class PhotoViewerView : UserControl, ILazyActivated
         else if (e.PropertyName is nameof(MainViewModel.IsCurrentPhotoScoreVisible)
             or nameof(MainViewModel.IsPhotoViewerActionsVisible)
             or nameof(MainViewModel.ShowPhotoViewerPreviousNextButtons)
+            or nameof(MainViewModel.CategoryButtons)
+            or nameof(MainViewModel.RotationButtons)
             or nameof(MainViewModel.ShouldShowCurrentPhotoUncategorizedAction)
             or nameof(MainViewModel.ShouldShowCurrentPhotoNiceAction)
             or nameof(MainViewModel.ShouldShowCurrentPhotoOkAction))
@@ -171,6 +184,14 @@ public partial class PhotoViewerView : UserControl, ILazyActivated
     {
         if (DataContext is not MainViewModel { IsPhotoViewerVisible: true } viewModel)
         {
+            return;
+        }
+
+        if (viewModel.IsPhotoPropertiesVisible)
+        {
+            if (e.Key is Key.Escape or Key.BrowserBack or Key.Back)
+                viewModel.ClosePhotoPropertiesCommand.Execute(null);
+            e.Handled = e.Key != Key.Tab;
             return;
         }
 
@@ -566,12 +587,18 @@ public partial class PhotoViewerView : UserControl, ILazyActivated
     private void PhotoViewer_PointerPressed(object? sender, PointerPressedEventArgs e)
     {
         if (UsesMobileGestures) return;
+        if (!e.GetCurrentPoint(PhotoViewerViewport).Properties.IsLeftButtonPressed ||
+            e.Source is not Visual source ||
+            (source != PhotoViewerImageHost && !PhotoViewerImageHost.IsVisualAncestorOf(source))) return;
         _photoViewerPointers[e.Pointer] = e.GetPosition(PhotoViewerViewport);
         _photoViewerPointerPressed = _photoViewerPointers.Count == 1;
         _photoViewerPointerStart = e.GetPosition(PhotoViewerViewport);
         _photoViewerPointerStartImageOrigin = _photoViewerImageOrigin;
         _photoViewerPointerMoved = false;
         e.Pointer.Capture(PhotoViewerViewport);
+
+        if (_photoViewerPointers.Count == 1) BeginPhotoViewerSwipe(_photoViewerPointerStart);
+        else CancelPhotoViewerSwipe();
 
         if (_photoViewerPointers.Count == 2)
         {
@@ -606,19 +633,24 @@ public partial class PhotoViewerView : UserControl, ILazyActivated
             SetPhotoViewerImageOrigin(_photoViewerPointerStartImageOrigin + delta);
             e.Handled = true;
         }
+        else if (_photoViewerPointers.Count == 1)
+        {
+            UpdatePhotoViewerSwipe(e.GetPosition(PhotoViewerViewport) - _photoViewerSwipeStart);
+            if (PhotoViewerSwipeWheel.IsVisible) e.Handled = true;
+        }
     }
 
     private void PhotoViewer_PointerReleased(object? sender, PointerReleasedEventArgs e)
     {
         if (UsesMobileGestures) return;
+        if (!_photoViewerPointers.ContainsKey(e.Pointer)) return;
         var endPosition = e.GetPosition(PhotoViewerViewport);
-        var delta = endPosition - _photoViewerPointerStart;
         var shouldToggleActions = _photoViewerPointerPressed &&
             !_photoViewerPointerMoved &&
             !_photoViewerPinchActive &&
             _photoViewerPointers.Count == 1 &&
             DataContext is MainViewModel;
-        var swipeDirection = GetPhotoViewerSwipeDirection(delta);
+        UpdatePhotoViewerSwipe(endPosition - _photoViewerSwipeStart);
 
         _photoViewerPointers.Remove(e.Pointer);
         e.Pointer.Capture(null);
@@ -637,19 +669,10 @@ public partial class PhotoViewerView : UserControl, ILazyActivated
 
         if (shouldToggleActions && DataContext is MainViewModel viewModel)
         {
+            CancelPhotoViewerSwipe();
             viewModel.TogglePhotoViewerActionsCommand.Execute(null);
         }
-        else if (swipeDirection is not 0 && DataContext is MainViewModel swipeViewModel)
-        {
-            if (swipeDirection > 0)
-            {
-                swipeViewModel.ShowPreviousPhotoInCategoryCommand.Execute(null);
-            }
-            else
-            {
-                swipeViewModel.ShowNextPhotoInCategoryCommand.Execute(null);
-            }
-        }
+        else CompletePhotoViewerSwipe();
     }
 
     private void PhotoViewer_PointerCaptureLost(object? sender, PointerCaptureLostEventArgs e)
@@ -657,6 +680,7 @@ public partial class PhotoViewerView : UserControl, ILazyActivated
         if (UsesMobileGestures) return;
         if (_photoViewerPointers.Remove(e.Pointer) && _photoViewerPointers.Count < 2)
         {
+            CancelPhotoViewerSwipe();
             _pinchStartDistance = 0;
             _photoViewerPinchActive = false;
         }
@@ -664,10 +688,10 @@ public partial class PhotoViewerView : UserControl, ILazyActivated
 
     private void ResetPhotoViewerZoom()
     {
+        CancelPhotoViewerSwipe();
         if (UsesMobileGestures)
         {
             _mobilePinching = false;
-            _mobileSwipeDelta = default;
             if (_mobileScrollRecognizer is not null) _mobileScrollRecognizer.IsScrollInertiaEnabled = false;
         }
         _photoViewerPointers.Clear();
@@ -854,23 +878,6 @@ public partial class PhotoViewerView : UserControl, ILazyActivated
         return transform?.Transform(viewportPoint) ?? viewportPoint;
     }
 
-    private int GetPhotoViewerSwipeDirection(Vector delta)
-    {
-        if (_photoViewerZoom > MinimumPhotoViewerZoom || _photoViewerPinchActive)
-        {
-            return 0;
-        }
-
-        var horizontal = Math.Abs(delta.X);
-        var vertical = Math.Abs(delta.Y);
-        if (horizontal < 80 || horizontal < vertical * 1.8)
-        {
-            return 0;
-        }
-
-        return delta.X > 0 ? 1 : -1;
-    }
-
     private void SetPhotoViewerZoom(double zoom, Point anchor)
     {
         var maximumZoom = GetMaximumPhotoViewerZoom();
@@ -880,6 +887,7 @@ public partial class PhotoViewerView : UserControl, ILazyActivated
         var relativeY = (anchor.Y - _photoViewerImageOrigin.Y) / oldHeight;
 
         _photoViewerZoom = Math.Clamp(zoom, MinimumPhotoViewerZoom, maximumZoom);
+        if (_photoViewerZoom > MinimumPhotoViewerZoom) CancelPhotoViewerSwipe();
         SetPhotoViewerSliderValue(_photoViewerZoom);
 
         var newWidth = Math.Max(1, _photoViewerBaseWidth * _photoViewerZoom);

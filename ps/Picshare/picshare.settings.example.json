@@ -7,6 +7,9 @@
     "fixedHeader": true,
     "fixedTabs": true,
     "fixedActionPanel": true,
-    "showPhotoViewerPreviousNextButtons": true
+    "showPhotoViewerPreviousNextButtons": true,
+    "categoryButtons": true,
+    "rotationButtons": true,
+    "preloadImagesWhileScrolling": false
   }
 }

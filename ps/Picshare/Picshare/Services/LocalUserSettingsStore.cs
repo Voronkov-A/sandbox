@@ -75,6 +75,12 @@ public sealed class LocalUserSettings
 
     public bool? ShowPhotoViewerPreviousNextButtons { get; set; }
 
+    public bool? CategoryButtons { get; set; }
+
+    public bool? RotationButtons { get; set; }
+
+    public bool? PreloadImagesWhileScrolling { get; set; }
+
     public int ZoomPower { get; set; } = DefaultZoomPower;
 
     public string PhotoViewerAspectRatioMode { get; set; } = DefaultPhotoViewerAspectRatioMode;

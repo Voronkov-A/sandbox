@@ -21,7 +21,7 @@ public sealed class GoogleDriveMediaHandler(Func<CancellationToken, Task<string>
         return response;
     }
 
-    private static bool TryGetMediaFileId(Uri? uri, out string fileId)
+    internal static bool TryGetMediaFileId(Uri? uri, out string fileId)
     {
         fileId = "";
         if (uri is null || uri.Scheme != Uri.UriSchemeHttps || !uri.IsDefaultPort || !string.IsNullOrEmpty(uri.UserInfo)) return false;

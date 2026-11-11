@@ -1,0 +1,37 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:Picshare.ViewModels"
+             x:Class="Picshare.Views.PhotoPropertiesDialogView"
+             x:DataType="vm:MainViewModel">
+  <UserControl.Styles>
+    <Style Selector="TextBlock">
+      <Setter Property="Foreground" Value="#27343B"/>
+    </Style>
+  </UserControl.Styles>
+  <Grid Background="#80000000" KeyDown="Dialog_KeyDown">
+    <Border Background="White" BorderBrush="#D6D8D1" BorderThickness="1"
+            CornerRadius="6" Padding="18" Margin="20" MaxWidth="460"
+            HorizontalAlignment="Stretch" VerticalAlignment="Center"
+            KeyboardNavigation.TabNavigation="Cycle">
+      <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+      <StackPanel Spacing="12">
+        <TextBlock Text="Properties" FontSize="18" FontWeight="SemiBold"/>
+        <TextBlock Text="{Binding PhotoProperties.FileName}" TextWrapping="Wrap"
+                   FontWeight="SemiBold"/>
+        <Grid ColumnDefinitions="96,*" RowDefinitions="Auto,Auto" RowSpacing="10" ColumnSpacing="12">
+          <TextBlock Text="File size"/>
+          <TextBlock Grid.Column="1" Text="{Binding PhotoProperties.FileSizeText}" TextWrapping="Wrap"/>
+          <TextBlock Grid.Row="1" Text="Dimensions"/>
+          <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding PhotoProperties.DimensionsText}" TextWrapping="Wrap"/>
+        </Grid>
+        <TextBlock Text="{Binding PhotoProperties.StatusText}" IsVisible="{Binding PhotoProperties.IsStatusVisible}"
+                   TextWrapping="Wrap" Foreground="#6C756F" AutomationProperties.LiveSetting="Polite"/>
+        <Button x:Name="OkButton" Content="OK" Command="{Binding ClosePhotoPropertiesCommand}"
+                HorizontalAlignment="Right" MinWidth="80" Padding="12,8"
+                Background="White" Foreground="#27343B" BorderBrush="#D6D8D1"
+                BorderThickness="1" CornerRadius="6"/>
+      </StackPanel>
+      </ScrollViewer>
+    </Border>
+  </Grid>
+</UserControl>

@@ -143,17 +143,26 @@ public sealed class PicshareSettingsProvider
         var fixedActionPanel = next?.FixedActionPanel ?? current?.FixedActionPanel;
         var showPhotoViewerPreviousNextButtons =
             next?.ShowPhotoViewerPreviousNextButtons ?? current?.ShowPhotoViewerPreviousNextButtons;
+        var categoryButtons = next?.CategoryButtons ?? current?.CategoryButtons;
+        var rotationButtons = next?.RotationButtons ?? current?.RotationButtons;
+        var preloadImagesWhileScrolling = next?.PreloadImagesWhileScrolling ?? current?.PreloadImagesWhileScrolling;
         return fixedHeader is null &&
             fixedTabs is null &&
             fixedActionPanel is null &&
-            showPhotoViewerPreviousNextButtons is null
+            showPhotoViewerPreviousNextButtons is null &&
+            categoryButtons is null &&
+            rotationButtons is null &&
+            preloadImagesWhileScrolling is null
             ? null
             : new DefaultUserSettings
             {
                 FixedHeader = fixedHeader,
                 FixedTabs = fixedTabs,
                 FixedActionPanel = fixedActionPanel,
-                ShowPhotoViewerPreviousNextButtons = showPhotoViewerPreviousNextButtons
+                ShowPhotoViewerPreviousNextButtons = showPhotoViewerPreviousNextButtons,
+                CategoryButtons = categoryButtons,
+                RotationButtons = rotationButtons,
+                PreloadImagesWhileScrolling = preloadImagesWhileScrolling
             };
     }
 
@@ -200,4 +209,10 @@ public sealed record DefaultUserSettings
     public bool? FixedActionPanel { get; init; }
 
     public bool? ShowPhotoViewerPreviousNextButtons { get; init; }
+
+    public bool? CategoryButtons { get; init; }
+
+    public bool? RotationButtons { get; init; }
+
+    public bool? PreloadImagesWhileScrolling { get; init; }
 }

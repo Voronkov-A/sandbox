@@ -1,6 +1,8 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="clr-namespace:Picshare.ViewModels"
+             xmlns:views="clr-namespace:Picshare.Views"
+             xmlns:converters="clr-namespace:Avalonia.Data.Converters;assembly=Avalonia.Base"
              x:Class="Picshare.Views.PhotoViewerView"
              x:DataType="vm:MainViewModel">
   <UserControl.Styles>
@@ -336,6 +338,26 @@
                   </Button>
 
                   <Button Classes="footer-action photo-viewer-footer-action"
+                          Width="42"
+                          Height="42"
+                          Padding="0"
+                          HorizontalContentAlignment="Center"
+                          VerticalContentAlignment="Center"
+                          Command="{Binding RotateCurrentPhotoLeftCommand}"
+                          IsVisible="{Binding RotationButtons}"
+                          IsEnabled="{Binding CanDownloadCurrentPhoto}"
+                          AutomationProperties.Name="Rotate left"
+                          ToolTip.Tip="Rotate left">
+                    <Canvas Width="20" Height="20">
+                      <Path Data="M4,8 A7,7 0 1 1 4,14 M4,3 L4,8 L9,8"
+                            Stroke="#27343B"
+                            StrokeThickness="1.7"
+                            StrokeLineCap="Round"
+                            StrokeJoin="Round"/>
+                    </Canvas>
+                  </Button>
+
+                  <Button Classes="footer-action photo-viewer-footer-action"
                           MaxWidth="92"
                           Height="42"
                           Padding="0"
@@ -397,9 +419,14 @@
                           HorizontalContentAlignment="Center"
                           VerticalContentAlignment="Center"
                           Command="{Binding MarkCurrentPhotoUncategorizedCommand}"
-                          IsVisible="{Binding ShouldShowCurrentPhotoUncategorizedAction}"
                           IsEnabled="{Binding CanMarkCurrentPhotoUncategorized}"
                           ToolTip.Tip="Todo">
+                    <Button.IsVisible>
+                      <MultiBinding Converter="{x:Static converters:BoolConverters.And}">
+                        <Binding Path="CategoryButtons"/>
+                        <Binding Path="ShouldShowCurrentPhotoUncategorizedAction"/>
+                      </MultiBinding>
+                    </Button.IsVisible>
                     <Grid ColumnDefinitions="Auto,Auto" ColumnSpacing="6" HorizontalAlignment="Center">
                       <Canvas Width="20" Height="20">
                         <Path Data="M5,7 L9,3 L15,3 L18,8 L15,16 L8,18 L3,14 Z"
@@ -434,9 +461,14 @@
                           HorizontalContentAlignment="Center"
                           VerticalContentAlignment="Center"
                           Command="{Binding MarkCurrentPhotoNiceCommand}"
-                          IsVisible="{Binding ShouldShowCurrentPhotoNiceAction}"
                           IsEnabled="{Binding CanMarkCurrentPhotoNice}"
                           ToolTip.Tip="Nice">
+                    <Button.IsVisible>
+                      <MultiBinding Converter="{x:Static converters:BoolConverters.And}">
+                        <Binding Path="CategoryButtons"/>
+                        <Binding Path="ShouldShowCurrentPhotoNiceAction"/>
+                      </MultiBinding>
+                    </Button.IsVisible>
                     <Grid ColumnDefinitions="Auto,Auto" ColumnSpacing="6" HorizontalAlignment="Center">
                       <Canvas Width="20" Height="20">
                         <Path Data="M5,7 L9,3 L15,3 L18,8 L15,16 L8,18 L3,14 Z"
@@ -466,9 +498,14 @@
                           HorizontalContentAlignment="Center"
                           VerticalContentAlignment="Center"
                           Command="{Binding MarkCurrentPhotoOkCommand}"
-                          IsVisible="{Binding ShouldShowCurrentPhotoOkAction}"
                           IsEnabled="{Binding CanMarkCurrentPhotoOk}"
                           ToolTip.Tip="Okay">
+                    <Button.IsVisible>
+                      <MultiBinding Converter="{x:Static converters:BoolConverters.And}">
+                        <Binding Path="CategoryButtons"/>
+                        <Binding Path="ShouldShowCurrentPhotoOkAction"/>
+                      </MultiBinding>
+                    </Button.IsVisible>
                     <Grid ColumnDefinitions="Auto,Auto" ColumnSpacing="6" HorizontalAlignment="Center">
                       <Canvas Width="20" Height="20">
                         <Path Data="M5,7 L9,3 L15,3 L18,8 L15,16 L8,18 L3,14 Z"
@@ -534,10 +571,28 @@
                             </Border>
                           </MenuItem.Header>
                         </MenuItem>
-                        <MenuItem Header="Trash"
-                                  Command="{Binding MarkCurrentPhotoTrashCommand}"
-                                  IsVisible="{Binding CanShowCurrentPhotoTrashAction}"
-                                  IsEnabled="{Binding CanMarkCurrentPhotoTrash}"/>
+                        <MenuItem Header="Move to...">
+                          <MenuItem Header="Todo"
+                                    Command="{Binding MarkCurrentPhotoUncategorizedCommand}"
+                                    IsEnabled="{Binding CanMarkCurrentPhotoUncategorized}"/>
+                          <MenuItem Header="Nice"
+                                    Command="{Binding MarkCurrentPhotoNiceCommand}"
+                                    IsEnabled="{Binding CanMarkCurrentPhotoNice}"/>
+                          <MenuItem Header="Good"
+                                    Command="{Binding MarkCurrentPhotoOkCommand}"
+                                    IsEnabled="{Binding CanMarkCurrentPhotoOk}"/>
+                          <MenuItem Header="Trash"
+                                    Command="{Binding MarkCurrentPhotoTrashCommand}"
+                                    IsEnabled="{Binding CanMarkCurrentPhotoTrash}"/>
+                        </MenuItem>
+                        <MenuItem Header="Go to...">
+                          <MenuItem Header="Left"
+                                    Command="{Binding ShowPreviousPhotoInCategoryCommand}"
+                                    IsEnabled="{Binding CanNavigatePhotoViewerCategory}"/>
+                          <MenuItem Header="Right"
+                                    Command="{Binding ShowNextPhotoInCategoryCommand}"
+                                    IsEnabled="{Binding CanNavigatePhotoViewerCategory}"/>
+                        </MenuItem>
                         <MenuItem Header="Same as previous"
                                   Command="{Binding MarkCurrentPhotoSameAsPreviousCommand}"
                                   IsVisible="{Binding CanShowCurrentPhotoSameAsPreviousMenuItem}"
@@ -619,11 +674,34 @@
                             </MenuItem.Header>
                           </MenuItem>
                         </MenuItem>
+                        <MenuItem Header="Properties..."
+                                  Command="{Binding ShowCurrentPhotoPropertiesCommand}"
+                                  IsEnabled="{Binding CanDownloadCurrentPhoto}"/>
                         <MenuItem Header="Download..."
                                   Click="DownloadCurrentPhoto_Click"
                                   IsEnabled="{Binding CanDownloadCurrentPhoto}"/>
                       </MenuFlyout>
                     </Button.Flyout>
+                  </Button>
+
+                  <Button Classes="footer-action photo-viewer-footer-action"
+                          Width="42"
+                          Height="42"
+                          Padding="0"
+                          HorizontalContentAlignment="Center"
+                          VerticalContentAlignment="Center"
+                          Command="{Binding RotateCurrentPhotoRightCommand}"
+                          IsVisible="{Binding RotationButtons}"
+                          IsEnabled="{Binding CanDownloadCurrentPhoto}"
+                          AutomationProperties.Name="Rotate right"
+                          ToolTip.Tip="Rotate right">
+                    <Canvas Width="20" Height="20">
+                      <Path Data="M16,8 A7,7 0 1 0 16,14 M16,3 L16,8 L11,8"
+                            Stroke="#27343B"
+                            StrokeThickness="1.7"
+                            StrokeLineCap="Round"
+                            StrokeJoin="Round"/>
+                    </Canvas>
                   </Button>
 
                   <Button Classes="footer-action photo-viewer-footer-action"
@@ -643,8 +721,22 @@
                 </StackPanel>
               </Grid>
             </Border>
+            <Canvas IsHitTestVisible="False">
+              <views:PhotoViewerSwipeControl x:Name="PhotoViewerSwipeWheel"
+                                            IsVisible="False"
+                                            LeftCommand="{Binding ShowNextPhotoInCategoryCommand}"
+                                            RightCommand="{Binding ShowPreviousPhotoInCategoryCommand}"
+                                            TopCommand="{Binding MarkCurrentPhotoNiceCommand}"
+                                            BottomCommand="{Binding MarkCurrentPhotoOkCommand}"
+                                            CanGoLeft="{Binding CanNavigatePhotoViewerCategory}"
+                                            CanGoRight="{Binding CanNavigatePhotoViewerCategory}"
+                                            CanMoveTop="{Binding CanMarkCurrentPhotoNice}"
+                                            CanMoveBottom="{Binding CanMarkCurrentPhotoOk}"/>
+            </Canvas>
           </Grid>
         </Border>
       </Grid>
+      <views:LazyControlHost IsActive="{Binding IsPhotoPropertiesVisible}"
+                             ControlType="{x:Type views:PhotoPropertiesDialogView}"/>
     </Grid>
 </UserControl>
