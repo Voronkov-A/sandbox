@@ -62,6 +62,8 @@ public sealed class PersistentAlbumCreationService
             throw new InvalidOperationException("An album can contain at most 99,999 photos.");
         }
 
+        // Persist numbering once so an interrupted upload resumes in exactly the same order.
+        photos = await PhotoUploadOrdering.SortAsync(photos, cancellationToken);
         var pending = new PendingAlbumCreation
         {
             AlbumId = Guid.NewGuid().ToString("N"),

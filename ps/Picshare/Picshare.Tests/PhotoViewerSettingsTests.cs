@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Avalonia.Controls;
+using Avalonia.Automation;
 using Picshare.Services;
 using Picshare.ViewModels;
 using Picshare.Views;
@@ -145,6 +146,83 @@ public sealed partial class PhotoViewerSwipeTests
         typeof(MainViewModel).GetField("_isLoadingLocalUserSettings", BindingFlags.Instance | BindingFlags.NonPublic)!
             .SetValue(model, true);
         return model;
+    }
+
+    [Theory]
+    [InlineData("previous")]
+    [InlineData("next")]
+    [InlineData("nice")]
+    [InlineData("okay")]
+    [InlineData("rotate-left")]
+    [InlineData("rotate-right")]
+    public void SwipeConfiguration_EveryPositionBindsTheAssignedCommandIconAndAvailability(string action)
+    {
+        var model = CreateModel();
+        var viewer = new PhotoViewerView { DataContext = model };
+        var wheel = viewer.FindControl<PhotoViewerSwipeControl>("PhotoViewerSwipeWheel")!;
+        var option = PhotoViewerActionOption.All.Single(option => option.Id == action);
+        model.SelectedSwipeLeftAction = option;
+        model.SelectedSwipeRightAction = option;
+        model.SelectedSwipeTopAction = option;
+        model.SelectedSwipeBottomAction = option;
+        System.Windows.Input.ICommand expected = action switch
+        {
+            "previous" => model.ShowPreviousPhotoInCategoryCommand,
+            "next" => model.ShowNextPhotoInCategoryCommand,
+            "nice" => model.MarkCurrentPhotoNiceCommand,
+            "okay" => model.MarkCurrentPhotoOkCommand,
+            "rotate-left" => model.RotateCurrentPhotoLeftCommand,
+            _ => model.RotateCurrentPhotoRightCommand
+        };
+        Assert.Same(expected, wheel.LeftCommand);
+        Assert.Same(expected, wheel.RightCommand);
+        Assert.Same(expected, wheel.TopCommand);
+        Assert.Same(expected, wheel.BottomCommand);
+        Assert.False(wheel.CanGoLeft);
+        Assert.False(wheel.CanGoRight);
+        Assert.False(wheel.CanMoveTop);
+        Assert.False(wheel.CanMoveBottom);
+        foreach (var name in new[] { "LeftButton", "RightButton", "TopButton", "BottomButton" })
+            Assert.Equal(option.Name, AutomationProperties.GetName(wheel.FindControl<Button>(name)!));
+
+        model.CanNavigatePhotoViewerCategory = true;
+        model.CanMarkCurrentPhotoNice = true;
+        model.CanMarkCurrentPhotoOk = true;
+        model.CanDownloadCurrentPhoto = true;
+        Assert.True(wheel.CanGoLeft);
+        Assert.True(wheel.CanGoRight);
+        Assert.True(wheel.CanMoveTop);
+        Assert.True(wheel.CanMoveBottom);
+        model.CanNavigatePhotoViewerCategory = false;
+        model.CanMarkCurrentPhotoNice = false;
+        model.CanMarkCurrentPhotoOk = false;
+        model.CanDownloadCurrentPhoto = false;
+        Assert.False(wheel.CanGoLeft);
+        Assert.False(wheel.CanMoveBottom);
+    }
+
+    [Fact]
+    public void SwipeConfiguration_LocalChoicesRoundTripAndUnknownActionsUsePositionDefaults()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "picshare-swipe-settings", Guid.NewGuid().ToString("N"));
+        try
+        {
+            var store = new LocalUserSettingsStore(root);
+            Assert.Null(store.Load().SwipeLeftAction);
+            store.Save(new LocalUserSettings
+            {
+                SwipeLeftAction = "rotate-right", SwipeRightAction = "nice",
+                SwipeTopAction = "previous", SwipeBottomAction = "next"
+            });
+            var restored = store.Load();
+            Assert.Equal("rotate-right", restored.SwipeLeftAction);
+            Assert.Equal("nice", restored.SwipeRightAction);
+            Assert.Equal("previous", restored.SwipeTopAction);
+            Assert.Equal("next", restored.SwipeBottomAction);
+            Assert.Equal("next", PhotoViewerActionOption.Find("unknown", "next").Id);
+            Assert.Equal("okay", PhotoViewerActionOption.Find(null, "okay").Id);
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
     }
 
     private static PicshareSettings Merge(PicshareSettings current, PicshareSettings next)

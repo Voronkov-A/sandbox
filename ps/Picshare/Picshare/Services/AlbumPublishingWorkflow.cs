@@ -11,6 +11,7 @@ public static class AlbumPublishingWorkflow
         Func<PreparedAlbumPhoto, CancellationToken, Task<StoredAlbumPhoto>> storePhotoAsync,
         CancellationToken cancellationToken)
     {
+        photos = await PhotoUploadOrdering.SortAsync(photos, cancellationToken);
         var photoReferences = new PhotoReference[photos.Count];
         await Parallel.ForEachAsync(
             photos.Select((photo, index) => (Photo: photo, Index: index)),

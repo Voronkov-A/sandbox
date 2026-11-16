@@ -8,7 +8,7 @@ public sealed class ImageCacheServiceWarmupTests
 {
     static ImageCacheServiceWarmupTests()
     {
-        SkiaPlatform.Initialize();
+        TestRenderingPlatform.EnsureInitialized();
     }
 
     private static readonly byte[] PngBytes = Convert.FromBase64String(

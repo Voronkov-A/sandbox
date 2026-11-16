@@ -15,7 +15,7 @@ namespace Picshare.Tests;
 
 public sealed partial class PhotoViewerSwipeTests
 {
-    static PhotoViewerSwipeTests() => SkiaPlatform.Initialize();
+    static PhotoViewerSwipeTests() => TestRenderingPlatform.EnsureInitialized();
 
     [Fact]
     public void Buttons_AreCenteredAroundTheCircleWithTheApplicationTheme()

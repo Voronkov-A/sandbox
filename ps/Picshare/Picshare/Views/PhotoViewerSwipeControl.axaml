@@ -36,7 +36,7 @@
               IsEnabled="{Binding CanGoLeft, ElementName=Wheel}"
               AutomationProperties.Name="Go right">
         <Canvas Width="20" Height="20">
-          <Path Data="M8,4 L14,10 L8,16"
+          <Path x:Name="LeftIcon" Data="M8,4 L14,10 L8,16"
                 Stroke="{Binding $parent[Button].Foreground}" StrokeThickness="1.7"
                 StrokeLineCap="Round" StrokeJoin="Round"/>
         </Canvas>
@@ -46,7 +46,7 @@
               IsEnabled="{Binding CanGoRight, ElementName=Wheel}"
               AutomationProperties.Name="Go left">
         <Canvas Width="20" Height="20">
-          <Path Data="M12,4 L6,10 L12,16"
+          <Path x:Name="RightIcon" Data="M12,4 L6,10 L12,16"
                 Stroke="{Binding $parent[Button].Foreground}" StrokeThickness="1.7"
                 StrokeLineCap="Round" StrokeJoin="Round"/>
         </Canvas>
@@ -56,7 +56,7 @@
               IsEnabled="{Binding CanMoveTop, ElementName=Wheel}"
               AutomationProperties.Name="Move to Nice">
         <Canvas Width="20" Height="20">
-          <Path Data="M5,7 L9,3 L15,3 L18,8 L15,16 L8,18 L3,14 Z M8,8 L8,9 M14,8 L14,9 M8,13 Q11,16 15,13"
+          <Path x:Name="TopIcon" Data="M5,7 L9,3 L15,3 L18,8 L15,16 L8,18 L3,14 Z M8,8 L8,9 M14,8 L14,9 M8,13 Q11,16 15,13"
                 Stroke="{Binding $parent[Button].Foreground}" StrokeThickness="1.5"
                 StrokeLineCap="Round" Fill="Transparent"/>
         </Canvas>
@@ -66,7 +66,7 @@
               IsEnabled="{Binding CanMoveBottom, ElementName=Wheel}"
               AutomationProperties.Name="Move to Good">
         <Canvas Width="20" Height="20">
-          <Path Data="M5,7 L9,3 L15,3 L18,8 L15,16 L8,18 L3,14 Z M8,8 L8,9 M14,8 L14,9 M8,14 L15,14"
+          <Path x:Name="BottomIcon" Data="M5,7 L9,3 L15,3 L18,8 L15,16 L8,18 L3,14 Z M8,8 L8,9 M14,8 L14,9 M8,14 L15,14"
                 Stroke="{Binding $parent[Button].Foreground}" StrokeThickness="1.5"
                 StrokeLineCap="Round" Fill="Transparent"/>
         </Canvas>

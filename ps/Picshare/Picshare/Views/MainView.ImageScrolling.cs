@@ -27,6 +27,7 @@ public partial class MainView
         _albumScrollingSource = viewer;
         _albumScrollLoading.RecordScroll(delta.Length, _albumScrollClock.Elapsed);
         ApplyAlbumPhotoScrollLoading();
+        StartScrollDiagnostics();
         if (_albumScrollIdleTimer is null)
         {
             _albumScrollIdleTimer = new DispatcherTimer { Interval = AlbumScrollLoadingPolicy.IdleDelay };
@@ -37,6 +38,7 @@ public partial class MainView
                 _albumScrollIdleTimer.Stop();
                 _albumScrollingSource = null;
                 ApplyAlbumPhotoScrollLoading();
+                StopScrollDiagnostics();
             };
         }
         _albumScrollIdleTimer.Stop();
@@ -56,6 +58,7 @@ public partial class MainView
 
     private void ResetAlbumPhotoScrollLoading()
     {
+        StopScrollDiagnostics();
         _albumScrollIdleTimer?.Stop();
         _albumScrollLoading.Reset();
         _albumScrollingSource = null;

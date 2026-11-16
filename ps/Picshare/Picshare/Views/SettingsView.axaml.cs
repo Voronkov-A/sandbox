@@ -385,6 +385,10 @@ public partial class SettingsView : UserControl, ILazyActivated
         ApplySettingsRowWidths(AnonymousNameSettingsRow, labelWidth, inputWidth);
         ApplySettingsRowWidths(ColumnsSettingsRow, labelWidth, inputWidth);
         ApplySettingsRowWidths(ZoomPowerSettingsRow, labelWidth, inputWidth);
+        ApplySettingsRowWidths(SwipeLeftSettingsRow, labelWidth, inputWidth);
+        ApplySettingsRowWidths(SwipeRightSettingsRow, labelWidth, inputWidth);
+        ApplySettingsRowWidths(SwipeTopSettingsRow, labelWidth, inputWidth);
+        ApplySettingsRowWidths(SwipeBottomSettingsRow, labelWidth, inputWidth);
         ApplySettingsRowWidths(ParallelismSettingsRow, labelWidth, inputWidth);
         ApplySettingsRowWidths(CacheLimitSettingsGrid, labelWidth, inputWidth);
         ApplySettingsRowWidths(CachedImagesSettingsRow, labelWidth, inputWidth);

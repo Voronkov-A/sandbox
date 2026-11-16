@@ -13,7 +13,7 @@
 
   <UserControl.DataTemplates>
     <DataTemplate DataType="{x:Type vm:AlbumPhotoRowViewModel}" x:DataType="vm:AlbumPhotoRowViewModel">
-      <ItemsControl ItemsSource="{Binding Photos}">
+      <views:MeasuredAlbumPhotoRow ItemsSource="{Binding Photos}">
         <ItemsControl.ItemsPanel>
           <ItemsPanelTemplate>
             <StackPanel Orientation="Horizontal"/>
@@ -21,7 +21,7 @@
         </ItemsControl.ItemsPanel>
         <ItemsControl.ItemTemplate>
           <DataTemplate x:DataType="vm:AlbumPhotoViewModel">
-            <Border x:Name="AlbumPhotoCard"
+            <views:MeasuredAlbumPhotoCard x:Name="AlbumPhotoCard"
                     Width="{Binding CardWidth}"
                     Height="{Binding CardHeight}"
                     Margin="0,0,12,12"
@@ -165,10 +165,10 @@
                   </Grid>
                 </Border>
               </Grid>
-            </Border>
+            </views:MeasuredAlbumPhotoCard>
           </DataTemplate>
         </ItemsControl.ItemTemplate>
-      </ItemsControl>
+      </views:MeasuredAlbumPhotoRow>
     </DataTemplate>
 
     <DataTemplate DataType="{x:Type vm:AlbumPhotoGroupHeaderViewModel}" x:DataType="vm:AlbumPhotoGroupHeaderViewModel">

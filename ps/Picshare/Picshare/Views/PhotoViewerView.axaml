@@ -724,14 +724,18 @@
             <Canvas IsHitTestVisible="False">
               <views:PhotoViewerSwipeControl x:Name="PhotoViewerSwipeWheel"
                                             IsVisible="False"
-                                            LeftCommand="{Binding ShowNextPhotoInCategoryCommand}"
-                                            RightCommand="{Binding ShowPreviousPhotoInCategoryCommand}"
-                                            TopCommand="{Binding MarkCurrentPhotoNiceCommand}"
-                                            BottomCommand="{Binding MarkCurrentPhotoOkCommand}"
-                                            CanGoLeft="{Binding CanNavigatePhotoViewerCategory}"
-                                            CanGoRight="{Binding CanNavigatePhotoViewerCategory}"
-                                            CanMoveTop="{Binding CanMarkCurrentPhotoNice}"
-                                            CanMoveBottom="{Binding CanMarkCurrentPhotoOk}"/>
+                                            LeftAction="{Binding SelectedSwipeLeftAction.Id}"
+                                            RightAction="{Binding SelectedSwipeRightAction.Id}"
+                                            TopAction="{Binding SelectedSwipeTopAction.Id}"
+                                            BottomAction="{Binding SelectedSwipeBottomAction.Id}"
+                                            LeftCommand="{Binding SwipeLeftCommand}"
+                                            RightCommand="{Binding SwipeRightCommand}"
+                                            TopCommand="{Binding SwipeTopCommand}"
+                                            BottomCommand="{Binding SwipeBottomCommand}"
+                                            CanGoLeft="{Binding CanSwipeLeft}"
+                                            CanGoRight="{Binding CanSwipeRight}"
+                                            CanMoveTop="{Binding CanSwipeTop}"
+                                            CanMoveBottom="{Binding CanSwipeBottom}"/>
             </Canvas>
           </Grid>
         </Border>

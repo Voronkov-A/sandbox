@@ -1,6 +1,9 @@
 using System.Windows.Input;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Automation;
+using Avalonia.Media;
+using Picshare.ViewModels;
 
 namespace Picshare.Views;
 
@@ -8,6 +11,29 @@ public enum PhotoViewerSwipeDirection { None, Left, Top, Right, Bottom }
 
 public partial class PhotoViewerSwipeControl : UserControl
 {
+    public static readonly StyledProperty<string> LeftActionProperty =
+        AvaloniaProperty.Register<PhotoViewerSwipeControl, string>(nameof(LeftAction), "next");
+    public static readonly StyledProperty<string> RightActionProperty =
+        AvaloniaProperty.Register<PhotoViewerSwipeControl, string>(nameof(RightAction), "previous");
+    public static readonly StyledProperty<string> TopActionProperty =
+        AvaloniaProperty.Register<PhotoViewerSwipeControl, string>(nameof(TopAction), "nice");
+    public static readonly StyledProperty<string> BottomActionProperty =
+        AvaloniaProperty.Register<PhotoViewerSwipeControl, string>(nameof(BottomAction), "okay");
+
+    public string LeftAction { get => GetValue(LeftActionProperty); set => SetValue(LeftActionProperty, value); }
+    public string RightAction { get => GetValue(RightActionProperty); set => SetValue(RightActionProperty, value); }
+    public string TopAction { get => GetValue(TopActionProperty); set => SetValue(TopActionProperty, value); }
+    public string BottomAction { get => GetValue(BottomActionProperty); set => SetValue(BottomActionProperty, value); }
+
+    private static readonly IReadOnlyDictionary<string, Geometry> ActionIcons = new Dictionary<string, Geometry>
+    {
+        ["previous"] = Geometry.Parse("M12,4 L6,10 L12,16"),
+        ["next"] = Geometry.Parse("M8,4 L14,10 L8,16"),
+        ["nice"] = Geometry.Parse("M5,7 L9,3 L15,3 L18,8 L15,16 L8,18 L3,14 Z M8,8 L8,9 M14,8 L14,9 M8,13 Q11,16 15,13"),
+        ["okay"] = Geometry.Parse("M5,7 L9,3 L15,3 L18,8 L15,16 L8,18 L3,14 Z M8,8 L8,9 M14,8 L14,9 M8,14 L15,14"),
+        ["rotate-left"] = Geometry.Parse("M7,4 L3,8 L7,12 M3,8 L11,8 A6,6 0 1 1 6,17"),
+        ["rotate-right"] = Geometry.Parse("M13,4 L17,8 L13,12 M17,8 L9,8 A6,6 0 1 0 14,17")
+    };
     public static readonly StyledProperty<ICommand?> LeftCommandProperty =
         AvaloniaProperty.Register<PhotoViewerSwipeControl, ICommand?>(nameof(LeftCommand));
     public static readonly StyledProperty<ICommand?> RightCommandProperty =
@@ -41,11 +67,34 @@ public partial class PhotoViewerSwipeControl : UserControl
         set => SetValue(SelectedDirectionProperty, value);
     }
 
-    public PhotoViewerSwipeControl() => InitializeComponent();
+    public PhotoViewerSwipeControl()
+    {
+        InitializeComponent();
+        UpdateActionIcons();
+    }
+
+    private void UpdateActionIcons()
+    {
+        if (LeftButton is null || RightButton is null || TopButton is null || BottomButton is null) return;
+        Update(LeftButton, LeftIcon, LeftAction, "next");
+        Update(RightButton, RightIcon, RightAction, "previous");
+        Update(TopButton, TopIcon, TopAction, "nice");
+        Update(BottomButton, BottomIcon, BottomAction, "okay");
+        static void Update(Button button, Avalonia.Controls.Shapes.Path icon, string action, string fallback)
+        {
+            var option = PhotoViewerActionOption.Find(action, fallback);
+            icon.Data = ActionIcons[option.Id];
+            AutomationProperties.SetName(button, option.Name);
+            ToolTip.SetTip(button, option.Name);
+        }
+    }
 
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
     {
         base.OnPropertyChanged(change);
+        if (change.Property == LeftActionProperty || change.Property == RightActionProperty ||
+            change.Property == TopActionProperty || change.Property == BottomActionProperty)
+            UpdateActionIcons();
         if (change.Property == SelectedDirectionProperty)
         {
             LeftButton.Classes.Set("selected", SelectedDirection == PhotoViewerSwipeDirection.Left);

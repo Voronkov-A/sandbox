@@ -193,6 +193,30 @@
             </Border>
           </StackPanel>
 
+          <StackPanel Spacing="8">
+            <Border BorderBrush="#D6D8D1" BorderThickness="1" CornerRadius="6" Padding="12">
+              <StackPanel Spacing="8">
+                <TextBlock Classes="settings-title" Text="Photo swipe actions" FontWeight="SemiBold"/>
+                <Grid x:Name="SwipeLeftSettingsRow" ColumnDefinitions="150,*" MinHeight="42">
+                  <TextBlock Classes="settings-row-label" Text="Left"/>
+                  <ComboBox Grid.Column="1" Classes="settings-control" ItemsSource="{Binding SwipeActionOptions}" SelectedItem="{Binding SelectedSwipeLeftAction, Mode=TwoWay}" HorizontalAlignment="Stretch"/>
+                </Grid>
+                <Grid x:Name="SwipeRightSettingsRow" ColumnDefinitions="150,*" MinHeight="42">
+                  <TextBlock Classes="settings-row-label" Text="Right"/>
+                  <ComboBox Grid.Column="1" Classes="settings-control" ItemsSource="{Binding SwipeActionOptions}" SelectedItem="{Binding SelectedSwipeRightAction, Mode=TwoWay}" HorizontalAlignment="Stretch"/>
+                </Grid>
+                <Grid x:Name="SwipeTopSettingsRow" ColumnDefinitions="150,*" MinHeight="42">
+                  <TextBlock Classes="settings-row-label" Text="Top"/>
+                  <ComboBox Grid.Column="1" Classes="settings-control" ItemsSource="{Binding SwipeActionOptions}" SelectedItem="{Binding SelectedSwipeTopAction, Mode=TwoWay}" HorizontalAlignment="Stretch"/>
+                </Grid>
+                <Grid x:Name="SwipeBottomSettingsRow" ColumnDefinitions="150,*" MinHeight="42">
+                  <TextBlock Classes="settings-row-label" Text="Bottom"/>
+                  <ComboBox Grid.Column="1" Classes="settings-control" ItemsSource="{Binding SwipeActionOptions}" SelectedItem="{Binding SelectedSwipeBottomAction, Mode=TwoWay}" HorizontalAlignment="Stretch"/>
+                </Grid>
+              </StackPanel>
+            </Border>
+          </StackPanel>
+
           <Border Height="1" Background="#D6D8D1"/>
 
           <StackPanel Spacing="8">

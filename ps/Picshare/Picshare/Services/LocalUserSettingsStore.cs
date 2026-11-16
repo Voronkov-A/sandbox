@@ -81,6 +81,11 @@ public sealed class LocalUserSettings
 
     public bool? PreloadImagesWhileScrolling { get; set; }
 
+    public string? SwipeLeftAction { get; set; }
+    public string? SwipeRightAction { get; set; }
+    public string? SwipeTopAction { get; set; }
+    public string? SwipeBottomAction { get; set; }
+
     public int ZoomPower { get; set; } = DefaultZoomPower;
 
     public string PhotoViewerAspectRatioMode { get; set; } = DefaultPhotoViewerAspectRatioMode;

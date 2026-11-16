@@ -307,6 +307,8 @@ public sealed class DiagnosticLogService : IDisposable
             using var archive = ZipFile.Open(archivePath, ZipArchiveMode.Create);
             using var logWriter = new StreamWriter(archive.CreateEntry("logs.jsonl", CompressionLevel.Optimal).Open(), Encoding.UTF8);
             var count = 0;
+            var sourceChunkCount = 0;
+            var compressedChunkCount = 0;
             DateTimeOffset? earliest = null;
             // Read bounded snapshots of each chunk so appending cannot extend an export indefinitely.
             (string Path, long Length)[] sources;
@@ -344,6 +346,8 @@ public sealed class DiagnosticLogService : IDisposable
                     }
                 }
                 catch (FileNotFoundException) { continue; }
+                sourceChunkCount++;
+                if (compressed) compressedChunkCount++;
                 using var buffer = new MemoryStream(bytes);
                 using var content = compressed ? (Stream)new GZipStream(buffer, CompressionMode.Decompress) : buffer;
                 using var reader = new StreamReader(content, Encoding.UTF8);
@@ -373,6 +377,8 @@ public sealed class DiagnosticLogService : IDisposable
                 RequestedUntilUtc = until,
                 EarliestRetainedEntryUtc = earliest,
                 ExportedEntryCount = count,
+                SourceChunkCount = sourceChunkCount,
+                CompressedChunkCount = compressedChunkCount,
                 RetentionMonths,
                 MaximumStorageBytes,
                 Note = "Contains available recorded events in the requested UTC interval. Logging begins when the app runs; retention and size limits may shorten coverage. No settings files, tokens, photos, or feedback documents are attached."

@@ -973,6 +973,10 @@ public partial class MainViewModel : ViewModelBase
                 true;
             CategoryButtons = localSettings.CategoryButtons ?? _settingsProvider.DefaultSettings.CategoryButtons ?? !IsMobilePlatform;
             RotationButtons = localSettings.RotationButtons ?? _settingsProvider.DefaultSettings.RotationButtons ?? true;
+            SwipeLeftAction = PhotoViewerActionOption.Find(localSettings.SwipeLeftAction, "next").Id;
+            SwipeRightAction = PhotoViewerActionOption.Find(localSettings.SwipeRightAction, "previous").Id;
+            SwipeTopAction = PhotoViewerActionOption.Find(localSettings.SwipeTopAction, "nice").Id;
+            SwipeBottomAction = PhotoViewerActionOption.Find(localSettings.SwipeBottomAction, "okay").Id;
             PreloadImagesWhileScrolling = localSettings.PreloadImagesWhileScrolling ??
                 _settingsProvider.DefaultSettings.PreloadImagesWhileScrolling ?? false;
             ZoomPower = NormalizeZoomPower(localSettings.ZoomPower);
@@ -2527,6 +2531,18 @@ public partial class MainViewModel : ViewModelBase
             _albumCreationCancellation?.Dispose();
             _albumCreationCancellation = new CancellationTokenSource();
             var cancellation = _albumCreationCancellation;
+            IsAlbumCreationProgressVisible = true;
+            AlbumCreationProgressValue = 0;
+            AlbumCreationProgressMaximum = Math.Max(1, AlbumPhotos.Count + 3);
+            AlbumCreationProgressWarning = "";
+            Status = "Reading photo capture times...";
+            await using var longRunningOperation = await BeginLongRunningOperationAsync(
+                LongRunningOperationKind.AlbumCreation,
+                "Creating Picshare album",
+                Status,
+                AlbumCreationProgressValue,
+                AlbumCreationProgressMaximum,
+                cancellation.Token);
             _activePendingAlbumCreation = await _albumCreationService.CreatePendingCreationAsync(
                 SelectedAlbumType.Id,
                 title,
@@ -2540,20 +2556,9 @@ public partial class MainViewModel : ViewModelBase
                 AlbumPhotos.Select(photo => photo.Source).ToList(),
                 cancellation.Token);
 
-            IsAlbumCreationProgressVisible = true;
-            AlbumCreationProgressValue = 0;
-            AlbumCreationProgressMaximum = Math.Max(1, AlbumPhotos.Count + 3);
-            AlbumCreationProgressWarning = "";
             Status = SelectedAlbumType.Id == LocalAlbumTypeId
                 ? "Creating local album..."
                 : "Uploading selected local photos to Google Drive...";
-            await using var longRunningOperation = await BeginLongRunningOperationAsync(
-                LongRunningOperationKind.AlbumCreation,
-                "Creating Picshare album",
-                Status,
-                AlbumCreationProgressValue,
-                AlbumCreationProgressMaximum,
-                cancellation.Token);
             var result = await ResumePendingAlbumCreationCoreAsync(_activePendingAlbumCreation, cancellation.Token);
             await CompleteAlbumCreationAsync(result);
         }
@@ -7222,6 +7227,10 @@ public partial class MainViewModel : ViewModelBase
             ShowPhotoViewerPreviousNextButtons = ShowPhotoViewerPreviousNextButtons,
             CategoryButtons = CategoryButtons,
             RotationButtons = RotationButtons,
+            SwipeLeftAction = SelectedSwipeLeftAction.Id,
+            SwipeRightAction = SelectedSwipeRightAction.Id,
+            SwipeTopAction = SelectedSwipeTopAction.Id,
+            SwipeBottomAction = SelectedSwipeBottomAction.Id,
             PreloadImagesWhileScrolling = PreloadImagesWhileScrolling,
             ZoomPower = NormalizeZoomPower(ZoomPower),
             PhotoViewerAspectRatioMode = NormalizePhotoViewerAspectRatioMode(PhotoViewerAspectRatioMode),

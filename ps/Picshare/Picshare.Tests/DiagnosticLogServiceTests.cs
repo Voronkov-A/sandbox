@@ -246,6 +246,32 @@ public sealed class DiagnosticLogServiceTests
     }
 
     [Fact]
+    public async Task Export_FiltersEventsAcrossEveryArchivedChunkAndTheActiveFile()
+    {
+        using var temp = new TempDirectory();
+        var until = new DateTimeOffset(DateTime.UtcNow.Date.AddHours(12), TimeSpan.Zero);
+        var time = new ManualTimeProvider(until.AddDays(-3));
+        using var logs = new DiagnosticLogService(temp.Logs, time);
+        logs.Write("Trace", "Performance.Scroll", "three days ago");
+        time.Now = until.AddDays(-2);
+        logs.Write("Trace", "Performance.Scroll", "two days ago");
+        time.Now = until.AddHours(-32);
+        logs.Write("Trace", "Performance.Scroll", "outside period in archived file");
+        time.Now = until.AddHours(-28);
+        logs.Write("Trace", "Performance.Scroll", "inside period in archived file");
+        time.Now = until;
+        logs.Write("Trace", "Performance.Scroll", "active file");
+        logs.Flush();
+        Assert.Equal(3, Directory.GetFiles(temp.Logs, "*.jsonl.gz").Length);
+        using var archive = ZipFile.OpenRead(await logs.CreateArchiveAsync(TimeSpan.FromHours(30), temp.Exports, until));
+        Assert.Equal(["inside period in archived file", "active file"], ReadEntries(archive).Select(entry => entry.Message));
+        using var metadata = JsonDocument.Parse(ReadEntry(archive, "diagnostics.json"));
+        Assert.Equal(4, metadata.RootElement.GetProperty("SourceChunkCount").GetInt32());
+        Assert.Equal(3, metadata.RootElement.GetProperty("CompressedChunkCount").GetInt32());
+        Assert.Equal(2, metadata.RootElement.GetProperty("ExportedEntryCount").GetInt32());
+    }
+
+    [Fact]
     public async Task RestartMaintenance_CompressesPreviousSessionWithoutResettingItsTimestamp()
     {
         using var temp = new TempDirectory();

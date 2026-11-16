@@ -8,6 +8,7 @@ public partial class MainViewModel
     protected override void OnPropertyChanged(PropertyChangedEventArgs e)
     {
         base.OnPropertyChanged(e);
+        NotifySwipeAvailabilityChanged(e.PropertyName);
         // Record workflow outcomes without logging every observable UI value (or account details).
         var message = e.PropertyName switch
         {

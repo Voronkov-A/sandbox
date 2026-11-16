@@ -48,6 +48,10 @@ public partial class MainView : UserControl
             RoutingStrategies.Tunnel,
             handledEventsToo: true);
         SettingsViewHost.ControlCreated += SettingsViewHost_ControlCreated;
+        AlbumReviewContentHost.AddHandler(InputElement.PointerWheelChangedEvent,
+            AlbumScrollDiagnostics_Wheel, RoutingStrategies.Tunnel, handledEventsToo: true);
+        AlbumReviewContentHost.AddHandler(InputElement.PointerMovedEvent,
+            AlbumScrollDiagnostics_PointerMoved, RoutingStrategies.Tunnel, handledEventsToo: true);
         AlbumReviewContentHost.AddHandler(
             InputElement.PointerPressedEvent,
             AlbumReviewContent_PointerPressed,
@@ -359,6 +363,7 @@ public partial class MainView : UserControl
 
     private async void AlbumPhoto_Loaded(object? sender, RoutedEventArgs e)
     {
+        using var timing = AlbumListPerformanceCounters.Shared.Measure(AlbumListMetric.CardsLoaded);
         if (DataContext is MainViewModel viewModel &&
             sender is Control { DataContext: AlbumPhotoViewModel photo } control)
         {
@@ -374,6 +379,7 @@ public partial class MainView : UserControl
 
     private void AlbumPhoto_Unloaded(object? sender, RoutedEventArgs e)
     {
+        using var timing = AlbumListPerformanceCounters.Shared.Measure(AlbumListMetric.CardsUnloaded);
         if (sender is not Control control) return;
         _albumPhotoCards.Remove(control);
         if (DataContext is MainViewModel viewModel &&
@@ -523,6 +529,7 @@ public partial class MainView : UserControl
         }
 
         _albumPhotoScrollOffsets.TryAdd(scrollViewer, scrollViewer.Offset.Y - e.OffsetDelta.Y);
+        using var timing = AlbumListPerformanceCounters.Shared.Measure(AlbumListMetric.ScrollHandler);
         RecordAlbumPhotoScroll(scrollViewer, e.OffsetDelta);
         UpdateFixedSurfaceTransforms(scrollViewer);
         QueueVisibleAlbumPhotoPriorityUpdate();
@@ -530,6 +537,7 @@ public partial class MainView : UserControl
 
     private void AlbumPhotoScrollViewer_ScrollChanged(object? sender, ScrollChangedEventArgs e)
     {
+        using var timing = AlbumListPerformanceCounters.Shared.Measure(AlbumListMetric.ScrollHandler);
         if (sender is ScrollViewer scrollViewer)
         {
             RecordAlbumPhotoScroll(scrollViewer, e.OffsetDelta);
@@ -573,6 +581,7 @@ public partial class MainView : UserControl
         }
 
         _isVisibleAlbumPhotoPriorityUpdateQueued = true;
+        var queuedAt = Stopwatch.GetTimestamp();
         _ = Dispatcher.UIThread.InvokeAsync(() =>
         {
             _isVisibleAlbumPhotoPriorityUpdateQueued = false;
@@ -582,6 +591,7 @@ public partial class MainView : UserControl
             }
 
             var started = Stopwatch.GetTimestamp();
+            AlbumListPerformanceCounters.Shared.Record(AlbumListMetric.ViewportQueueDelay, started - queuedAt);
             UpdateVisibleAlbumPhotoPriorities();
             UpdateStickyAlbumPhotoGroupHeader();
             var elapsed = Stopwatch.GetElapsedTime(started);
@@ -630,6 +640,7 @@ public partial class MainView : UserControl
 
     private void UpdateFixedSurfaceTransforms(ScrollViewer scrollViewer)
     {
+        using var timing = AlbumListPerformanceCounters.Shared.Measure(AlbumListMetric.ChromeUpdate);
         if (DataContext is not MainViewModel viewModel)
         {
             return;
@@ -778,6 +789,7 @@ public partial class MainView : UserControl
 
     private void UpdateStickyAlbumPhotoGroupHeader()
     {
+        using var timing = AlbumListPerformanceCounters.Shared.Measure(AlbumListMetric.StickyHeader);
         var listBox = GetActiveAlbumPhotoListBox();
         if (listBox is null)
         {
@@ -819,6 +831,7 @@ public partial class MainView : UserControl
 
     private void UpdateVisibleAlbumPhotoPriorities()
     {
+        using var timing = AlbumListPerformanceCounters.Shared.Measure(AlbumListMetric.ViewportUpdate);
         if (DataContext is not MainViewModel viewModel)
         {
             return;
