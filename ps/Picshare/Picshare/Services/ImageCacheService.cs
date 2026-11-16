@@ -83,6 +83,27 @@ public sealed class ImageCacheService
         }
     }
 
+    /// <summary>Acquires an already decoded thumbnail without I/O, decoding, or waiting for cache work.</summary>
+    public AlbumImageBitmapLease? TryAcquireCachedThumbnail(string albumId, string photoId, int pixelWidth, int pixelHeight)
+    {
+        if (!Monitor.TryEnter(_memoryCacheSync)) return null;
+        try
+        {
+            return Acquire(GetDetailedThumbnailCacheFileName(photoId, pixelWidth, pixelHeight), AlbumImageCacheKind.DetailedThumbnail)
+                ?? Acquire(GetFastThumbnailCacheFileName(photoId), AlbumImageCacheKind.FastThumbnail);
+        }
+        finally { Monitor.Exit(_memoryCacheSync); }
+
+        AlbumImageBitmapLease? Acquire(string fileName, AlbumImageCacheKind kind)
+        {
+            var limit = Limits.GetBitmapMemoryBytes(kind);
+            if (limit <= 0 || !_bitmapCache.TryGetValue(new MemoryCacheKey(albumId, fileName, kind), out var entry) ||
+                entry.EstimatedBytes > limit || !entry.TryAcquire(out var lease)) return null;
+            entry.LastAccessUtc = DateTime.UtcNow;
+            return lease;
+        }
+    }
+
     public async Task<AlbumFastThumbnailBitmapLoadResult> LoadFastThumbnailBitmapAsync(
         string albumId,
         string photoId,

@@ -5,6 +5,23 @@ namespace Picshare.Tests;
 public sealed class AlbumScrollLoadingPolicyTests
 {
     [Fact]
+    public void Input_DefersBeforeLayoutWithoutAddingFakeDistanceAndAlsoResetsAtTheListEdge()
+    {
+        var policy = new AlbumScrollLoadingPolicy();
+        policy.RecordInput(TimeSpan.Zero);
+        Assert.True(policy.IsLoadingDeferred);
+        policy.RecordScroll(2, TimeSpan.FromMilliseconds(50));
+        policy.RecordInput(TimeSpan.FromMilliseconds(100));
+        policy.RecordScroll(2, TimeSpan.FromMilliseconds(100));
+        Assert.False(policy.IsLoadingDeferred);
+        policy.RecordInput(TimeSpan.FromMilliseconds(500));
+        Assert.True(policy.IsLoadingDeferred);
+        policy.ResumeIfIdle(TimeSpan.FromMilliseconds(680));
+        Assert.False(policy.HasActivity);
+        Assert.False(policy.IsLoadingDeferred);
+    }
+
+    [Fact]
     public void FastScroll_DefersImmediatelyAndResumesOnlyAfterQuietPeriod()
     {
         var policy = new AlbumScrollLoadingPolicy();

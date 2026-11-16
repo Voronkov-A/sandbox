@@ -1,4 +1,9 @@
 {
+  "ai": {
+    "model": "gpt-6-luna",
+    "batchSize": 50,
+    "maxImageDimension": 512
+  },
   "google": {
     "oauthClientId": "<oauthClientId>",
     "oauthClientSecret": "<oauthClientSecret>"

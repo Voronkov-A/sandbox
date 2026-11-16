@@ -97,6 +97,9 @@
             <MenuItem Header="Download the album..."
                       Command="{Binding OpenAlbumDownloadDialogCommand}"
                       IsEnabled="{Binding CanUseAlbumMoreMenu}"/>
+            <MenuItem Header="Find duplicates with AI..."
+                      Command="{Binding OpenAiDuplicateDialogCommand}"
+                      IsEnabled="{Binding CanFindAiDuplicates}"/>
           </MenuFlyout>
         </Button.Flyout>
       </Button>

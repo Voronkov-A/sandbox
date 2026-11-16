@@ -8,6 +8,13 @@
              x:Class="Picshare.Views.AlbumProgressDialogsView"
              x:DataType="vm:MainViewModel">
   <Grid>
+    <views:ProgressDialogView IsVisible="{Binding IsAiDuplicateProgressVisible}"
+                             Title="Finding duplicates with AI"
+                             Message="{Binding AiDuplicateProgressMessage}"
+                             Maximum="{Binding AiDuplicateProgressMaximum}"
+                             Value="{Binding AiDuplicateProgressValue}"
+                             CancelCommand="{Binding CancelAiDuplicateDetectionCommand}"/>
+
     <views:ProgressDialogView IsVisible="{Binding IsAlbumOpenProgressVisible}"
                               Title="Opening album"
                               Message="{Binding AlbumOpenProgressMessage}"

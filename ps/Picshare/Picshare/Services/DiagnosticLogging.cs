@@ -11,9 +11,13 @@ public static class DiagnosticLogging
     private static ITimer? _maintenanceTimer;
     private static ITimer? _flushTimer;
     // Avalonia calls its Trace level Verbose.
-    public const LogEventLevel MinimumLevel = LogEventLevel.Verbose;
+    public static LogEventLevel MinimumLevel => Current.MinimumLevel == DiagnosticLogLevel.Trace
+        ? LogEventLevel.Verbose : LogEventLevel.Debug;
     public static DiagnosticLogService Current { get; } = new(Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Picshare", "diagnostics"));
+
+    public static void SetLevel(string? level) => Current.MinimumLevel = DiagnosticLogLevels.Normalize(level) == "Trace"
+        ? DiagnosticLogLevel.Trace : DiagnosticLogLevel.Debug;
 
     public static void Initialize()
     {
@@ -107,21 +111,27 @@ public static class DiagnosticLogging
     private sealed class DiagnosticTraceListener : TraceListener
     {
         private readonly DiagnosticTextWriter _writer = new(TextWriter.Null, "Trace", "Trace");
-        public override void Write(string? message) => _writer.Write(message);
-        public override void WriteLine(string? message) => _writer.WriteLine(message);
+        public override void Write(string? message) { if (Current.IsEnabled("Trace")) _writer.Write(message); }
+        public override void WriteLine(string? message) { if (Current.IsEnabled("Trace")) _writer.WriteLine(message); }
         public override void Flush() => _writer.Flush();
     }
 
-    private sealed class DiagnosticAvaloniaSink : ILogSink
+    private sealed class DiagnosticAvaloniaSink(DiagnosticLogService? logs = null) : ILogSink
     {
-        public bool IsEnabled(LogEventLevel level, string area) => level >= MinimumLevel;
-        public void Log(LogEventLevel level, string area, object? source, string messageTemplate) =>
-            Current.Write(level == LogEventLevel.Verbose ? "Trace" : level.ToString(), $"Avalonia.{area}", messageTemplate);
+        private DiagnosticLogService Logs => logs ?? Current;
+        public bool IsEnabled(LogEventLevel level, string area) => level >=
+            (Logs.MinimumLevel == DiagnosticLogLevel.Trace ? LogEventLevel.Verbose : LogEventLevel.Debug);
+        public void Log(LogEventLevel level, string area, object? source, string messageTemplate)
+        {
+            if (IsEnabled(level, area))
+                Logs.Write(level == LogEventLevel.Verbose ? "Trace" : level.ToString(), $"Avalonia.{area}", messageTemplate);
+        }
         public void Log(LogEventLevel level, string area, object? source, string messageTemplate, params object?[] propertyValues)
         {
+            if (!IsEnabled(level, area)) return;
             // Snapshot UI-owned objects here; formatting, redaction, JSON and disk I/O run on the log worker.
             var values = Array.ConvertAll(propertyValues, value => value?.ToString());
-            Current.WriteTemplate(level == LogEventLevel.Verbose ? "Trace" : level.ToString(), $"Avalonia.{area}", messageTemplate, values);
+            Logs.WriteTemplate(level == LogEventLevel.Verbose ? "Trace" : level.ToString(), $"Avalonia.{area}", messageTemplate, values);
         }
     }
 }

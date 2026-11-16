@@ -392,6 +392,7 @@ public partial class SettingsView : UserControl, ILazyActivated
         ApplySettingsRowWidths(ParallelismSettingsRow, labelWidth, inputWidth);
         ApplySettingsRowWidths(CacheLimitSettingsGrid, labelWidth, inputWidth);
         ApplySettingsRowWidths(CachedImagesSettingsRow, labelWidth, inputWidth);
+        ApplySettingsRowWidths(LogLevelSettingsRow, labelWidth, inputWidth);
         UpdateDiagnosticsRowWidths();
     }
 

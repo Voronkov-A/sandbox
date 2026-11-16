@@ -12,6 +12,17 @@ public sealed class AlbumScrollLoadingPolicy
     public bool IsLoadingDeferred { get; private set; }
     public bool HasActivity => _lastScrollAt.HasValue;
 
+    public void RecordInput(TimeSpan now)
+    {
+        if (_lastScrollAt is null || now - _lastScrollAt.Value >= IdleDelay)
+        {
+            _sampleStart = now;
+            _sampleDistance = 0;
+            IsLoadingDeferred = true;
+        }
+        _lastScrollAt = now;
+    }
+
     public void RecordScroll(double distance, TimeSpan now)
     {
         if (!double.IsFinite(distance) || distance <= 0) return;

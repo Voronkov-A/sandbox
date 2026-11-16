@@ -34,6 +34,15 @@ public sealed class DiagnosticLogService : IDisposable
     private StreamWriter? _writer;
     private long _currentBytes;
     private bool _disposed;
+    private int _minimumLevel;
+    public DiagnosticLogLevel MinimumLevel
+    {
+        get => (DiagnosticLogLevel)Volatile.Read(ref _minimumLevel);
+        set => Volatile.Write(ref _minimumLevel, (int)value);
+    }
+
+    public bool IsEnabled(string level) =>
+        MinimumLevel == DiagnosticLogLevel.Trace || !string.Equals(level, "Trace", StringComparison.OrdinalIgnoreCase);
     private static readonly Regex UrlQuery = new(@"(https?://[^\s?""<>]+)\?[^\s""<>]+", RegexOptions.Compiled | RegexOptions.IgnoreCase);
     private static readonly Regex SecretField = new(@"((?:access_token|refresh_token|id_token|client_secret|code_verifier|authorization|password|\bcode)\s*[""']?\s*[:=]\s*[""']?)([^\s""'&,}]+)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
     private static readonly Regex Bearer = new(@"\bBearer\s+[A-Za-z0-9._~+/=-]+", RegexOptions.Compiled | RegexOptions.IgnoreCase);
@@ -64,6 +73,7 @@ public sealed class DiagnosticLogService : IDisposable
 
     private void Enqueue(string level, string area, string message, Exception? exception, string?[]? values)
     {
+        if (!IsEnabled(level)) return;
         lock (_queueGate)
         {
             if (_disposed) return;

@@ -225,6 +225,43 @@ public sealed partial class PhotoViewerSwipeTests
         finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
     }
 
+    [Fact]
+    public void LoggingPreference_DefaultsToDebugAndPersistsTrace()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "picshare-log-settings", Guid.NewGuid().ToString("N"));
+        try
+        {
+            var store = new LocalUserSettingsStore(root);
+            Assert.Equal("Debug", store.Load().DiagnosticLogLevel);
+            store.Save(new LocalUserSettings { DiagnosticLogLevel = "Trace" });
+            Assert.Equal("Trace", store.Load().DiagnosticLogLevel);
+            Assert.Equal("Debug", DiagnosticLogLevels.Normalize("unknown"));
+            Assert.Equal("Debug", DiagnosticLogLevels.Normalize(null));
+        }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
+    }
+
+    [Fact]
+    public void AdvancedLogLevelSelector_UpdatesTheRuntimeFilterImmediately()
+    {
+        var previous = DiagnosticLogging.Current.MinimumLevel;
+        try
+        {
+            var model = CreateModel();
+            model.DiagnosticLogLevel = "Debug";
+            var view = new SettingsView { DataContext = model };
+            var row = view.FindControl<Grid>("LogLevelSettingsRow")!;
+            var selector = Assert.Single(row.Children.OfType<ComboBox>());
+            Assert.Equal("Debug", selector.SelectedItem);
+            selector.SelectedItem = "Trace";
+            Assert.Equal("Trace", model.DiagnosticLogLevel);
+            Assert.Equal(DiagnosticLogLevel.Trace, DiagnosticLogging.Current.MinimumLevel);
+            selector.SelectedItem = "Debug";
+            Assert.Equal(DiagnosticLogLevel.Debug, DiagnosticLogging.Current.MinimumLevel);
+        }
+        finally { DiagnosticLogging.Current.MinimumLevel = previous; }
+    }
+
     private static PicshareSettings Merge(PicshareSettings current, PicshareSettings next)
         => (PicshareSettings)typeof(PicshareSettingsProvider).GetMethod("MergeSettings", BindingFlags.NonPublic | BindingFlags.Static)!
             .Invoke(null, [current, next])!;

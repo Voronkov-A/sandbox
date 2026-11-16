@@ -42,6 +42,9 @@
     <views:LazyControlHost IsActive="{Binding IsAlbumDownloadDialogVisible}"
                            ControlType="{x:Type views:AlbumDownloadDialogView}"/>
 
+    <views:LazyControlHost IsActive="{Binding IsAiDuplicateDialogVisible}"
+                          ControlType="{x:Type views:AiDuplicateDialogView}"/>
+
     <views:LazyControlHost IsActive="{Binding IsAlbumProgressDialogsVisible}"
                            ControlType="{x:Type views:AlbumProgressDialogsView}"/>
 

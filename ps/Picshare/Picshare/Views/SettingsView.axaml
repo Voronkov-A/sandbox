@@ -420,10 +420,16 @@
             <TextBlock Classes="settings-title" Text="Advanced" FontSize="16" FontWeight="SemiBold"/>
             <Border x:Name="DiagnosticsSectionBorder" BorderBrush="#D6D8D1" BorderThickness="1" CornerRadius="6" Padding="12">
               <StackPanel Spacing="8">
+                <Grid x:Name="LogLevelSettingsRow" ColumnDefinitions="150,*" MinHeight="42">
+                  <TextBlock Classes="settings-row-label" Text="Log level"/>
+                  <ComboBox Grid.Column="1" Classes="settings-control" HorizontalAlignment="Stretch"
+                            ItemsSource="{Binding DiagnosticLogLevelOptions}"
+                            SelectedItem="{Binding DiagnosticLogLevel, Mode=TwoWay}"/>
+                </Grid>
                 <CheckBox Classes="settings-control" IsChecked="{Binding PreloadImagesWhileScrolling}">
                   <TextBlock Text="Preload images while scrolling" TextWrapping="Wrap"/>
                 </CheckBox>
-                <TextBlock Text="Experimental: leave unchecked to defer image loading until scrolling slows or stops."
+                <TextBlock Text="Leave unchecked to defer image loading until scrolling slows or stops."
                            TextWrapping="Wrap" Foreground="#6C756F"/>
                 <Grid x:Name="DiagnosticsControls" ColumnDefinitions="142,Auto,*,Auto,Auto" ColumnSpacing="8"
                       SizeChanged="DiagnosticsControls_SizeChanged" ClipToBounds="True">

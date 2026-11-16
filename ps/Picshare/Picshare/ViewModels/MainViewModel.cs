@@ -667,9 +667,10 @@ public partial class MainViewModel : ViewModelBase
     public bool HasCommitFeedbackMenuComment => !string.IsNullOrWhiteSpace(CommitFeedbackMenuComment);
 
     public bool IsAlbumProgressDialogsVisible =>
-        IsAlbumOpenProgressVisible || IsAlbumDownloadProgressVisible || IsAlbumCreationProgressVisible;
+        IsAlbumOpenProgressVisible || IsAlbumDownloadProgressVisible || IsAlbumCreationProgressVisible || IsAiDuplicateProgressVisible;
 
     public bool IsAlbumModalDialogsVisible =>
+        IsAiDuplicateDialogVisible ||
         IsGoogleAuthorizationRequired ||
         IsAlbumDownloadDialogVisible ||
         IsAlbumProgressDialogsVisible ||
@@ -962,6 +963,8 @@ public partial class MainViewModel : ViewModelBase
         try
         {
             AnonymousReviewerName = localSettings.AnonymousReviewerName;
+            DiagnosticLogLevel = DiagnosticLogLevels.Normalize(localSettings.DiagnosticLogLevel);
+            DiagnosticLogging.SetLevel(DiagnosticLogLevel);
             MaximumParallelism = NormalizeMaximumParallelism(localSettings.MaximumParallelism);
             NumberOfPicturesPerRow = NormalizeNumberOfPicturesPerRow(localSettings.NumberOfPicturesPerRow);
             FixedHeader = localSettings.FixedHeader ?? _settingsProvider.DefaultSettings.FixedHeader ?? true;
@@ -3624,6 +3627,7 @@ public partial class MainViewModel : ViewModelBase
         bool syncImmediately)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        ClearAiDuplicateState();
         StopFeedbackSync();
         StopFlowMonitor();
         _currentManifest = manifest;
@@ -3707,6 +3711,11 @@ public partial class MainViewModel : ViewModelBase
     {
         _albumImageListLoader.SetListLoadingPaused(paused && !PreloadImagesWhileScrolling);
     }
+
+    public AlbumImageBitmapLease? TryAcquireCachedPhotoThumbnail(AlbumPhotoViewModel photo) =>
+        _imageCache.TryAcquireCachedThumbnail(photo.AlbumId, photo.PhotoId,
+            Math.Max(1, (int)Math.Ceiling(photo.CardWidth)),
+            Math.Max(1, (int)Math.Ceiling(photo.CardHeight - 40)));
 
     public void UpdateAlbumPhotoCardSize(double availableWidth)
     {
@@ -5624,6 +5633,7 @@ public partial class MainViewModel : ViewModelBase
 
     private void ClearOpenedAlbumState()
     {
+        ClearAiDuplicateState();
         StopFeedbackSync();
         StopFlowMonitor();
         _currentManifest = null;
@@ -6347,6 +6357,9 @@ public partial class MainViewModel : ViewModelBase
             case LongRunningOperationKind.Download:
                 _albumDownloadLongRunningOperationId = scope.OperationId;
                 break;
+            case LongRunningOperationKind.AiDuplicateDetection:
+                _aiDuplicateLongRunningOperationId = scope.OperationId;
+                break;
         }
 
         return scope;
@@ -6392,6 +6405,9 @@ public partial class MainViewModel : ViewModelBase
             case LongRunningOperationKind.Download:
                 _albumDownloadLongRunningOperationId = null;
                 break;
+            case LongRunningOperationKind.AiDuplicateDetection:
+                _aiDuplicateLongRunningOperationId = null;
+                break;
         }
     }
 
@@ -6403,6 +6419,7 @@ public partial class MainViewModel : ViewModelBase
 
     private void UpdateBulkPhotoSelectionState()
     {
+        NotifyAiDuplicateAvailability();
         var selectedPhotos = GetSelectedPhotos().ToList();
         if (selectedPhotos.Count > 0 && _lastBulkSelectedPhotoCount == 0)
         {
@@ -7219,6 +7236,7 @@ public partial class MainViewModel : ViewModelBase
         _localUserSettingsStore.Save(new LocalUserSettings
         {
             AnonymousReviewerName = AnonymousReviewerName.Trim(),
+            DiagnosticLogLevel = DiagnosticLogLevel,
             MaximumParallelism = GetMaximumParallelism(),
             NumberOfPicturesPerRow = NormalizeNumberOfPicturesPerRow(NumberOfPicturesPerRow),
             FixedHeader = FixedHeader,

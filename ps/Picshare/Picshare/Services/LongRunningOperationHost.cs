@@ -7,7 +7,8 @@ public enum LongRunningOperationKind
     AlbumCreationCancellation,
     AlbumDeletion,
     AlbumDeletionCancellation,
-    Download
+    Download,
+    AiDuplicateDetection
 }
 
 public sealed record LongRunningOperationInfo(

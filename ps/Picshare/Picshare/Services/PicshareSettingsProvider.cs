@@ -25,6 +25,8 @@ public sealed class PicshareSettingsProvider
 
     public DefaultUserSettings DefaultSettings => Settings.DefaultSettings ?? new DefaultUserSettings();
 
+    public AiSettings Ai => Settings.Ai ?? new AiSettings();
+
     public string MissingGoogleOAuthClientIdMessage =>
         $"Google OAuth client id is not configured. Add it to {string.Join(" or ", SettingsFilePaths)}, or package picshare.settings.json with the application.";
 
@@ -132,7 +134,14 @@ public sealed class PicshareSettingsProvider
                 {
                     RootPath = localStorageRootPath
                 },
-            DefaultSettings = defaultSettings
+            DefaultSettings = defaultSettings,
+            Ai = new AiSettings
+            {
+                ApiKey = FirstNonWhiteSpace(next?.Ai?.ApiKey, current.Ai?.ApiKey),
+                Model = FirstNonWhiteSpace(next?.Ai?.Model, current.Ai?.Model),
+                BatchSize = next?.Ai?.BatchSize ?? current.Ai?.BatchSize,
+                MaxImageDimension = next?.Ai?.MaxImageDimension ?? current.Ai?.MaxImageDimension
+            }
         };
     }
 
@@ -174,6 +183,8 @@ public sealed class PicshareSettingsProvider
 
 public sealed record PicshareSettings
 {
+    public AiSettings? Ai { get; init; }
+
     public GoogleSettings? Google { get; init; }
 
     public LocalStorageSettings? LocalStorage { get; init; }
@@ -186,6 +197,14 @@ public sealed record PicshareSettings
 
     [JsonPropertyName("localStorage.rootPath")]
     public string? LocalStorageRootPath { get; init; }
+}
+
+public sealed record AiSettings
+{
+    public string? ApiKey { get; init; }
+    public string? Model { get; init; }
+    public int? BatchSize { get; init; }
+    public int? MaxImageDimension { get; init; }
 }
 
 public sealed record GoogleSettings

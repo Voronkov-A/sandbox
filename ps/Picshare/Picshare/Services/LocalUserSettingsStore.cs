@@ -81,6 +81,8 @@ public sealed class LocalUserSettings
 
     public bool? PreloadImagesWhileScrolling { get; set; }
 
+    public string DiagnosticLogLevel { get; set; } = "Debug";
+
     public string? SwipeLeftAction { get; set; }
     public string? SwipeRightAction { get; set; }
     public string? SwipeTopAction { get; set; }

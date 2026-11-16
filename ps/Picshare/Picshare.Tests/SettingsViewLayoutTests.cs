@@ -62,13 +62,25 @@ public sealed class SettingsViewLayoutTests
     }
 
     [Fact]
-    public void TraceLogging_AcceptsAvaloniaVerboseEventsAndHigherLevels()
+    public void Logging_DefaultsToDebugAndSkipsTraceValuesUntilTraceIsSelected()
     {
+        var root = Path.Combine(Path.GetTempPath(), "picshare-level-tests", Guid.NewGuid().ToString("N"));
+        using var logs = new DiagnosticLogService(root);
         var type = typeof(DiagnosticLogging).GetNestedType("DiagnosticAvaloniaSink", BindingFlags.NonPublic)!;
-        var sink = (ILogSink)Activator.CreateInstance(type, nonPublic: true)!;
-        Assert.True(sink.IsEnabled(LogEventLevel.Verbose, "Layout"));
+        var sink = (ILogSink)Activator.CreateInstance(type, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+            binder: null, args: [logs], culture: null)!;
+        Assert.Equal(DiagnosticLogLevel.Debug, logs.MinimumLevel);
+        Assert.False(sink.IsEnabled(LogEventLevel.Verbose, "Layout"));
+        sink.Log(LogEventLevel.Verbose, "Layout", null, "Ignored {Value}", new UnformattableValue());
         Assert.True(sink.IsEnabled(LogEventLevel.Debug, "Binding"));
         Assert.True(sink.IsEnabled(LogEventLevel.Warning, "Platform"));
+        logs.MinimumLevel = DiagnosticLogLevel.Trace;
+        Assert.True(sink.IsEnabled(LogEventLevel.Verbose, "Layout"));
+    }
+
+    private sealed class UnformattableValue
+    {
+        public override string ToString() => throw new InvalidOperationException("Disabled trace must not format UI values");
     }
 
     private static (double ButtonSlot, double Label, double Numeric, double Units, double Ellipsis, double Spacing) Calculate(double width)

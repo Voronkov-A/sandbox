@@ -64,11 +64,19 @@ public sealed partial class AlbumImageListLoaderWarmupTests
         using var lease = (AlbumImageBitmapLease)Activator.CreateInstance(typeof(AlbumImageBitmapLease),
             BindingFlags.Instance | BindingFlags.NonPublic, null, [bitmap, (Action)(() => releases++)], null)!;
         var method = typeof(AlbumImageListLoader).GetMethod("SetLoadedImageIfStillVisibleAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
-        var assignment = (Task<bool>)method.Invoke(loader, [photo, lease, false, "Loaded", token, 1L])!;
-
-        loader.SetListLoadingPaused(true);
-        Dispatcher.UIThread.RunJobs();
-        Assert.False(await assignment);
+        var previousContext = SynchronizationContext.Current;
+        Task<bool> assignment;
+        try
+        {
+            // This test has no running Avalonia message loop. Do not capture a UI/test
+            // synchronization context for the continuation after the queued assignment.
+            SynchronizationContext.SetSynchronizationContext(null);
+            assignment = (Task<bool>)method.Invoke(loader, [photo, lease, false, "Loaded", token, 1L])!;
+            loader.SetListLoadingPaused(true);
+            Dispatcher.UIThread.RunJobs();
+        }
+        finally { SynchronizationContext.SetSynchronizationContext(previousContext); }
+        Assert.False(await assignment.WaitAsync(TimeSpan.FromSeconds(5)));
         Assert.Null(photo.Image);
         Assert.Equal(1, releases);
         photo.CompleteFastThumbnailLoad(false, token);

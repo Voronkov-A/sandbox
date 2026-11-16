@@ -11,9 +11,9 @@
     <vm:MainViewModel />
   </Design.DataContext>
 
-  <UserControl.DataTemplates>
-    <DataTemplate DataType="{x:Type vm:AlbumPhotoRowViewModel}" x:DataType="vm:AlbumPhotoRowViewModel">
-      <views:MeasuredAlbumPhotoRow ItemsSource="{Binding Photos}">
+  <UserControl.Resources>
+    <DataTemplate x:Key="AlbumHeavyRowTemplate" x:DataType="vm:AlbumPhotoRowViewModel">
+      <ItemsControl ItemsSource="{Binding Photos}">
         <ItemsControl.ItemsPanel>
           <ItemsPanelTemplate>
             <StackPanel Orientation="Horizontal"/>
@@ -21,7 +21,7 @@
         </ItemsControl.ItemsPanel>
         <ItemsControl.ItemTemplate>
           <DataTemplate x:DataType="vm:AlbumPhotoViewModel">
-            <views:MeasuredAlbumPhotoCard x:Name="AlbumPhotoCard"
+            <Border x:Name="AlbumPhotoCard"
                     Width="{Binding CardWidth}"
                     Height="{Binding CardHeight}"
                     Margin="0,0,12,12"
@@ -108,7 +108,7 @@
                             BorderBrush="#27343B"
                             BorderThickness="1"
                             ClipToBounds="True">
-                      <Image Source="{Binding DuplicateStackPhoto.Image}"
+                      <Image Source="{Binding DuplicateStackPhoto.Image, FallbackValue={x:Null}}"
                              Stretch="UniformToFill"/>
                     </Border>
                     <TextBlock Text="{Binding DuplicateGroupCountText}"
@@ -165,12 +165,13 @@
                   </Grid>
                 </Border>
               </Grid>
-            </views:MeasuredAlbumPhotoCard>
+            </Border>
           </DataTemplate>
         </ItemsControl.ItemTemplate>
-      </views:MeasuredAlbumPhotoRow>
+      </ItemsControl>
     </DataTemplate>
-
+  </UserControl.Resources>
+  <UserControl.DataTemplates>
     <DataTemplate DataType="{x:Type vm:AlbumPhotoGroupHeaderViewModel}" x:DataType="vm:AlbumPhotoGroupHeaderViewModel">
       <TextBlock x:Name="AlbumPhotoGroupHeader"
                  Text="{Binding Header}"
@@ -344,7 +345,7 @@
               Margin="20,0,20,20"
               SizeChanged="AlbumReviewContentHost_SizeChanged">
           <Grid IsVisible="{Binding IsUncategorizedReviewTabSelected}">
-                  <ListBox ItemsSource="{Binding UncategorizedPhotoGroups}"
+                  <views:AlbumPhotoListBox HeavyRowTemplate="{StaticResource AlbumHeavyRowTemplate}" ItemsSource="{Binding UncategorizedPhotoGroups}"
                            Classes="album-photo-list"
                            Loaded="AlbumPhotoList_Loaded"
                            Unloaded="AlbumPhotoList_Unloaded"
@@ -357,10 +358,10 @@
                         <VirtualizingStackPanel/>
                       </ItemsPanelTemplate>
                     </ListBox.ItemsPanel>
-                  </ListBox>
+                  </views:AlbumPhotoListBox>
           </Grid>
           <Grid IsVisible="{Binding IsNiceReviewTabSelected}">
-                  <ListBox ItemsSource="{Binding NicePhotoGroups}"
+                  <views:AlbumPhotoListBox HeavyRowTemplate="{StaticResource AlbumHeavyRowTemplate}" ItemsSource="{Binding NicePhotoGroups}"
                            Classes="album-photo-list"
                            Loaded="AlbumPhotoList_Loaded"
                            Unloaded="AlbumPhotoList_Unloaded"
@@ -373,10 +374,10 @@
                         <VirtualizingStackPanel/>
                       </ItemsPanelTemplate>
                     </ListBox.ItemsPanel>
-                  </ListBox>
+                  </views:AlbumPhotoListBox>
           </Grid>
           <Grid IsVisible="{Binding IsOkReviewTabSelected}">
-                  <ListBox ItemsSource="{Binding OkPhotoGroups}"
+                  <views:AlbumPhotoListBox HeavyRowTemplate="{StaticResource AlbumHeavyRowTemplate}" ItemsSource="{Binding OkPhotoGroups}"
                            Classes="album-photo-list"
                            Loaded="AlbumPhotoList_Loaded"
                            Unloaded="AlbumPhotoList_Unloaded"
@@ -389,10 +390,10 @@
                         <VirtualizingStackPanel/>
                       </ItemsPanelTemplate>
                     </ListBox.ItemsPanel>
-                  </ListBox>
+                  </views:AlbumPhotoListBox>
           </Grid>
           <Grid IsVisible="{Binding IsTrashReviewTabSelected}">
-                  <ListBox ItemsSource="{Binding TrashPhotoGroups}"
+                  <views:AlbumPhotoListBox HeavyRowTemplate="{StaticResource AlbumHeavyRowTemplate}" ItemsSource="{Binding TrashPhotoGroups}"
                            Classes="album-photo-list"
                            Loaded="AlbumPhotoList_Loaded"
                            Unloaded="AlbumPhotoList_Unloaded"
@@ -405,10 +406,10 @@
                         <VirtualizingStackPanel/>
                       </ItemsPanelTemplate>
                     </ListBox.ItemsPanel>
-                  </ListBox>
+                  </views:AlbumPhotoListBox>
           </Grid>
           <Grid IsVisible="{Binding IsUnresolvedDuplicatesReviewTabSelected}">
-                  <ListBox ItemsSource="{Binding UnresolvedDuplicatePhotoGroups}"
+                  <views:AlbumPhotoListBox HeavyRowTemplate="{StaticResource AlbumHeavyRowTemplate}" ItemsSource="{Binding UnresolvedDuplicatePhotoGroups}"
                            Classes="album-photo-list"
                            Loaded="AlbumPhotoList_Loaded"
                            Unloaded="AlbumPhotoList_Unloaded"
@@ -421,7 +422,7 @@
                         <VirtualizingStackPanel/>
                       </ItemsPanelTemplate>
                     </ListBox.ItemsPanel>
-                  </ListBox>
+                  </views:AlbumPhotoListBox>
           </Grid>
           <Border x:Name="StickyAlbumPhotoGroupHeader"
                   Background="#F7F7F4"

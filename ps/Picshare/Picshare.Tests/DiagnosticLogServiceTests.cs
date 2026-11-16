@@ -7,11 +7,28 @@ namespace Picshare.Tests;
 public sealed class DiagnosticLogServiceTests
 {
     [Fact]
+    public async Task LogLevel_ChangesImmediatelyAndExportStillIncludesPreviouslyRecordedTrace()
+    {
+        using var temp = new TempDirectory();
+        using var logs = new DiagnosticLogService(temp.Logs);
+        Assert.Equal(DiagnosticLogLevel.Debug, logs.MinimumLevel);
+        logs.Write("Trace", "Test", "hidden before");
+        logs.Write("Debug", "Test", "debug event");
+        logs.MinimumLevel = DiagnosticLogLevel.Trace;
+        logs.Write("Trace", "Test", "trace event");
+        logs.MinimumLevel = DiagnosticLogLevel.Debug;
+        logs.Write("Trace", "Test", "hidden after");
+        logs.Write("Warning", "Test", "warning event");
+        using var archive = ZipFile.OpenRead(await logs.CreateArchiveAsync(TimeSpan.FromHours(1), temp.Exports));
+        Assert.Equal(["debug event", "trace event", "warning event"], ReadEntries(archive).Select(entry => entry.Message));
+    }
+
+    [Fact]
     public async Task SlowPersistence_DoesNotBlockProducersAndPreservesEventTimeAndThread()
     {
         using var temp = new TempDirectory();
         var time = new ManualTimeProvider(DateTimeOffset.UtcNow);
-        using var logs = new DiagnosticLogService(temp.Logs, time);
+        using var logs = new DiagnosticLogService(temp.Logs, time) { MinimumLevel = DiagnosticLogLevel.Trace };
         using var blocker = new BlockingException();
         var first = Task.Run(() => logs.Write("Error", "Test", "slow exception formatting", blocker));
         Assert.True(blocker.Entered.Wait(TimeSpan.FromSeconds(5)));
@@ -38,7 +55,7 @@ public sealed class DiagnosticLogServiceTests
     public async Task SlowPersistence_BoundsBacklogAndReportsOverflowInsteadOfBlocking()
     {
         using var temp = new TempDirectory();
-        using var logs = new DiagnosticLogService(temp.Logs);
+        using var logs = new DiagnosticLogService(temp.Logs) { MinimumLevel = DiagnosticLogLevel.Trace };
         using var blocker = new BlockingException();
         var first = Task.Run(() => logs.Write("Error", "Test", "slow record", blocker));
         Assert.True(blocker.Entered.Wait(TimeSpan.FromSeconds(5)));
@@ -78,7 +95,7 @@ public sealed class DiagnosticLogServiceTests
     public async Task DeferredAvaloniaFormatting_PreservesPlaceholdersAndRedactsValues()
     {
         using var temp = new TempDirectory();
-        using var logs = new DiagnosticLogService(temp.Logs);
+        using var logs = new DiagnosticLogService(temp.Logs) { MinimumLevel = DiagnosticLogLevel.Trace };
         var method = typeof(DiagnosticLogService).GetMethod("WriteTemplate",
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
         method.Invoke(logs, ["Trace", "Avalonia.Test", "Offset={Offset}; Source={Source}; Endpoint={Endpoint}",
@@ -93,7 +110,7 @@ public sealed class DiagnosticLogServiceTests
     public void BackgroundWrites_UseOneOpenFileAndFlushAndDisposeDrainAcceptedRecords()
     {
         using var temp = new TempDirectory();
-        using var logs = new DiagnosticLogService(temp.Logs);
+        using var logs = new DiagnosticLogService(temp.Logs) { MinimumLevel = DiagnosticLogLevel.Trace };
         for (var index = 0; index < 10; index++) logs.Write("Trace", "Test", $"event {index}");
         logs.Flush();
         var file = Assert.Single(Directory.GetFiles(temp.Logs));
@@ -251,7 +268,7 @@ public sealed class DiagnosticLogServiceTests
         using var temp = new TempDirectory();
         var until = new DateTimeOffset(DateTime.UtcNow.Date.AddHours(12), TimeSpan.Zero);
         var time = new ManualTimeProvider(until.AddDays(-3));
-        using var logs = new DiagnosticLogService(temp.Logs, time);
+        using var logs = new DiagnosticLogService(temp.Logs, time) { MinimumLevel = DiagnosticLogLevel.Trace };
         logs.Write("Trace", "Performance.Scroll", "three days ago");
         time.Now = until.AddDays(-2);
         logs.Write("Trace", "Performance.Scroll", "two days ago");

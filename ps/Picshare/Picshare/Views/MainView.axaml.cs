@@ -36,7 +36,6 @@ public partial class MainView : UserControl
     private double _albumReviewTabHeaderHiddenHeight;
     private double _imageListFooterHiddenHeight;
     private bool _isVisibleAlbumPhotoPriorityUpdateQueued;
-    private DateTime _lastBlankPhotoDiagnosticsUtc = DateTime.MinValue;
     private DateTime _lastSlowViewportDiagnosticsUtc = DateTime.MinValue;
 
     public MainView()
@@ -49,9 +48,9 @@ public partial class MainView : UserControl
             handledEventsToo: true);
         SettingsViewHost.ControlCreated += SettingsViewHost_ControlCreated;
         AlbumReviewContentHost.AddHandler(InputElement.PointerWheelChangedEvent,
-            AlbumScrollDiagnostics_Wheel, RoutingStrategies.Tunnel, handledEventsToo: true);
+            AlbumScrollInput_Wheel, RoutingStrategies.Tunnel, handledEventsToo: true);
         AlbumReviewContentHost.AddHandler(InputElement.PointerMovedEvent,
-            AlbumScrollDiagnostics_PointerMoved, RoutingStrategies.Tunnel, handledEventsToo: true);
+            AlbumScrollInput_PointerMoved, RoutingStrategies.Tunnel, handledEventsToo: true);
         AlbumReviewContentHost.AddHandler(
             InputElement.PointerPressedEvent,
             AlbumReviewContent_PointerPressed,
@@ -113,6 +112,7 @@ public partial class MainView : UserControl
             _viewModelPropertyChanged.PropertyChanged += ViewModel_PropertyChanged;
         }
 
+        foreach (var list in _albumPhotoLists.OfType<AlbumPhotoListBox>()) ConfigureAlbumThumbnailProvider(list);
         QueueVisibleAlbumPhotoPriorityUpdate();
 
         base.OnDataContextChanged(e);
@@ -363,7 +363,6 @@ public partial class MainView : UserControl
 
     private async void AlbumPhoto_Loaded(object? sender, RoutedEventArgs e)
     {
-        using var timing = AlbumListPerformanceCounters.Shared.Measure(AlbumListMetric.CardsLoaded);
         if (DataContext is MainViewModel viewModel &&
             sender is Control { DataContext: AlbumPhotoViewModel photo } control)
         {
@@ -379,7 +378,6 @@ public partial class MainView : UserControl
 
     private void AlbumPhoto_Unloaded(object? sender, RoutedEventArgs e)
     {
-        using var timing = AlbumListPerformanceCounters.Shared.Measure(AlbumListMetric.CardsUnloaded);
         if (sender is not Control control) return;
         _albumPhotoCards.Remove(control);
         if (DataContext is MainViewModel viewModel &&
@@ -425,6 +423,7 @@ public partial class MainView : UserControl
 
     private void AttachAlbumPhotoList(ListBox listBox)
     {
+        if (listBox is AlbumPhotoListBox albumList) ConfigureAlbumThumbnailProvider(albumList);
         if (!_albumPhotoLists.Add(listBox))
         {
             return;
@@ -435,6 +434,11 @@ public partial class MainView : UserControl
             AlbumPhotoList_ScrollChanged,
             RoutingStrategies.Bubble,
             handledEventsToo: true);
+    }
+
+    private void ConfigureAlbumThumbnailProvider(AlbumPhotoListBox list)
+    {
+        list.CachedThumbnailProvider = DataContext is MainViewModel model ? model.TryAcquireCachedPhotoThumbnail : null;
     }
 
     private bool AttachAlbumPhotoScrollViewers(ListBox listBox)
@@ -529,7 +533,6 @@ public partial class MainView : UserControl
         }
 
         _albumPhotoScrollOffsets.TryAdd(scrollViewer, scrollViewer.Offset.Y - e.OffsetDelta.Y);
-        using var timing = AlbumListPerformanceCounters.Shared.Measure(AlbumListMetric.ScrollHandler);
         RecordAlbumPhotoScroll(scrollViewer, e.OffsetDelta);
         UpdateFixedSurfaceTransforms(scrollViewer);
         QueueVisibleAlbumPhotoPriorityUpdate();
@@ -537,7 +540,6 @@ public partial class MainView : UserControl
 
     private void AlbumPhotoScrollViewer_ScrollChanged(object? sender, ScrollChangedEventArgs e)
     {
-        using var timing = AlbumListPerformanceCounters.Shared.Measure(AlbumListMetric.ScrollHandler);
         if (sender is ScrollViewer scrollViewer)
         {
             RecordAlbumPhotoScroll(scrollViewer, e.OffsetDelta);
@@ -581,7 +583,6 @@ public partial class MainView : UserControl
         }
 
         _isVisibleAlbumPhotoPriorityUpdateQueued = true;
-        var queuedAt = Stopwatch.GetTimestamp();
         _ = Dispatcher.UIThread.InvokeAsync(() =>
         {
             _isVisibleAlbumPhotoPriorityUpdateQueued = false;
@@ -590,8 +591,8 @@ public partial class MainView : UserControl
                 return;
             }
 
+            if (_albumRowsAreLightweight) return;
             var started = Stopwatch.GetTimestamp();
-            AlbumListPerformanceCounters.Shared.Record(AlbumListMetric.ViewportQueueDelay, started - queuedAt);
             UpdateVisibleAlbumPhotoPriorities();
             UpdateStickyAlbumPhotoGroupHeader();
             var elapsed = Stopwatch.GetElapsedTime(started);
@@ -640,7 +641,6 @@ public partial class MainView : UserControl
 
     private void UpdateFixedSurfaceTransforms(ScrollViewer scrollViewer)
     {
-        using var timing = AlbumListPerformanceCounters.Shared.Measure(AlbumListMetric.ChromeUpdate);
         if (DataContext is not MainViewModel viewModel)
         {
             return;
@@ -789,7 +789,7 @@ public partial class MainView : UserControl
 
     private void UpdateStickyAlbumPhotoGroupHeader()
     {
-        using var timing = AlbumListPerformanceCounters.Shared.Measure(AlbumListMetric.StickyHeader);
+        if (_albumRowsAreLightweight) { StickyAlbumPhotoGroupHeader.IsVisible = false; return; }
         var listBox = GetActiveAlbumPhotoListBox();
         if (listBox is null)
         {
@@ -831,7 +831,6 @@ public partial class MainView : UserControl
 
     private void UpdateVisibleAlbumPhotoPriorities()
     {
-        using var timing = AlbumListPerformanceCounters.Shared.Measure(AlbumListMetric.ViewportUpdate);
         if (DataContext is not MainViewModel viewModel)
         {
             return;
@@ -876,7 +875,6 @@ public partial class MainView : UserControl
             .ToList();
 
         viewModel.PrioritizePhotoViewportLoads(visiblePhotos);
-        LogBlankPhotoDiagnostics(viewModel, albumPhotoControls);
     }
 
     private static bool IsInSelectedAlbumPhotoList(Control control)
@@ -891,34 +889,6 @@ public partial class MainView : UserControl
 
         var tabItem = listBox.GetVisualAncestors().OfType<TabItem>().FirstOrDefault();
         return tabItem?.IsSelected ?? listBox.IsVisible;
-    }
-
-    private void LogBlankPhotoDiagnostics(
-        MainViewModel viewModel,
-        IEnumerable<AlbumPhotoControlSnapshot> albumPhotoControls)
-    {
-        var blankControls = albumPhotoControls
-            .Where(item => item.Photo.Image is null)
-            .Take(8)
-            .ToList();
-        if (blankControls.Count == 0)
-        {
-            return;
-        }
-
-        var now = DateTime.UtcNow;
-        if (now - _lastBlankPhotoDiagnosticsUtc < TimeSpan.FromSeconds(1))
-        {
-            return;
-        }
-
-        _lastBlankPhotoDiagnosticsUtc = now;
-        Console.WriteLine($"PicshareImageLoader: visible blank card diagnostics count={blankControls.Count}");
-        foreach (var item in blankControls)
-        {
-            Console.WriteLine(
-                $"PicshareImageLoader: blank {item.Photo.FileName} ({item.Photo.PhotoId}) inViewport={item.IsInViewport} fully={item.IsFullyInViewport} bounds={FormatRect(item.Bounds)} scrollBounds={FormatRect(item.ViewportBounds)} {viewModel.DescribePhotoImageLoadState(item.Photo)}");
-        }
     }
 
     private static Rect TransformBounds(Control control, Visual target)
@@ -939,11 +909,6 @@ public partial class MainView : UserControl
         var right = Math.Max(Math.Max(topLeft.X, topRight.X), Math.Max(bottomLeft.X, bottomRight.X));
         var bottom = Math.Max(Math.Max(topLeft.Y, topRight.Y), Math.Max(bottomLeft.Y, bottomRight.Y));
         return new Rect(left, top, Math.Max(0, right - left), Math.Max(0, bottom - top));
-    }
-
-    private static string FormatRect(Rect rect)
-    {
-        return $"{rect.X:0.##},{rect.Y:0.##},{rect.Width:0.##},{rect.Height:0.##}";
     }
 
     private sealed record AlbumPhotoControlSnapshot(

@@ -13,6 +13,8 @@ public partial class App : Application
 {
     public override void Initialize()
     {
+        var settings = new PicshareSettingsProvider();
+        DiagnosticLogging.SetLevel(new LocalUserSettingsStore(settings.LocalStorageRootPath).Load().DiagnosticLogLevel);
         DiagnosticLogging.Initialize();
         AvaloniaXamlLoader.Load(this);
     }

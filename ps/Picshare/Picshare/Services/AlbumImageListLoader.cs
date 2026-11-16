@@ -1969,11 +1969,9 @@ public sealed class AlbumImageListLoader : IDisposable
                 if (!IsCurrentGeneration(generation) || !photo.IsImageWorkCurrent(workToken) ||
                     !IsPhotoInViewport(photo) || !CanLoadPhotoControl(photo))
                 {
-                    AlbumListPerformanceCounters.Shared.Count(AlbumListMetric.BitmapSuppressed);
                     return;
                 }
 
-                using var timing = AlbumListPerformanceCounters.Shared.Measure(AlbumListMetric.BitmapAssignment);
                 photo.SetLoadedImage(bitmap, isDetailedThumbnail, status);
                 wasBound = true;
             }, DispatcherPriority.Background);
